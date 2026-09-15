@@ -8,6 +8,15 @@ Written to answer graphics questions that the RenderDoc UI makes tedious: *which
 use, which constant buffers are bound and what is inside them, which shader permutations exist and what GI
 uniforms do they read.* It is used from the command line and from scripts; every command prints plain text.
 
+> ## Vibe coded — use at your own risk
+>
+> Every feature and every line of code here is **vibe coded**, written ad-hoc by me, for me, because I am lazy
+> and this was the fastest way to get my own answers while debugging RenderDoc captures. It is not a product,
+> not a library, not supported, and not reviewed. Commands exist because one specific capture needed them;
+> heuristics and hard-coded assumptions (signature scoring, state-tracking guesses, "this layout worked once")
+> are load-bearing throughout. **Use at your own risk** — validate anything you plan to rely on against the
+> capture you are actually debugging, and read §8 for the known sharp edges.
+
 ```
 rdc-tools/
   rdc_analysis.py     the tool (single file, ~1000 lines)

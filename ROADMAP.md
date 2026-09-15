@@ -9,7 +9,10 @@ opportunistic · **P3** = nice-to-have.
 Current state for reference: the tool parses the `.rdc` container, decompresses the frame-capture stream
 (LZ4 in-file, Zstd optional), walks the SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer
 payloads, extracts DXBC/DXIL containers with their GI-related reflection strings, and can read a resource's
-`InitialContents` by `(resourceId, byteOffset)`. 22 commands, see `README.md`.
+`InitialContents` by `(resourceId, byteOffset)`. 23 commands, see `README.md`. Since 2026-09-15 it also has a
+278-test hermetic suite (`python rdc_analysis.py selftest`) and is clean under Pyright "Standard"
+(`npx --yes pyright@latest`); `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite
+is the safety net for everything below — land the tests with the change, not after it.
 
 ### Environment convention — `renderdoc-src` in the root folder
 
@@ -228,6 +231,9 @@ captures tested but is not guaranteed).
 
 ## 4. P2 — Quality of life
 
+**Promoted to P1 by §6** (these two close README §8 bullets): the *bundled chunk-name table* (§6.5) and
+*parallel / cached decompression* (§6.12).
+
 * **Bundled chunk-name table** — embed the D3D12/SystemChunk enums (generated from
   `<root>/rdc-tools/renderdoc-src/`) so the tool still prints readable names when the `renderdoc-src` copy is
   absent or when analysing captures made by a different RenderDoc version. Keep the `renderdoc-src` lookup as
@@ -252,21 +258,188 @@ captures tested but is not guaranteed).
   decoders for `vkCmdDraw*`, descriptor sets, etc. (~3–5 days)
 * **Zstd without the dependency** — either vendor a decoder or fail with a clear message (today it needs
   `pip install zstandard`). (~4 h)
-* **Unit tests + fixtures** — small synthetic `.rdc`-like streams for the container/chunk walkers, plus golden
-  output files for the decoders, so refactors are safe. (~1 day)
+* **Unit tests + fixtures** — ~~synthetic `.rdc`-like streams for the container/chunk walkers~~ **DONE
+  (2026-09-15)**: `tests/` holds a 278-test hermetic suite (`rdc_analysis.py selftest`). Still open: golden
+  output files for the decoders, and the `CHARACTERIZATION` tests that §6.3/§6.4 replace.
 * **Memory-mapped stream access** — avoid holding ~650 MB in RAM for the largest captures. (~4 h)
 * **`draws` state fidelity** — track state per PSO properly (and root-signature-aware), so inherited bindings
-  are reported instead of omitted. (~4 h)
+  are reported instead of omitted. (~4 h) — this is §6.9, and closes the matching README §8 bullet.
 * **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
   (~1 h)
 
 ---
 
-## 6. Suggested order
+## 6. P0 — Clear README §8 ("Pitfalls and known limitations")
 
-1. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data.
-2. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
-3. **Root signature / descriptor decode** (§3.1, §3.2) and **resource table** (§3.3) — make the offline output
-   self-explanatory.
-4. **Bundled chunk names + caching** (§4) — remove the two environment dependencies.
-5. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.
+One entry per bullet in README §8, with the change that closes it and the gate that proves it is closed.
+
+**"Resolved" means** the bullet is deleted from README §8, the `CHARACTERIZATION` tests that pinned the old
+behaviour are replaced by tests of the *correct* behaviour, and every doc that described the limitation is
+updated in the same change (AGENTS.md: behaviour is the contract, so these are deliberate, tested fixes —
+never silent ones).
+
+Four bullets had no home elsewhere in this file and are planned in full below; the rest already have a plan,
+so §6 only states the acceptance gate for them.
+
+| # | README §8 bullet | Plan | Priority | Effort |
+|---|---|---|---|---|
+| 6.1 | Payload offset: never assume `+8` | new, below | P0 | ~3 h |
+| 6.2 | Alignment padding is garbage | new, below | P0 | ~2 h |
+| 6.3 | Strings shorter than 6 characters are invisible | new, below | P0 | ~3 h |
+| 6.4 | Two consumers of the same chunk disagree | new, below | P0 | ~3 h + capture check |
+| 6.5 | Chunk names need `renderdoc-src` | §4 bundled chunk-name table | P1 | ~2 h |
+| 6.6 | Only section 0 is decompressed | §3.6 other `.rdc` sections | P1 | ~4 h |
+| 6.7 | `InitialContents` header is heuristic | §3.4 generalised `InitialContents` | P1 | ~4 h |
+| 6.8 | No name resolution for root parameters | §3.1 (+ §1 replay) | P1 | ~4 h, or free with replay |
+| 6.9 | `draws` state tracking is a heuristic | §5 `draws` state fidelity | P1 | ~4 h |
+| 6.10 | No texture decoding | §3.5 (+ §1 replay) | P1 | 2–3 d |
+| 6.11 | No shader disassembly | §3.7 | P2 | ~1 d |
+| 6.12 | Performance: single-threaded LZ4 | §4 parallel / cached decompression | P1 | ~4 h |
+
+**Order:** 6.3 and 6.4 first — both are *wrong output* today, both are contained fixes in one file, and 6.4 is
+the cheapest real correctness win in the project. Then 6.1/6.2 (make the failure modes loud), then the two
+environment dependencies (6.5, 6.12), then 6.6. The remaining items (6.7–6.11) are the ones replay (§1)
+answers directly, so they should be attempted offline only if replay is still blocked.
+
+---
+
+### 6.1 Payload offset — make the wrong slice impossible to write
+
+**What.** `ChunkInfo.data` (the payload offset) becomes `ChunkInfo.payload_offset`, `chunk_payload()` stays the
+only supported accessor, and a new `verify` command re-walks a stream and reports every frame that cannot be
+true instead of silently stopping at it.
+
+**Why.** The original bogus "PSO id" came from reading chunk metadata as payload; today a hand-written
+`stream[ch['off'] + 8 : ...]` still produces plausible numbers. Renaming the key turns that mistake into an
+`AttributeError`/`KeyError` at the point of the bug, and `verify` turns a truncated or corrupt stream into an
+explicit report rather than a short chunk list.
+
+**How.**
+* Rename the key in `iter_chunks`, `chunk_payload`, `chunk_strings`, `cmd_*` and `tests/rdc_fixtures.py`
+  (mechanical; nothing outside the repo reads it).
+* Add `verify` (and `iter_chunks(..., strict=True)`): for every chunk check `data - off >= 8`,
+  `data + length <= len(stream)`, `off % 64 == 0` for all but the first chunk, and that the next chunk starts
+  at `align_up(data + length)`. Print a table of problems with offsets; exit non-zero when any are found.
+* Keep the current lenient behaviour for the default walk (a capture with trailing garbage must still analyse),
+  and keep `test_length_past_end_stops` as the test for it.
+* Architecture test: assert no function in `rdc_analysis.py` other than `iter_chunks` slices the stream using
+  `['off']` arithmetic (a small AST scan over the module source in `tests/test_rdc_analysis.py`).
+
+**Acceptance.** `python rdc_analysis.py verify <capture.rdc>` reports 0 problems on both real captures; new
+tests cover each problem class (short frame, length past end, misaligned start, payload running into the next
+chunk); the architecture test passes; README §8 bullet deleted and §3.3/§6 reworded to "the offset is
+validated by `verify`".
+
+**Effort.** ~3 h.
+
+---
+
+### 6.2 Alignment padding — surface it instead of warning about it
+
+**What.** Report the padding explicitly so nobody has to remember it exists: `verify` lists non-zero padding
+runs per chunk (they are stale capture-buffer bytes, not data), and the padding is exposed from `iter_chunks`.
+
+**Why.** README §8 warns that padding can contain stale bytes; nothing today shows where, so a decoder that
+reads past `length` sees plausible garbage. Making it visible is what turns the warning into a checkable fact.
+
+**How.** Extend the yielded record with `pad_start`/`pad_len` (or add `iter_chunk_padding(stream)`), have
+`verify` print the number of non-zero padding bytes per chunk plus a hex sample of the first non-zero run, and
+add a regression test that `chunk_payload()` never returns padding when a payload ends exactly on a 64-byte
+boundary.
+
+**Acceptance.** Unit tests for zero and non-zero padding; `verify` output on both real captures; README §8
+bullet deleted, with the fact kept as a note in §3.3 ("padding is stale buffer content; `verify` reports it").
+
+**Effort.** ~2 h.
+
+---
+
+### 6.3 Short strings — make `minlen` real
+
+**What.** Replace the fixed `rb'[\x20-\x7e]{6,}'` scan with a parameterised one, so short strings are found
+and `minlen` behaves as documented.
+
+**Why.** This silently loses data in the commands that matter for triage: marker names under 6 characters
+print as `?` in `markers`/`summary`/`draws`, `chunk_strings`/`part_strings` drop short names, and a `minlen`
+below 6 is accepted and ignored (`dxbc`, `sig`, `dump`, `strings` all inherit the floor). Verified by the
+suite — see the two tests that currently pin the floor.
+
+**How.**
+* Add `string_runs(blob, minlen=1, start=0, end=None) -> Iterator[Tuple[int, str]]` that compiles
+  `rb'[\x20-\x7e]{%d,}' % max(minlen, 1)` (cached in a dict keyed by `minlen`).
+* Route `chunk_strings`, `part_strings`, `cmd_strings`, `cmd_dump`, `cmd_names`, `cmd_dxbc` and `cmd_report`
+  through it; keep every existing default `minlen` so output for 6+ character strings is unchanged.
+* Keep `STR_RE` as the ≥6 default pattern (it is a documented module constant).
+* Replace the two `CHARACTERIZATION` tests (`test_minlen_below_6_is_limited_by_the_string_regex` in both
+  `TestChunkPayloadAndStrings` and `TestPartStrings`) with tests asserting a 3-character string *is* found,
+  and add coverage that a 2-character marker name now shows up in `markers`/`draws`.
+
+**Acceptance.** Diff `markers`, `summary` and `draws` output on both real captures before/after: entries may
+only be *added* (no `?` regressions, no reordering); new unit tests; README §8 bullet deleted and §4.2/§4.5
+`minlen` columns reworded.
+
+**Effort.** ~3 h.
+
+---
+
+### 6.4 Decoder disagreements — one layout per chunk, verified against the source
+
+**What.** Make every consumer of a chunk agree, using the layouts from the RenderDoc serialiser:
+
+| Chunk | Correct payload | Today |
+|---|---|---|
+| `List_SetGraphicsRootConstantBufferView` / `…ShaderResourceView` / `…UnorderedAccessView` | `u64 cmdList, u32 rootParam, u64 resId, u64 offset` (28 B) — `D3D12BufferLocation` is Id+Offset (`d3d12_serialise.cpp`) | `draws` correct; `decode_chunk` requires only ≥20 B and prints the resource id as `VA=` |
+| `List_IASetIndexBuffer` | `u64 cmdList, u64 resId, u64 offset, u32 size, u32 fmt` (32 B) | `draws` correct; `decode_chunk` reads `size`/`fmt` at `+16`/`+20`, i.e. the two halves of the offset |
+| `List_SetGraphicsRoot32BitConstants` | `u64 cmdList, u32 rootParam, u32 n, u64 arrayCount, u32 values[n], u32 destOffset` (`28 + 4n`) — `SERIALISE_ELEMENT_ARRAY` writes the count | `rootconst` assumes `20 + 4n`, so values and `destOffset` come out 8 bytes early |
+
+**Why.** These are the three places where the tool can print confident nonsense: `chunk <N>` labels a
+resource id as a VA, `chunk <N>` on an index buffer reports a "size" that is really half an offset, and
+`rootconst` decodes float values from the wrong bytes. Each is pinned today by a `CHARACTERIZATION` test.
+
+**How.** Fix `decode_chunk` (require 28/32 bytes, decode `resId` + `offset` and print `res%d+0x%x`; read
+`size`/`fmt` at `+24`/`+28`) and `cmd_rootconst` (sanity check `(length - 28) % 4 == 0`, values at `+28`,
+`destOffset` at `+28 + 4n`, warn when the inline `arrayCount` disagrees with `n`). Update
+`tests/rdc_fixtures.py` (`pl_32bit_constants` → 28+4n, add a `pl_root_view`/`pl_index_buffer` note) and the
+affected tests in `TestDecodeChunk` and `TestCmdRootconst`, deleting the three `CHARACTERIZATION` comments.
+Then reword README §3.4 (the table there is already correct — the decoders move to match it) and delete the
+§8 bullet.
+
+**Acceptance.** For the same chunk index, `chunk <N>` and `draws` print the *same* `rpN=res…+0x…` string; on
+both real captures every `rootconst` chunk passes the length check and prints `arrayCount == numValues`;
+`selftest` + pyright green.
+
+**Effort.** ~3 h plus a validation pass on the two real captures.
+
+---
+
+### 6.5–6.12 Acceptance gates for the cross-referenced items
+
+* **6.5** (§4 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
+  newer than the tree; the table is generated by a checked-in script and carries its RenderDoc version; the
+  §1.1 warning becomes "using bundled names for RenderDoc X".
+* **6.6** (§3.6): `sections` reports every section's decompressed size and first bytes; a `section <name>`
+  command can dump any of them; section 0 behaviour unchanged.
+* **6.7** (§3.4): `initial` no longer scores candidate headers — the data start is parsed from the serialised
+  resource description, and the printed header offset matches a replay-verified value on both captures.
+* **6.8** (§3.1 + §1): every `rpN` in `draws` carries a name (from `RDEF`/reflection) or is explicitly
+  marked unnamed; the wrong conclusion recorded in README §9 can no longer be reached from the output alone.
+* **6.9** (§5): a draw that inherits bindings from earlier in the frame reports them; add a regression test
+  built from a synthetic stream with a CBV bound 3 draws earlier.
+* **6.10** (§3.5): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
+* **6.11** (§3.7): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
+* **6.12** (§4 caching): repeated commands on the same capture are instant; `sections`-only commands stay
+  instant; peak RSS does not grow with the cache.
+
+---
+
+## 7. Suggested order
+
+1. **README §8 fixes** (§6) — 6.3 and 6.4 are wrong-output bugs, then 6.1/6.2 make failures loud; the rest
+   of §6 is a mix of cheap wins and items replay supersedes.
+2. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data, and
+   is the cheap route through §6.7–§6.11.
+3. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
+4. **Root signature / descriptor decode** (§3.1, §3.2) and **resource table** (§3.3) — make the offline output
+   self-explanatory (skip §3.1 if replay landed first).
+5. **Bundled chunk names + caching** (§4, = §6.5/§6.12) — remove the two environment dependencies.
+6. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.

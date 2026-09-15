@@ -482,6 +482,9 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 
 ## 8. Pitfalls and known limitations
 
+Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.12); the plan
+is to clear the whole list, so a bullet here is a known defect, not a permanent design decision.
+
 * **Payload offset.** Never assume `+8`; use `chunk_payload()`. Reading metadata as data produces plausible but
   wrong numbers (this exact mistake produced a bogus "PSO id" early on).
 * **Alignment padding is garbage.** Chunk-to-chunk padding can contain stale bytes from the capture buffer.

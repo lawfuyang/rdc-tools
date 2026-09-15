@@ -14,6 +14,7 @@ Usage:
   python rdc_analysis.py sections <rdc>
   python rdc_analysis.py blocks   <rdc>          # per-section compression accounting
   python rdc_analysis.py resources <rdc> [limit] [nameFilter]   # id -> kind/size/name
+  python rdc_analysis.py descriptors <rdc> [limit] [heapFilter] # descriptor heap contents
   python rdc_analysis.py verify   <rdc>          # framing/padding/payload checks, exit 1 on problems
   python rdc_analysis.py summary  <rdc>
   python rdc_analysis.py markers  <rdc>
@@ -132,11 +133,11 @@ class CacheEntry(TypedDict):
 class ResourceInfo(TypedDict):
     """One D3D12 resource: what it is, how big, and what the capture calls it.
 
-    `kind` is `buffer` / `texture1d` / `texture2d` / `texture3d` / `unknown` (the last one for ids
-    that are only *named*: heaps, queues, fences, PSOs). `size` is the byte size of a buffer and 0
-    for textures, which are described by `width`/`height`/`depth` (depth doubles as array size),
-    `mips` and `format` instead. `name` is empty when the capture never named the resource, and
-    `gpuAddress` is the base VA of a buffer.
+    `kind` is `buffer` / `texture1d` / `texture2d` / `texture3d` / `blas` / `tlas` / `unknown` (the
+    last one for ids that are only *named*: heaps, queues, fences, PSOs). `size` is the byte size of
+    a buffer or an acceleration structure, and 0 for textures, which are described by
+    `width`/`height`/`depth` (depth doubles as array size), `mips` and `format` instead. `name` is
+    empty when the capture never named the resource, and `gpuAddress` is the base VA of a buffer.
     """
     kind: str
     name: str
@@ -147,6 +148,17 @@ class ResourceInfo(TypedDict):
     mips: int
     format: int
     gpuAddress: int
+
+
+class DescriptorInfo(TypedDict):
+    """One written descriptor-heap slot: what kind of view it holds and which resource it names.
+
+    `kind` is `cbv` / `srv` / `uav` / `rtv` / `dsv` / `sampler`. `resource` is 0 for a sampler (a
+    sampler points at no resource) and for a slot the capture never wrote -- heaps are created with
+    up to a million slots, and only written ones are recorded.
+    """
+    kind: str
+    resource: int
 
 
 class DrawState(TypedDict):
@@ -446,12 +458,19 @@ def _cache_file(abspath: str, size: int, mtime: int, section_index: int) -> str:
 
 
 def _cache_identity(path: str) -> Optional[Tuple[int, int, str]]:
-    """`(size, mtime_ns, absolute path)` of the capture, or None when it cannot be stat'ed."""
+    """`(size, mtime_ns, absolute path)` of the capture, or None when it cannot be stat'ed.
+
+    The path is case-normalised (`os.path.normcase`: lowercased on Windows, a no-op elsewhere), so
+    `C:\\x.rdc` and `c:\\x.rdc` are one cache entry. Without that, asking for a capture through two
+    spellings of its path caches the whole stream twice -- on Windows a shell prompt and a
+    `Resolve-Path` disagree about the drive letter, and the entry that is not looked up again is
+    several hundred MB of dead weight.
+    """
     try:
         st = os.stat(path)
     except OSError:
         return None
-    return st.st_size, st.st_mtime_ns, os.path.abspath(path)
+    return st.st_size, st.st_mtime_ns, os.path.normcase(os.path.abspath(path))
 
 
 def _read_cache_header(cfile: str) -> Optional[CacheEntry]:
@@ -742,8 +761,8 @@ def cmd_cache(args: Optional[Sequence[str]] = None) -> int:
 
 
 def _resource_size(info: ResourceInfo, formats: Dict[int, str]) -> str:
-    """The size column of `resources`: bytes for a buffer, dimensions + format for a texture."""
-    if info['kind'] == 'buffer':
+    """The size column of `resources`: bytes for a buffer or an AS, dimensions + format for a texture."""
+    if info['kind'] in ('buffer', 'blas', 'tlas'):
         return '%d B' % info['size']
     if info['kind'] == 'unknown':
         return '-'
@@ -757,6 +776,38 @@ def _name_suffix(table: Dict[int, ResourceInfo], rid: int, width: int = 24) -> s
     if entry is None or not entry['name']:
         return ''
     return '[%s]' % entry['name'][:width]
+
+
+def cmd_descriptors(path: str, limit: int = 200, heap_filter: Optional[str] = None) -> None:
+    """List the written slots of every descriptor heap: heap, slot, kind and resource.
+
+    This is what makes a `draws` line like `rp0=heap298[138458]` readable: the binding names a slot
+    in a heap, and this says what the capture wrote into it. Only written slots are listed (a heap
+    can have a million), and the filter matches either the heap id or its name.
+    """
+    _info, stream, _how = load_stream(path)
+    names = load_chunk_names()
+    resources = parse_resource_table(stream, names)
+    heaps = parse_descriptor_heaps(stream, names)
+    written = sum(len(slots) for slots in heaps.values())
+    print('descriptor heaps: %d, %d written slots' % (len(heaps), written))
+    shown = 0
+    for heap in sorted(heaps):
+        label = resources.get(heap, {}).get('name') or ''
+        if heap_filter and heap_filter != str(heap) and heap_filter.lower() not in label.lower():
+            continue
+        if limit and shown >= limit:
+            break
+        print('heap%d %s' % (heap, label or '-'))
+        for index in sorted(heaps[heap]):
+            if limit and shown >= limit:
+                break
+            info = heaps[heap][index]
+            target = 'sampler' if info['kind'] == 'sampler' else (
+                'res%d%s' % (info['resource'], _name_suffix(resources, info['resource'])))
+            print('  [%-9d] %-8s %s' % (index, info['kind'], target))
+            shown += 1
+    print('total slots: %d (shown %d)' % (written, shown))
 
 
 def cmd_resources(path: str, limit: int = 200, name_filter: Optional[str] = None) -> None:
@@ -1263,14 +1314,59 @@ ALIGN_UP_DEFAULT = CHUNK_ALIGN
 #: straight in (d3d12_device_rescreate_wrap.cpp). Every one of them ends with
 #: `IID(16) | resourceId(8) | gpuAddress(8)`, so the id is at `length - 16` and a buffer's base VA
 #: at `length - 8`.
+#:
+#: The `1`/`2`/`3` variants differ only in what *follows* the descriptor (`D3D12_RESOURCE_DESC1`,
+#: a protected session, a castable-format list), and that struct starts with the same 48 bytes as
+#: `D3D12_RESOURCE_DESC`, so one offset covers them all -- the descriptor fields are read from the
+#: first 48 bytes either way. Verified against a capture for `...3` (149-byte payloads, every
+#: dimension field valid) and `...2`; the rest follow the same serialiser shape in the source.
 RESOURCE_CHUNKS: Dict[str, int] = {
     'Device_CreateCommittedResource': 24,
+    'Device_CreateCommittedResource1': 24,
+    'Device_CreateCommittedResource2': 24,
+    'Device_CreateCommittedResource3': 24,
     'Device_CreatePlacedResource': 16,
+    'Device_CreatePlacedResource1': 16,
+    'Device_CreatePlacedResource2': 16,
     'Device_CreateReservedResource': 0,
+    'Device_CreateReservedResource1': 0,
+    'Device_CreateReservedResource2': 0,
 }
+
+#: `CreateAS`: an acceleration structure is a *sub-range of a buffer*, not a resource. The payload
+#: is `u64 buffer, u64 offset, u32 type, u64 byteSize, u64 asId` (d3d12_device.cpp
+#: `Serialise_CreateAS`), and `asId` is the id the frame references. The type is a
+#: `D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE`, where **0 is TOP_LEVEL** and 1 BOTTOM_LEVEL --
+#: the capture that exercises this has 5205 small type-0 structures rebuilt every frame (RTXDI's
+#: per-light TLASes) and 3 large type-1 ones (the static BLASes), which is what those two are.
+AS_KINDS: Dict[int, str] = {0: 'tlas', 1: 'blas'}
 
 #: `D3D10_RESOURCE_DIMENSION` (common/dds_readwrite.cpp): what a descriptor's Dimension field means.
 RESOURCE_KINDS: Dict[int, str] = {1: 'buffer', 2: 'texture1d', 3: 'texture2d', 4: 'texture3d'}
+
+#: Descriptor-write chunks and the kind of descriptor each one writes (d3d12_device_wrap.cpp).
+#: A `Device_Create*View` payload holds the descriptor first and *ends* with the destination
+#: `PortableHandle`; the resource id is at +16 in every view payload (`D3D12Descriptor`'s
+#: serialiser writes type, heap, index, then the view, whose first field is the resource --
+#: d3d12_serialise.cpp). `Device_CreateSampler` writes a sampler: no resource.
+DESCRIPTOR_KINDS: Dict[str, str] = {
+    'Device_CreateConstantBufferView': 'cbv',
+    'Device_CreateShaderResourceView': 'srv',
+    'Device_CreateUnorderedAccessView': 'uav',
+    'Device_CreateRenderTargetView': 'rtv',
+    'Device_CreateDepthStencilView': 'dsv',
+    'Device_CreateSampler': 'sampler',
+    'Device_CreateSampler2': 'sampler',
+}
+
+#: Descriptor-copy chunks: `u64 count` then `count x (u32 heapType, dst PortableHandle, src)`.
+DESCRIPTOR_COPY_CHUNKS = ('Device_CopyDescriptors', 'Device_CopyDescriptorsSimple')
+
+#: Bytes of one `DynamicDescriptorCopy`: the heap type, then two PortableHandles.
+_DESCRIPTOR_COPY_SIZE = 28
+
+#: Least a descriptor write can be: the resource field (ends at +24) plus the destination handle.
+_DESCRIPTOR_WRITE_MIN = 36
 
 #: Bytes of `D3D12_RESOURCE_DESC` to read, and the least that can follow it in a creation payload
 #: (the initial state, the optional-clear flag, the IID and the two trailing u64s).
@@ -1616,12 +1712,28 @@ def _parse_resource(blob: bytes, desc_off: int) -> Optional[ResourceInfo]:
                         format=u32(blob, desc_off + 28), gpuAddress=u64(blob, len(blob) - 8))
 
 
+def _parse_acceleration_structure(blob: bytes) -> Optional[Tuple[int, ResourceInfo]]:
+    """`(id, info)` of one `CreateAS` payload, or None when it does not fit the layout.
+
+    The buffer and offset it lives at are decoded by `AS_KINDS`' caller but not recorded: the id is
+    what the rest of the tool prints, and `size` is the acceleration structure's own byte size.
+    """
+    if len(blob) < 36:
+        return None
+    kind = AS_KINDS.get(u32(blob, 16))
+    if kind is None:
+        return None
+    return u64(blob, 28), ResourceInfo(kind=kind, name='', size=u64(blob, 20), width=0, height=0,
+                                       depth=0, mips=0, format=0, gpuAddress=0)
+
+
 def parse_resource_table(stream: bytes,
                          names: Optional[Dict[int, str]] = None) -> Dict[int, ResourceInfo]:
     """Build the resource table (id -> description) from the creation chunks and `SetName`.
 
     `RESOURCE_CHUNKS` says where each creation payload's descriptor starts, and the resource id is
-    always at `length - 16`. `SetName` names any D3D12 object, so ids that are only named -- heaps,
+    always at `length - 16`; `CreateAS` adds acceleration structures, whose ids the frame references
+    just like resources. `SetName` names any D3D12 object, so ids that are only named -- heaps,
     queues, fences, PSOs -- end up in the table too, with `kind == 'unknown'` and no size; that is
     what `draws` prints as `heap298[279377]`.
     """
@@ -1641,6 +1753,10 @@ def parse_resource_table(stream: bytes,
             info = _parse_resource(blob, RESOURCE_CHUNKS[nm])
             if info is not None:
                 table[u64(blob, len(blob) - 16)] = info
+        elif nm == 'CreateAS':
+            parsed = _parse_acceleration_structure(chunk_payload(stream, ch))
+            if parsed is not None:
+                table[parsed[0]] = parsed[1]
     for rid, name in named.items():
         entry = table.get(rid)
         if entry is None:
@@ -1649,6 +1765,68 @@ def parse_resource_table(stream: bytes,
         else:
             entry['name'] = name
     return table
+
+
+def _portable_handle(blob: bytes, offset: int) -> Optional[Tuple[int, int]]:
+    """`(heapId, index)` of the `PortableHandle` at `offset`, or None when it does not fit.
+
+    A `PortableHandle` is `u64 heapId, u32 index` (`d3d12_manager.h`): 12 bytes, no padding, and the
+    same pair a descriptor-table binding carries (README 3.4).
+    """
+    if offset < 0 or offset + 12 > len(blob):
+        return None
+    return u64(blob, offset), u32(blob, offset + 8)
+
+
+def parse_descriptor_heaps(stream: bytes, names: Optional[Dict[int, str]] = None
+                           ) -> Dict[int, Dict[int, DescriptorInfo]]:
+    """Build `heapId -> {index: DescriptorInfo}` from the descriptor writes and copies.
+
+    Writes and copies are applied in stream order, which is the order D3D12 applies them in: a slot
+    written twice ends up holding the second write, and a copy reads the slot as it is *at that
+    point* in the frame. Only written slots are recorded -- heaps are created with up to a million
+    slots and the rest stay undefined, which is also what an unresolved `draws` binding means.
+    """
+    if names is None:
+        names = load_chunk_names()
+    heaps: Dict[int, Dict[int, DescriptorInfo]] = {}
+    for ch in iter_chunks(stream):
+        nm = names.get(ch['id'], '')
+        kind = DESCRIPTOR_KINDS.get(nm)
+        if kind is not None:
+            blob = chunk_payload(stream, ch)
+            if len(blob) < _DESCRIPTOR_WRITE_MIN:
+                continue
+            dst = _portable_handle(blob, len(blob) - 12)
+            if dst is None:
+                continue
+            resource = 0 if kind == 'sampler' else u64(blob, 16)
+            heaps.setdefault(dst[0], {})[dst[1]] = DescriptorInfo(kind=kind, resource=resource)
+        elif nm in DESCRIPTOR_COPY_CHUNKS:
+            blob = chunk_payload(stream, ch)
+            count = u64(blob, 0) if len(blob) >= 8 else 0
+            for i in range(count):
+                entry = 8 + i * _DESCRIPTOR_COPY_SIZE
+                dst = _portable_handle(blob, entry + 4)
+                src = _portable_handle(blob, entry + 16)
+                if dst is None or src is None:
+                    break
+                info = heaps.get(src[0], {}).get(src[1])
+                if info is not None:
+                    heaps.setdefault(dst[0], {})[dst[1]] = info
+    return heaps
+
+
+def _descriptor_label(heaps: Dict[int, Dict[int, DescriptorInfo]],
+                      resources: Dict[int, ResourceInfo], heap: int, index: int) -> str:
+    """` -> srv res2233[Name]` for a descriptor-table slot, or '' when it was never written."""
+    info = heaps.get(heap, {}).get(index)
+    if info is None:
+        return ''
+    if info['kind'] == 'sampler':
+        return ' -> sampler'
+    return ' -> %s res%d%s' % (info['kind'], info['resource'],
+                               _name_suffix(resources, info['resource']))
 
 
 def cmd_chunk_detail(path: str, index: int, hexlen: int = 160) -> None:
@@ -1793,14 +1971,15 @@ def _apply_state_chunk(name: str, blob: bytes, states: Dict[int, DrawState]) -> 
     return True
 
 
-def _print_draw_state(state: Optional[DrawState], compute: bool,
-                      resources: Dict[int, ResourceInfo]) -> None:
+def _print_draw_state(state: Optional[DrawState], compute: bool, resources: Dict[int, ResourceInfo],
+                      heaps: Dict[int, Dict[int, DescriptorInfo]]) -> None:
     """Print the bindings in effect for one draw or dispatch (the indented lines under its row).
 
     `compute` selects the namespace: a dispatch uses the compute root parameters, a draw the
     graphics ones. Vertex streams and the index buffer are graphics-only state. Every resource id
-    that the capture named gets its name appended (`_name_suffix`); descriptor-table bindings stay
-    numeric because the heap is not the resource being read.
+    that the capture named gets its name appended (`_name_suffix`); a descriptor-table binding gets
+    the descriptor written into the slot it names (`_descriptor_label`), or the heap's name when the
+    slot was never written.
     """
     if state is None:
         return
@@ -1811,10 +1990,9 @@ def _print_draw_state(state: Optional[DrawState], compute: bool,
             'rp%d=res%d+0x%x%s' % (rp, res, off, _name_suffix(resources, res))
             for rp, (res, off) in sorted(cbvs.items())))
     if tables:
-        # the heap name is worth having: `GlobalSamplerHeap` says the table holds samplers, which
-        # is the difference between "a resource I cannot see" and "a sampler table"
         print('        Table: ' + '  '.join(
-            'rp%d=heap%d[%d]%s' % (rp, heap, idx, _name_suffix(resources, heap))
+            'rp%d=heap%d[%d]%s' % (rp, heap, idx, _descriptor_label(heaps, resources, heap, idx)
+                                   or _name_suffix(resources, heap))
             for rp, (heap, idx) in sorted(tables.items())))
     if compute:
         return
@@ -1833,13 +2011,16 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
     The state printed for a draw is the state of its *command list* at that point -- everything that
     is still bound, not only what changed since the previous draw (see `DrawState`). Dispatches
     report the compute root bindings, draws the graphics ones plus the vertex streams and the index
-    buffer. Root descriptor tables are reported as `heap<id>[index]`; resolving them to resources is
-    ROADMAP 3.2. Bound resources are annotated with the name the capture gave them, when it has one
-    (`[SceneUniformBuffer]`, see `parse_resource_table`).
+    buffer. A root descriptor table is reported as `heap<id>[index]` plus what the capture wrote
+    into that slot (`-> srv res2233[SkyViewLut]`, see `parse_descriptor_heaps`); the descriptors
+    after the first are the root signature's business (ROADMAP 3.1). Bound resources are annotated
+    with the name the capture gave them, when it has one (`[SceneUniformBuffer]`, see
+    `parse_resource_table`).
     """
     _info, stream, _how = load_stream(path)
     names = load_chunk_names()
     resources = parse_resource_table(stream, names)
+    heaps = parse_descriptor_heaps(stream, names)
     stack: List[str] = []
     states: Dict[int, DrawState] = {}
     n_draw = 0
@@ -1868,10 +2049,11 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
                          nm.replace('List_', '')))
                 if nm == 'List_ExecuteIndirect':
                     # it can be a graphics or a compute call, so both namespaces are reported
-                    _print_draw_state(st, compute=True, resources=resources)
-                    _print_draw_state(st, compute=False, resources=resources)
+                    _print_draw_state(st, compute=True, resources=resources, heaps=heaps)
+                    _print_draw_state(st, compute=False, resources=resources, heaps=heaps)
                 else:
-                    _print_draw_state(st, compute=nm in COMPUTE_CHUNKS, resources=resources)
+                    _print_draw_state(st, compute=nm in COMPUTE_CHUNKS, resources=resources,
+                                      heaps=heaps)
         elif _apply_state_chunk(nm, blob, states):
             pass                       # a tracked setter: it changes the state, it prints nothing
     print('total draws/dispatches: %d' % n_draw)
@@ -2101,6 +2283,8 @@ def main() -> None:
         cmd_blocks(path)
     elif cmd == 'resources':
         cmd_resources(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+    elif cmd == 'descriptors':
+        cmd_descriptors(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
     elif cmd == 'strings':
         cmd_strings(path, _arg(argv, 3, 6), _arg(argv, 4, 200))
     elif cmd == 'names':

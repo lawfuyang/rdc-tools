@@ -119,6 +119,7 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | Which draw is the one I care about? | `markers`, then `chunks <limit> List_Draw` |
 | What pipeline state, constant buffers and vertex streams does draw N use? | `draws` |
 | What is `res342`, and which buffers/textures exist at all? | `resources`, `resources <limit> <nameFilter>` |
+| What does the descriptor heap hold that this table binding points into? | `descriptors`, `descriptors <rdc> <heapId>` |
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>` |
 | Is the parse trustworthy? | `verify` |
 | Which shaders are in this capture and what GI uniforms do they read? | `dxbc`, `sig` |
@@ -220,7 +221,12 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `List_SetComputeRoot{Signature,ConstantBufferView,DescriptorTable}` | the same layouts as the `Graphics` ones above; only the root-parameter namespace differs (checked against both captures by `verify`) |
 | `List_Reset` | 64 bytes: the list's creation parameters (IID, node mask, type, baked id), then the **command-list id at +40** and the **initial PSO at +48** — the id at +40 is the one every other `List_*` chunk carries at +0 |
 | `Device_Create{Committed,Placed,Reserved}Resource` | the `D3D12_RESOURCE_DESC` follows the leading args (committed: heap props 20 B + heap flags 4 B; placed: heap id 8 B + heap offset 8 B; reserved: none), and every one of them ends `IID(16), u64 resourceId, u64 gpuAddress` — so the **id is at `length - 16`** and a buffer's base VA at `length - 8`. 117/145, 109/118/137 and 93 bytes in the captures tested |
+| `Device_Create…Resource1/2/3` | the same, with a `D3D12_RESOURCE_DESC1` (whose **first 48 bytes are the same struct**) and a castable-format list after it — 149 bytes for `…CommittedResource3` in a capture, and one offset covers them all |
+| `CreateAS` | `u64 buffer, u64 offset, u32 type, u64 byteSize, u64 asId` (36 bytes) — an acceleration structure is a **sub-range of a buffer**, and the type is `TOP_LEVEL = 0` / `BOTTOM_LEVEL = 1` |
 | `SetName` | `u64 objectId, u32 length, utf-8 name` — RenderDoc names every object, not only resources, which is what makes heaps and queues identifiable |
+| `Device_CreateDescriptorHeap` | `D3D12_DESCRIPTOR_HEAP_DESC` (type, count) + IID + the heap id at `length - 16` + the original GPU base — 56 bytes |
+| `Device_Create{ConstantBuffer,ShaderResource,UnorderedAccess,RenderTarget,DepthStencil}View` | the descriptor first — the **resource id is at +16** — and the destination `PortableHandle` last (`u64 heapId` at `length - 12`, `u32 index` at `length - 4`). 68 bytes for an SRV, 80 for a UAV in the captures |
+| `Device_CopyDescriptors` / `…Simple` | `u64 count`, then `count x (u32 heapType, dst PortableHandle, src PortableHandle)` — 28 bytes per entry (36 bytes for a single copy) |
 | `InitialContents` | `u64 resourceId` + resource description, then the data — only the id and the first header bytes are decoded (`chunk <N>`); reading the contents is the replay driver's job |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
 
@@ -258,6 +264,7 @@ register u32, ...`), with the string table after the array. This is how per-inst
 | `verify` | `<rdc>` | walks the chunk stream and checks what would make a parse untrustworthy: frames claiming bytes the stream does not hold, and payload lengths that disagree with the layout the decoder expects (see §3.4). Also reports the alignment padding totals — non-zero padding is legal (stale buffer bytes) so it is a note, not a failure. Exit code 0/1, so it can gate a script |
 | `blocks` | `<rdc>` | per section: name, flags, first 16 bytes hex — enough to identify compression (`28b52ffd` = Zstd) |
 | `resources` | `<rdc> [limit=200] [nameFilter]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
+| `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 
 ### 4.2 Stream text mining
@@ -319,7 +326,8 @@ prints the state that is *in effect* — everything still bound, not only what c
 ```
 
 `rp<n>=res<id>+0x<offset>` is a root-parameter CBV binding; `rp<n>=heap<id>[index]` is a root-parameter
-descriptor table (the heap resource and descriptor index — resolving it to resources is ROADMAP §3.2);
+descriptor table — the heap and the slot it points at, plus what the capture wrote into that slot
+(`-> srv res2233[SkyViewLut]`, §4.10) or the heap's name when the slot was never written in this frame (§8);
 `res<id>+0x<off>(sz,st)` is a vertex stream (resource, byte offset, size, stride). A `res0+0x0(sz0,st0)` entry
 is a **NULL vertex buffer** — a useful signature in itself.
 
@@ -330,7 +338,7 @@ between "a resource I cannot see" and "a sampler table":
 ```
 #270    GridInject:NotLinkedList 2300     x=8 y=5 z=2 Dispatch
         CBV: rp2=res1907+0x174b00[Resource Allocator Under]  rp3=res1907+0x120000[Resource Allocator Under]
-        Table: rp0=heap298[138458][GlobalResourceHeap]  rp1=heap299[0][GlobalSamplerHeap]
+        Table: rp0=heap298[279425] -> srv res384[Resource Allocator Under]  rp1=heap299[0][GlobalSamplerHeap]
 ```
 
 UE sub-allocates its buffers inside page buffers, so a binding into a `Resource Allocator Underlying Buffer`
@@ -364,9 +372,11 @@ fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and 
 Exit code is 0 when everything passes, 1 on failure, 2 for a bad option.
 
 The real-capture integration tests are skipped unless a capture is pointed at them
-(`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'` — copies of the two captures used here live in the ignored
-`renderdoc-src/` folder); they take about a minute, because each command re-decompresses the whole stream. A
-third class parses the real `renderdoc-src` enums and is skipped when the tree is absent. Tests that pin
+(`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'`). Copies of the three captures used here live in the ignored
+`renderdoc-src/` folder — two from Unreal Engine (PC and Android) and `HobbyRenderer FlyingWorld.rdc` from a
+custom D3D12 renderer, which is the one that exercises ray tracing, `...CommittedResource3` and `CreateAS`.
+They take about a minute, because each command re-decompresses the whole stream unless the cache (§4.8) has
+it. A third class parses the real `renderdoc-src` enums and is skipped when the tree is absent. Tests that pin
 behaviour which looks wrong are marked `CHARACTERIZATION` in the source, so a deliberate fix does not read as
 a regression.
 
@@ -387,8 +397,10 @@ The coding rules that keep it that way are in `AGENTS.md`.
 
 Decompressing a frame-capture section costs seconds (§8) and every command needs the same stream, so the
 decompressed bytes are cached on disk, keyed by the capture's identity: absolute path, size, mtime, section
-index and cache format version. The first command on a capture decompresses and writes the cache; every later
-one reads it back, and the method label says so:
+index and cache format version. The path is **case-normalised** (`os.path.normcase`), so `C:\x.rdc` and
+`c:\x.rdc` are one entry — on Windows a shell prompt and `Resolve-Path` disagree about the drive letter, and
+without that a capture was cached twice. The first command on a capture decompresses and writes the cache;
+every later one reads it back, and the method label says so:
 
 ```
 framecapture stream: 630790592 bytes  (expected 630790592)  [lz4(602 blocks)]           <- first run
@@ -438,7 +450,9 @@ total resources: 241 (shown 2)
 
 * `kind` and the size come from the `D3D12_RESOURCE_DESC` in `Device_CreateCommittedResource` /
   `CreatePlacedResource` / `CreateReservedResource` (offsets in §3.4): a buffer reports its byte size, a
-  texture its dimensions, array size, mip count and DXGI format.
+  texture its dimensions, array size, mip count and DXGI format. `CreateAS` adds ray-tracing acceleration
+  structures as `blas` / `tlas` with their byte size — they are sub-ranges of a buffer and the frame
+  references them by their own id.
 * The names come from `SetName`, which RenderDoc emits for every D3D12 object — heaps, queues, fences and PSOs
   included. Those have no descriptor, so they show `-` and `kind=unknown`; they are in the table because
   `draws` prints their ids (`heap298[279377]`).
@@ -446,6 +460,40 @@ total resources: 241 (shown 2)
   the source tree they print as numbers, like chunk names (§1.1).
 * `limit` counts rows (`0` = no limit, as in `chunks`) and `nameFilter` is a case-insensitive substring of the
   name, so `0 lut` means "every row with `lut` in the name".
+
+### 4.10 Descriptors
+
+`descriptors` lists what the capture *wrote* into each descriptor heap, which is what makes a table binding
+readable:
+
+```powershell
+python rdc_analysis.py descriptors 'capture.rdc'        # every written slot
+python rdc_analysis.py descriptors 'capture.rdc' 0 298  # one heap, by id or by name
+```
+
+```
+descriptor heaps: 2, 16 written slots
+heap298 GlobalResourceHeap
+  [279336   ] uav      res60823[VirtualTextureFeedbackGP]
+  [279422   ] srv      res384[Resource Allocator Under]
+heap300 FD3D12OfflineDescriptorManager
+  [533      ] uav      res2266[NumCulledLightsGrid]
+total slots: 16 (shown 16)
+```
+
+`draws` uses the same table: a root descriptor table prints the descriptor in the slot it names
+(`rp0=heap298[279425] -> srv res384[Resource Allocator Under]`) and falls back to the heap's name when that
+slot was never written during the capture (§8). The layouts are in §3.4; what matters here is:
+
+* a `Device_Create*View` payload holds the descriptor (the **resource id at +16**) and *ends* with the
+  destination `PortableHandle` (`u64 heapId` at `length - 12`, `u32 index` at `length - 4`). The *kind* comes
+  from the chunk name, so a sampler records no resource;
+* `Device_CopyDescriptors` / `…Simple` are `u64 count` followed by
+  `count x (u32 heapType, dst PortableHandle, src PortableHandle)` — 28 bytes each. Following them is not
+  optional: UE writes a descriptor into one heap and copies it into the heap the frame binds from;
+* writes and copies are applied **in stream order**, which is the order D3D12 applies them in: a slot written
+  twice holds the second write, and a copy sees its source as it was at that point;
+* only written slots are recorded, so "no entry" means "the capture does not say", never "empty".
 
 ---
 
@@ -519,6 +567,10 @@ the decoders rely on.
   sub-allocates buffers inside page buffers (`Resource Allocator Underlying Buffer`, `Fast Allocator Page`), so
   `res<id>+0x<offset>` can point *into* a page: the page is what the capture names, and the logical buffer
   inside it is not in the D3D12 stream at all.
+* A `PortableHandle` is `u64 heapId, u32 index` — 12 bytes, no padding (`d3d12_manager.h`). Both a
+  descriptor-table binding and a descriptor write name their slot that way, which is why the two can be matched
+  at all (§4.10). Descriptor heaps are created with up to a million slots and their **contents are not
+  snapshotted** into a frame capture: the stream only carries the writes and copies of the captured frame.
 * Every array in a payload is preceded by a `u64` element count (`SERIALISE_ELEMENT_ARRAY`, `serialiser.h`).
   That is why `List_IASetVertexBuffers` views start at `+24`, and why
   `List_SetGraphicsRoot32BitConstants` is `28 + 4n` with the values at `+24` — the count is part of the
@@ -606,7 +658,7 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 
 ## 8. Pitfalls and known limitations
 
-Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.7); the plan
+Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.5); the plan
 is to clear the whole list, so a bullet here is a known defect, not a permanent design decision.
 
 * **Chunk names need the RenderDoc source tree in the root folder.** The tool expects
@@ -616,13 +668,16 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed.
 * **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be
   mapped to a uniform name offline. This is the main reason for the replay driver in `ROADMAP.md`.
-* **Root descriptor tables are not resolved.** `draws` reports a table binding as `heap<id>[index]` — the heap
-  resource, its name and the descriptor index — because turning that pair into resources needs descriptor-heap
-  parsing (ROADMAP §3.2). Root CBVs need no such step.
+* **A descriptor-table binding resolves only as far as the capture goes.** The stream holds the descriptor
+  *writes and copies of the captured frame*, not the contents of the heap, and UE fills its million-slot global
+  heap at startup: on the Android capture every table binding therefore still shows the heap name, while the PC
+  capture resolves 9 of them. `descriptors` (§4.10) reports what is known and a slot the capture never wrote is
+  reported as the heap — never guessed at. Descriptors *after* the first in a table are the root signature's
+  business (ROADMAP §3.1).
 * **A binding into an allocator page names the page, not the buffer inside it.** UE sub-allocates, so
   `rp1=res1907+0x93300[Resource Allocator Under]` is as specific as the D3D12 stream gets: the logical buffer's
-  name lives in UE's own bookkeeping (§3.5). Resources reached through *descriptor tables* are the other half of
-  this problem, and those become nameable once the heaps are parsed (ROADMAP §3.2).
+  name lives in UE's own bookkeeping (§3.5). Descriptor-table bindings are the other half of this problem and
+  have the same shape: what the capture wrote is resolved (§4.10), what it did not is only the heap.
 * **No texture decoding.** `GetTextureData`-style format decoding (BC/ASTC/float, mips, slices) is not
   implemented; only raw bytes can be dumped.
 * **No shader disassembly.** `dump-shaders` extracts containers; disassembling the `ILDN`/`ILDB` bytecode needs

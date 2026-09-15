@@ -149,7 +149,7 @@ class TestCmdCache(CmdCase):
         out = self.out(R.cmd_cache, ['list'])
         self.assertIn('entries   : 1,', out)
         self.assertIn('lz4(1 blocks)', out)
-        self.assertIn(os.path.abspath(path), out)
+        self.assertIn(os.path.normcase(os.path.abspath(path)), out)
 
     def test_list_counts_unusable_files_separately(self):
         self.garbage()
@@ -192,6 +192,59 @@ class TestCmdCache(CmdCase):
         self.assertIn('cache dir :', out)
 
 
+class TestCmdDescriptors(CmdCase):
+    def capture(self) -> str:
+        return self.cap(
+            self.ch('Device_CreateDescriptorHeap', F.pl_descriptor_heap(298)),
+            self.ch('Device_CreateDescriptorHeap', F.pl_descriptor_heap(299, heap_type=1)),
+            self.ch('Device_CreateShaderResourceView',
+                    F.pl_descriptor_write(2233, heap=298, index=138456)),
+            self.ch('Device_CreateUnorderedAccessView',
+                    F.pl_descriptor_write(2234, heap=298, index=138458)),
+            self.ch('Device_CreateSampler', F.pl_descriptor_write(0, heap=299, index=0)),
+            self.ch('SetName', F.pl_set_name(298, 'GlobalResourceHeap')),
+            self.ch('SetName', F.pl_set_name(299, 'GlobalSamplerHeap')),
+            self.ch('SetName', F.pl_set_name(2233, 'SkyAtmosphere.SkyViewLut')))
+
+    def test_lists_heaps_and_their_written_slots(self):
+        out = self.out(R.cmd_descriptors, self.capture())
+        self.assertIn('descriptor heaps: 2, 3 written slots', out)
+        self.assertIn('heap298 GlobalResourceHeap', out)
+        self.assertIn('heap299 GlobalSamplerHeap', out)
+        srv = self.line_with(out, 'res2233')
+        self.assertIn('[138456', srv)
+        self.assertIn('srv', srv)
+        self.assertIn('SkyAtmosphere.SkyViewLut', srv)
+        self.assertIn('uav', self.line_with(out, 'res2234'))
+        self.assertIn('sampler', self.line_with(out, '[0'))
+        self.assertIn('total slots: 3 (shown 3)', out)
+
+    def test_an_unnamed_heap_shows_a_dash(self):
+        path = self.cap(self.ch('Device_CreateShaderResourceView',
+                                F.pl_descriptor_write(7, heap=298, index=1)))
+        self.assertIn('heap298 -', self.out(R.cmd_descriptors, path))
+
+    def test_heap_filter_by_id(self):
+        out = self.out(R.cmd_descriptors, self.capture(), 200, '299')
+        self.assertIn('GlobalSamplerHeap', out)
+        self.assertNotIn('SkyViewLut', out)
+
+    def test_heap_filter_by_name(self):
+        out = self.out(R.cmd_descriptors, self.capture(), 200, 'globalresource')
+        self.assertIn('SkyViewLut', out)
+        self.assertNotIn('GlobalSamplerHeap', out)
+
+    def test_limit_caps_the_rows_but_not_the_count(self):
+        out = self.out(R.cmd_descriptors, self.capture(), 1)
+        self.assertIn('total slots: 3 (shown 1)', out)
+        self.assertNotIn('GlobalSamplerHeap', out)      # the second heap is not even headed
+
+    def test_main_dispatches_descriptors(self):
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'descriptors', self.capture(), '5']):
+            out = self.out(R.main)
+        self.assertIn('descriptor heaps: 2', out)
+
+
 class TestCmdResources(CmdCase):
     def test_lists_a_buffer_and_a_texture_with_their_names(self):
         chunks = [self.ch('Device_CreateCommittedResource',
@@ -210,6 +263,17 @@ class TestCmdResources(CmdCase):
         self.assertIn('256x64x1', texture_row)
         self.assertIn('mips=8', texture_row)
         self.assertIn('R16G16B16A16_FLOAT', texture_row)     # from the fake DXGI_FORMAT enum
+
+    def test_acceleration_structures_show_their_byte_size(self):
+        # an AS has no dimensions, so it must not fall into the texture formatting branch
+        path = self.cap(self.ch('CreateAS', F.pl_create_as(393, buffer=390, as_type=1,
+                                                           byte_size=62336)),
+                        self.ch('SetName', F.pl_set_name(393, 'UnitSphereBLAS')))
+        out = self.out(R.cmd_resources, path)
+        row = self.line_with(out, 'UnitSphereBLAS')
+        self.assertIn('blas', row)
+        self.assertIn('62336 B', row)
+        self.assertNotIn('mips=', row)
 
     def test_an_unnamed_resource_shows_a_dash(self):
         path = self.cap(self.ch('Device_CreateCommittedResource',
@@ -918,6 +982,42 @@ class TestCmdDraws(CmdCase):
         out = self.out(R.cmd_draws, self.cap(*chunks))
         self.assertIn('[%s]' % ('A' * 24), out)
         self.assertNotIn('A' * 25, out)
+
+    def test_a_table_binding_resolves_to_the_descriptor_in_that_slot(self):
+        chunks = [self.ch('Device_CreateShaderResourceView',
+                          F.pl_descriptor_write(2233, heap=298, index=138456)),
+                  self.ch('SetName', F.pl_set_name(2233, 'SkyAtmosphere.SkyViewLut')),
+                  self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 1, 298, 138456)),
+                  self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('rp1=heap298[138456] -> srv res2233[SkyAtmosphere.SkyViewLut]', out)
+
+    def test_a_copied_descriptor_resolves_in_the_destination_heap(self):
+        # exactly what the real captures do: write into one heap, copy into the heap the frame binds
+        chunks = [self.ch('Device_CreateUnorderedAccessView',
+                          F.pl_descriptor_write(2234, heap=300, index=1047)),
+                  self.ch('Device_CopyDescriptors', F.pl_copy_descriptors([(298, 138455, 300, 1047)])),
+                  self.ch('SetName', F.pl_set_name(2234, 'SkyViewLut')),
+                  self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 0, 298, 138455)),
+                  self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('rp0=heap298[138455] -> uav res2234[SkyViewLut]', out)
+
+    def test_an_unwritten_slot_falls_back_to_the_heap_name(self):
+        # descriptors written before the capture are not in the stream (README 8): say the heap
+        chunks = [self.ch('SetName', F.pl_set_name(298, 'GlobalResourceHeap')),
+                  self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 1, 298, 5)),
+                  self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('rp1=heap298[5][GlobalResourceHeap]', out)
+        self.assertNotIn('->', out)
+
+    def test_a_sampler_slot_resolves_to_sampler(self):
+        chunks = [self.ch('Device_CreateSampler', F.pl_descriptor_write(0, heap=299, index=0)),
+                  self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 1, 299, 0)),
+                  self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('rp1=heap299[0] -> sampler', out)
 
     def test_descriptor_tables_are_annotated_with_the_heap_name(self):
         # `GlobalSamplerHeap` says the table holds samplers, which is worth knowing

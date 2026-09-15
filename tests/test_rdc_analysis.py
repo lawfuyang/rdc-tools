@@ -532,7 +532,8 @@ class CacheCase(TempDirCase):
     def cache_file(self, section: int = 0) -> str:
         """Where the cache file for this capture/section has to be."""
         st = os.stat(self.capture)
-        return R._cache_file(os.path.abspath(self.capture), st.st_size, st.st_mtime_ns, section)
+        return R._cache_file(os.path.normcase(os.path.abspath(self.capture)), st.st_size,
+                             st.st_mtime_ns, section)
 
     def touch(self, name: str, data: bytes = b'x') -> str:
         """Write a file into the cache directory (creating it) and return its path."""
@@ -546,7 +547,8 @@ class CacheCase(TempDirCase):
                     src_mtime: Optional[int] = None, stream_len: Optional[int] = None) -> str:
         """Write a cache file by hand, so a single header field can be made wrong."""
         st = os.stat(self.capture)
-        path_bytes = (os.path.abspath(self.capture) if src is None else src).encode('utf-8')
+        default = os.path.normcase(os.path.abspath(self.capture))
+        path_bytes = (default if src is None else src).encode('utf-8')
         head = R.CACHE_HEADER.pack(magic, version, R.CACHE_HEADER.size + len(path_bytes), section,
                                    method, st.st_size if src_size is None else src_size,
                                    st.st_mtime_ns if src_mtime is None else src_mtime,
@@ -635,7 +637,7 @@ class TestCacheStoreAndLookup(CacheCase):
         entry = R._read_cache_header(self.store() or '')
         self.assertIsNotNone(entry)
         assert entry is not None                     # narrow for the type checker
-        self.assertEqual(entry['srcPath'], os.path.abspath(self.capture))
+        self.assertEqual(entry['srcPath'], os.path.normcase(os.path.abspath(self.capture)))
         self.assertEqual(entry['srcSize'], os.path.getsize(self.capture))
         self.assertEqual(entry['srcMtime'], os.stat(self.capture).st_mtime_ns)
         self.assertEqual(entry['section'], 0)
@@ -653,6 +655,19 @@ class TestCacheStoreAndLookup(CacheCase):
             self.assertEqual(fh.read(), self.stream)
 
     def test_another_section_is_a_separate_entry(self):
+        self.store()
+        self.assertIsNone(R.cache_lookup(self.capture, self.info, 1))
+
+    @unittest.skipUnless(os.name == 'nt', 'case-insensitive paths are a Windows property')
+    def test_a_differently_cased_path_is_the_same_entry(self):
+        # found on a real capture: the shell gives `c:\x.rdc`, `Resolve-Path` gives `C:\x.rdc`, and
+        # without normcase that cached a 1.4 GB stream twice
+        self.store()
+        other = self.capture[0].swapcase() + self.capture[1:]
+        self.assertEqual(R._cache_identity(other), R._cache_identity(self.capture))
+        self.assertEqual(R.cache_lookup(other, R.parse_container(other)),
+                         (self.stream, 'lz4(2 blocks, cached)'))
+        self.assertEqual(len(R._cache_names()), 1)
         self.store()
         self.assertIsNone(R.cache_lookup(self.capture, self.info, 1))
 
@@ -942,6 +957,121 @@ class TestParseResourceTable(CmdCase):
 
     def test_an_empty_stream_is_an_empty_table(self):
         self.assertEqual(self.table(), {})
+
+    def test_the_newer_creation_variants_use_the_same_offsets(self):
+        # a hobby-renderer capture creates 5252 resources with `...CommittedResource3` (149-byte
+        # payloads, `D3D12_RESOURCE_DESC1`) and 148 with `...PlacedResource2`: the extra fields come
+        # *after* the descriptor and its first 48 bytes are the same struct, so one offset each
+        desc3 = F.pl_committed_resource3(4001, F.pl_resource_desc(3, 1920, 1080, fmt=45))
+        desc2 = F.pl_placed_resource(4002, F.pl_resource_desc(1, 512), heap=2)
+        table = self.table(self.ch('Device_CreateCommittedResource3', desc3),
+                           self.ch('Device_CreatePlacedResource2', desc2))
+        self.assertEqual(len(desc3), 149)
+        self.assertEqual(table[4001]['kind'], 'texture2d')
+        self.assertEqual((table[4001]['width'], table[4001]['height']), (1920, 1080))
+        self.assertEqual(table[4001]['format'], 45)
+        self.assertEqual(table[4002]['size'], 512)
+
+    def test_an_acceleration_structure_is_recorded_by_its_own_id(self):
+        # `CreateAS` names a sub-range of a buffer: the id is the AS id (what the frame references),
+        # the size is the AS's own byte size, and the type is TOP_LEVEL = 0 / BOTTOM_LEVEL = 1
+        table = self.table(self.ch('CreateAS', F.pl_create_as(47055, buffer=11157, as_type=0,
+                                                              byte_size=904832)),
+                           self.ch('CreateAS', F.pl_create_as(393, buffer=390, as_type=1,
+                                                              byte_size=62336)))
+        self.assertEqual(table[47055]['kind'], 'tlas')
+        self.assertEqual(table[47055]['size'], 904832)
+        self.assertEqual(table[393]['kind'], 'blas')
+        self.assertEqual(table[393]['size'], 62336)
+        self.assertNotIn(11157, table)          # the buffer is not created by this chunk
+
+    def test_an_acceleration_structure_keeps_its_name(self):
+        table = self.table(self.ch('CreateAS', F.pl_create_as(7, buffer=1, as_type=1)),
+                           self.ch('SetName', F.pl_set_name(7, 'UnitSphereBLAS')))
+        self.assertEqual(table[7]['name'], 'UnitSphereBLAS')
+        self.assertEqual(table[7]['kind'], 'blas')
+
+    def test_an_acceleration_structure_with_an_unknown_type_is_skipped(self):
+        self.assertEqual(self.table(self.ch('CreateAS', F.pl_create_as(7, buffer=1, as_type=2))), {})
+
+    def test_a_short_acceleration_structure_payload_is_skipped(self):
+        self.assertEqual(self.table(self.ch('CreateAS', F.pl_create_as(7, buffer=1)[:35])), {})
+
+
+class TestParseDescriptorHeaps(CmdCase):
+    """`parse_descriptor_heaps`: the writes and copies that fill a descriptor heap, in stream order."""
+
+    def heaps(self, *chunks: bytes) -> Dict[int, Dict[int, R.DescriptorInfo]]:
+        path = self.cap(*chunks)
+        _info, stream, _how = R.load_stream(path)
+        return R.parse_descriptor_heaps(stream, self.names)
+
+    def test_a_view_write_records_its_slot_and_resource(self):
+        heaps = self.heaps(self.ch('Device_CreateShaderResourceView',
+                                   F.pl_descriptor_write(2233, heap=298, index=138456)))
+        self.assertEqual(heaps, {298: {138456: {'kind': 'srv', 'resource': 2233}}})
+
+    def test_the_kind_comes_from_the_chunk_name(self):
+        cases = [('Device_CreateConstantBufferView', 'cbv'), ('Device_CreateShaderResourceView', 'srv'),
+                 ('Device_CreateUnorderedAccessView', 'uav'), ('Device_CreateRenderTargetView', 'rtv'),
+                 ('Device_CreateDepthStencilView', 'dsv')]
+        for name, kind in cases:
+            with self.subTest(chunk=name):
+                heaps = self.heaps(self.ch(name, F.pl_descriptor_write(7, heap=1, index=2)))
+                self.assertEqual(heaps[1][2], {'kind': kind, 'resource': 7})
+
+    def test_a_sampler_records_no_resource(self):
+        heaps = self.heaps(self.ch('Device_CreateSampler', F.pl_descriptor_write(0, heap=299, index=0)))
+        self.assertEqual(heaps, {299: {0: {'kind': 'sampler', 'resource': 0}}})
+
+    def test_a_copy_moves_the_descriptor_into_the_destination_slot(self):
+        # the real captures do exactly this: write into one heap, copy into the heap the frame binds
+        chunks = [self.ch('Device_CreateUnorderedAccessView',
+                          F.pl_descriptor_write(2266, heap=300, index=1047)),
+                  self.ch('Device_CopyDescriptorsSimple',
+                          F.pl_copy_descriptors([(298, 138455, 300, 1047)]))]
+        heaps = self.heaps(*chunks)
+        self.assertEqual(heaps[300][1047], {'kind': 'uav', 'resource': 2266})
+        self.assertEqual(heaps[298][138455], {'kind': 'uav', 'resource': 2266})
+
+    def test_a_copy_of_an_unwritten_slot_records_nothing(self):
+        heaps = self.heaps(self.ch('Device_CopyDescriptors',
+                                   F.pl_copy_descriptors([(298, 5, 300, 9)])))
+        self.assertEqual(heaps, {})
+
+    def test_stream_order_decides_which_write_wins(self):
+        # a write after the copy must survive it: that is the order D3D12 applies them in
+        copy = self.ch('Device_CopyDescriptors', F.pl_copy_descriptors([(298, 5, 300, 9)]))
+        chunks = [self.ch('Device_CreateShaderResourceView',
+                          F.pl_descriptor_write(1, heap=300, index=9)),
+                  copy,
+                  self.ch('Device_CreateUnorderedAccessView',
+                          F.pl_descriptor_write(2, heap=298, index=5))]
+        heaps = self.heaps(*chunks)
+        self.assertEqual(heaps[298][5], {'kind': 'uav', 'resource': 2})
+
+    def test_a_copy_after_a_write_wins(self):
+        chunks = [self.ch('Device_CreateShaderResourceView',
+                          F.pl_descriptor_write(1, heap=298, index=5)),
+                  self.ch('Device_CreateShaderResourceView',
+                          F.pl_descriptor_write(2, heap=300, index=9)),
+                  self.ch('Device_CopyDescriptors', F.pl_copy_descriptors([(298, 5, 300, 9)]))]
+        self.assertEqual(self.heaps(*chunks)[298][5], {'kind': 'srv', 'resource': 2})
+
+    def test_a_write_payload_too_short_for_the_handle_is_skipped(self):
+        self.assertEqual(self.heaps(self.ch('Device_CreateShaderResourceView', b'\x00' * 20)), {})
+
+    def test_a_truncated_copy_entry_stops_the_list(self):
+        # the count claims two entries but only one fits: the second must not be invented
+        blob = F.pl_copy_descriptors([(298, 5, 300, 9)]) + b'\x00' * 10
+        heaps = self.heaps(self.ch('Device_CreateShaderResourceView',
+                                   F.pl_descriptor_write(1, heap=300, index=9)),
+                           self.ch('Device_CopyDescriptors', blob))
+        self.assertEqual(heaps[298][5], {'kind': 'srv', 'resource': 1})
+        self.assertEqual(len(heaps[298]), 1)
+
+    def test_an_empty_stream_has_no_heaps(self):
+        self.assertEqual(self.heaps(), {})
 
 
 class TestLoadFormatNames(TempDirCase):

@@ -232,6 +232,35 @@ def pl_root_signature(cmdlist: int, rootsig: int) -> bytes:
     return u64b(cmdlist) + u64b(rootsig)
 
 
+def pl_descriptor_write(resource: int, heap: int, index: int, length: int = 68) -> bytes:
+    """A `Device_Create*View` payload: the resource id at +16, the destination handle last.
+
+    The tool reads exactly those two things -- the descriptor *kind* comes from the chunk name -- so
+    the bytes in between are zeros. `length` matches what the captures carry for an SRV (68); a UAV
+    payload is 80 in the captures, which is why the length is a parameter.
+    """
+    return b'\x00' * 16 + u64b(resource) + b'\x00' * (length - 36) + u64b(heap) + u32b(index)
+
+
+def pl_copy_descriptors(entries: Sequence[Tuple[int, int, int, int]],
+                        heap_type: int = 0) -> bytes:
+    """`Device_CopyDescriptors*`: u64 count, then per entry `(dstHeap, dstIndex, srcHeap, srcIndex)`.
+
+    Each entry is `u32 heapType` followed by the destination and source `PortableHandle`s (28 bytes).
+    """
+    out = u64b(len(entries))
+    for dst_heap, dst_index, src_heap, src_index in entries:
+        out += (u32b(heap_type) + u64b(dst_heap) + u32b(dst_index) + u64b(src_heap)
+                + u32b(src_index))
+    return out
+
+
+def pl_descriptor_heap(heap: int, heap_type: int = 0, num_descriptors: int = 1000000) -> bytes:
+    """`Device_CreateDescriptorHeap`: the desc, the IID, then the heap id at `length - 16` (56 B)."""
+    return (u32b(heap_type) + u32b(num_descriptors) + b'\x00' * 24 + b'\x00' * 8 + u64b(heap)
+            + u64b(0))
+
+
 def pl_set_name(resid: int, name: str) -> bytes:
     """`SetName`: [u64 resourceId][u32 length][utf-8 name]."""
     raw = name.encode('utf-8')
@@ -268,6 +297,23 @@ def pl_placed_resource(resid: int, desc: bytes, heap: int = 1, heap_offset: int 
                        gpu_address: int = 0) -> bytes:
     """`Device_CreatePlacedResource`: heap(8) | heap offset(8) | desc | tail (109 bytes)."""
     return u64b(heap) + u64b(heap_offset) + desc + _creation_tail(resid, gpu_address)
+
+
+def pl_committed_resource3(resid: int, desc: bytes, gpu_address: int = 0) -> bytes:
+    """`Device_CreateCommittedResource3`: heap props | flags | `D3D12_RESOURCE_DESC1` | tail (149 B).
+
+    The descriptor is 12 bytes longer than in the base form and the castable-format list follows it.
+    The tool reads the first 48 bytes of the descriptor -- which both structs share -- and the id at
+    `length - 16`, so those 32 extra bytes only have to be *there*, which is why they are filler.
+    """
+    return b'\x02' + b'\x00' * 19 + u32b(0) + desc + b'\x00' * 32 + _creation_tail(resid, gpu_address)
+
+
+def pl_create_as(asid: int, buffer: int, offset: int = 0, as_type: int = 0,
+                 byte_size: int = 4194304) -> bytes:
+    """`CreateAS`: u64 buffer, u64 offset, u32 type (0 = top level, 1 = bottom level), u64 byteSize,
+    u64 asId -- an acceleration structure is a sub-range of a buffer, not a resource."""
+    return u64b(buffer) + u64b(offset) + u32b(as_type) + u64b(byte_size) + u64b(asid)
 
 
 def pl_reserved_resource(resid: int, desc: bytes, gpu_address: int = 0) -> bytes:
@@ -445,6 +491,18 @@ enum class D3D12Chunk : uint32_t
   Device_CreateCommittedResource,
   Device_CreatePlacedResource,
   Device_CreateReservedResource,
+  Device_CreateCommittedResource3,
+  Device_CreatePlacedResource2,
+  CreateAS,
+  Device_CreateDescriptorHeap,
+  Device_CreateConstantBufferView,
+  Device_CreateShaderResourceView,
+  Device_CreateUnorderedAccessView,
+  Device_CreateRenderTargetView,
+  Device_CreateDepthStencilView,
+  Device_CreateSampler,
+  Device_CopyDescriptors,
+  Device_CopyDescriptorsSimple,
 };
 '''
 

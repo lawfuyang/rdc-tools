@@ -57,10 +57,16 @@ def capture_all(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
 class TempDirCase(unittest.TestCase):
     #: scratch directory created in `setUp` and removed by a cleanup hook.
     tmp: str
+    #: cache directory for this test, so nothing touches the real user cache (see `cache_dir`).
+    cache: str
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp(prefix='rdc_unit_')
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.cache = os.path.join(self.tmp, 'cache')
+        env = mock.patch.dict(os.environ, {'RDC_CACHE_DIR': self.cache})
+        env.start()
+        self.addCleanup(env.stop)
 
     def path(self, name: str, data: Optional[bytes] = None) -> str:
         p = os.path.join(self.tmp, name)
@@ -304,6 +310,53 @@ class TestDecompressLz4(unittest.TestCase):
         self.assertEqual(R.decompress_lz4(b'', 0), (b'', 0))
 
 
+class TestLz4BlocksShareHistory(unittest.TestCase):
+    """The blocks of a section are pages of one continuous LZ4 stream, not independent frames.
+
+    RenderDoc compresses with `LZ4_compress_fast_continue` and decompresses with
+    `LZ4_decompress_safe_continue` over a shared stream context (serialise/lz4io.cpp), so a match in
+    one 1 MB page may point up to 64 KB back into the previous page. `decompress_lz4` therefore
+    carries one output buffer across the blocks -- and a block-parallel decoder is impossible:
+    decoding a block on its own loses the bytes its matches reach for. (A pooled version of this
+    function produced 625,911,281 bytes for the PC capture in this repo where the section declares
+    630,790,592 -- which is why there is no parallel LZ4 path.)
+    """
+
+    #: 32 distinct bytes, compressed as a literal-only block, so the output is recognisable.
+    first_plain = bytes(range(65, 97))
+    first_block = F.lz4_literal_block(first_plain)
+    #: 1 literal ('Z') then a match of 8 bytes at offset 8: the match starts 7 bytes inside the
+    #: previous block, so it can only be decoded with that block's output as history.
+    second_block = b'\x14' + b'Z' + b'\x08\x00'
+
+    def blob(self) -> bytes:
+        return (F.u32b(len(self.first_block)) + self.first_block
+                + F.u32b(len(self.second_block)) + self.second_block)
+
+    def test_a_match_may_reach_into_the_previous_block(self):
+        out, blocks = R.decompress_lz4(self.blob(), 0)
+        self.assertEqual(blocks, 2)
+        self.assertEqual(out[:32], self.first_plain)
+        self.assertEqual(out[32:33], b'Z')
+        # the 8-byte match copies out[25:33]: 7 bytes of the previous block plus this block's literal
+        self.assertEqual(out[33:], self.first_plain[25:] + b'Z')
+        self.assertEqual(len(out), 32 + 1 + 8)
+
+    def test_the_same_block_alone_loses_the_history_bytes(self):
+        # offset 8 with only one byte of output so far: the slice clamps to the one literal, so the
+        # block contributes 2 bytes on its own instead of the 9 it contributes with its history
+        alone = bytes(R.lz4_block(self.second_block, bytearray()))
+        self.assertEqual(alone, b'ZZ')
+
+    def test_expect_is_a_budget_checked_before_each_block(self):
+        # 32 bytes are already there, so the second block is never decoded...
+        out, blocks = R.decompress_lz4(self.blob(), 32)
+        self.assertEqual((out, blocks), (self.first_plain, 1))
+        # ...but a budget of 33 pulls it in whole (41 bytes: the decoder never splits a block)
+        out, blocks = R.decompress_lz4(self.blob(), 33)
+        self.assertEqual((len(out), blocks), (41, 2))
+
+
 # =========================================================================== zstd
 class TestDecompressZstd(unittest.TestCase):
     """`zstandard` is optional; a stub module exercises all three magic branches."""
@@ -406,6 +459,350 @@ class TestGetStream(TempDirCase):
         info = R.parse_container(self.path('m.rdc', F.rdc([])))
         with self.assertRaises(IndexError):
             R.get_stream(info)
+
+
+# =========================================================================== cache
+class CacheCase(TempDirCase):
+    """An lz4 capture plus the pieces the cache functions need.
+
+    `TempDirCase` points `$RDC_CACHE_DIR` at a scratch directory, so these tests never touch the
+    real user cache and never see each other's entries.
+    """
+
+    #: the chunks the cached stream is made of.
+    chunks: List[bytes]
+    #: path of the capture, its parsed container, and the decompressed stream.
+    capture: str
+    info: R.CaptureInfo
+    stream: bytes
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.chunks = [F.chunk(1000, b'payload-' * 8), F.chunk(1001, b'second-' * 8)]
+        self.capture = self.path('c.rdc', F.capture(self.chunks, lz4=True, block_count=2))
+        self.info = R.parse_container(self.capture)
+        self.stream = b''.join(self.chunks)
+
+    def store(self, stream: Optional[bytes] = None, method: int = R.METHOD_LZ4,
+              blocks: int = 2, section: int = 0) -> Optional[str]:
+        """Cache `stream` (by default the capture's real stream) and return the file written."""
+        return R.cache_store(self.capture, self.info, section,
+                             self.stream if stream is None else stream, method, blocks)
+
+    def cache_file(self, section: int = 0) -> str:
+        """Where the cache file for this capture/section has to be."""
+        st = os.stat(self.capture)
+        return R._cache_file(os.path.abspath(self.capture), st.st_size, st.st_mtime_ns, section)
+
+    def touch(self, name: str, data: bytes = b'x') -> str:
+        """Write a file into the cache directory (creating it) and return its path."""
+        os.makedirs(self.cache, exist_ok=True)
+        return F.write_bytes(os.path.join(self.cache, name), data)
+
+    def write_cache(self, stream: bytes = b'', src: Optional[str] = None,
+                    magic: bytes = R.CACHE_MAGIC, version: int = R.CACHE_VERSION,
+                    section: int = 0, at_section: Optional[int] = None, method: int = R.METHOD_LZ4,
+                    blocks: int = 2, src_size: Optional[int] = None,
+                    src_mtime: Optional[int] = None, stream_len: Optional[int] = None) -> str:
+        """Write a cache file by hand, so a single header field can be made wrong."""
+        st = os.stat(self.capture)
+        path_bytes = (os.path.abspath(self.capture) if src is None else src).encode('utf-8')
+        head = R.CACHE_HEADER.pack(magic, version, R.CACHE_HEADER.size + len(path_bytes), section,
+                                   method, st.st_size if src_size is None else src_size,
+                                   st.st_mtime_ns if src_mtime is None else src_mtime,
+                                   len(stream) if stream_len is None else stream_len, blocks)
+        cfile = self.cache_file(section if at_section is None else at_section)
+        os.makedirs(os.path.dirname(cfile), exist_ok=True)
+        with open(cfile, 'wb') as fh:
+            fh.write(head)
+            fh.write(path_bytes)
+            fh.write(stream)
+        return cfile
+
+
+class TestCacheDir(unittest.TestCase):
+    def test_env_var_wins(self):
+        with mock.patch.dict(os.environ, {'RDC_CACHE_DIR': r'D:\somewhere'}):
+            self.assertEqual(R.cache_dir(), r'D:\somewhere')
+
+    def test_default_is_an_absolute_rdc_tools_folder(self):
+        # the platform base directories are blanked (not the whole environment: `expanduser` needs
+        # the home variables), so the fallback under the home directory is what gets tested
+        blanked = {'RDC_CACHE_DIR': '', 'LOCALAPPDATA': '', 'XDG_CACHE_HOME': ''}
+        with mock.patch.dict(os.environ, blanked):
+            path = R.cache_dir()
+        self.assertTrue(os.path.isabs(path), path)
+        self.assertTrue(path.replace('\\', '/').endswith('rdc-tools/cache'), path)
+
+    def test_on_unless_rdc_no_cache_is_set(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(R._cache_enabled())
+        for value in ('1', 'yes', '0'):
+            with self.subTest(value=value):
+                with mock.patch.dict(os.environ, {'RDC_NO_CACHE': value}):
+                    self.assertFalse(R._cache_enabled())
+
+
+class TestMethodLabel(unittest.TestCase):
+    def test_one_label_per_method(self):
+        self.assertEqual(R._method_label(R.METHOD_RAW, 0), 'raw')
+        self.assertEqual(R._method_label(R.METHOD_LZ4, 7), 'lz4(7 blocks)')
+        self.assertEqual(R._method_label(R.METHOD_ZSTD, 0), 'zstd')
+
+    def test_cached_suffix(self):
+        self.assertEqual(R._method_label(R.METHOD_LZ4, 7, cached=True), 'lz4(7 blocks, cached)')
+        self.assertEqual(R._method_label(R.METHOD_RAW, 0, cached=True), 'raw, cached')
+
+
+class TestCacheStoreAndLookup(CacheCase):
+    def test_store_then_lookup_returns_the_stream_and_a_cached_label(self):
+        cfile = self.store()
+        self.assertIsNotNone(cfile)
+        self.assertTrue(os.path.isfile(cfile or ''))
+        self.assertEqual(R.cache_lookup(self.capture, self.info),
+                         (self.stream, 'lz4(2 blocks, cached)'))
+
+    def test_stats_answer_from_the_header(self):
+        self.store()
+        self.assertEqual(R.cache_stats(self.capture, self.info),
+                         (len(self.stream), 'lz4(2 blocks, cached)'))
+
+    def test_no_file_is_a_miss(self):
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+        self.assertIsNone(R.cache_stats(self.capture, self.info))
+
+    def test_raw_sections_are_never_cached(self):
+        self.assertIsNone(self.store(method=R.METHOD_RAW))
+        self.assertEqual(R._cache_names(), [])
+
+    def test_a_zstd_label_round_trips(self):
+        self.store(method=R.METHOD_ZSTD, blocks=0)
+        hit = R.cache_lookup(self.capture, self.info)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit[1] if hit else '', 'zstd, cached')
+
+    def test_a_disabled_cache_writes_and_reads_nothing(self):
+        with mock.patch.dict(os.environ, {'RDC_NO_CACHE': '1'}):
+            self.assertIsNone(self.store())
+            self.assertIsNone(R.cache_lookup(self.capture, self.info))
+            self.assertEqual(R._cache_names(), [])
+
+    def test_the_write_is_atomic(self):
+        self.store()
+        self.assertEqual([n for n in R._cache_names() if '.tmp' in n], [])
+
+    def test_the_header_records_the_identity_and_the_lengths(self):
+        entry = R._read_cache_header(self.store() or '')
+        self.assertIsNotNone(entry)
+        assert entry is not None                     # narrow for the type checker
+        self.assertEqual(entry['srcPath'], os.path.abspath(self.capture))
+        self.assertEqual(entry['srcSize'], os.path.getsize(self.capture))
+        self.assertEqual(entry['srcMtime'], os.stat(self.capture).st_mtime_ns)
+        self.assertEqual(entry['section'], 0)
+        self.assertEqual(entry['method'], R.METHOD_LZ4)
+        self.assertEqual(entry['blocks'], 2)
+        self.assertEqual(entry['streamLen'], len(self.stream))
+        self.assertEqual(entry['hdrLen'], R.CACHE_HEADER.size + len(os.path.abspath(self.capture)))
+
+    def test_the_payload_follows_the_header(self):
+        cfile = self.store() or ''
+        entry = R._read_cache_header(cfile)
+        assert entry is not None
+        with open(cfile, 'rb') as fh:
+            fh.seek(entry['hdrLen'])
+            self.assertEqual(fh.read(), self.stream)
+
+    def test_another_section_is_a_separate_entry(self):
+        self.store()
+        self.assertIsNone(R.cache_lookup(self.capture, self.info, 1))
+
+
+class TestCacheValidation(CacheCase):
+    def touch_capture(self) -> None:
+        """Give the capture a new mtime, the way editing it would."""
+        st = os.stat(self.capture)
+        os.utime(self.capture, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+
+    def test_touching_the_capture_invalidates_the_entry(self):
+        cfile = self.store()
+        self.touch_capture()
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+        # the stale file is keyed to the old mtime, so it is not even looked up -- see the prune test
+        self.assertTrue(os.path.exists(cfile or ''))
+
+    def test_a_rebuild_removes_the_stale_entry_for_the_same_capture(self):
+        stale = self.store()
+        self.touch_capture()
+        self.store()
+        self.assertFalse(os.path.exists(stale or ''))
+        self.assertEqual(len(R._cache_names()), 1)
+
+    def test_pruning_keeps_another_section_of_the_same_capture(self):
+        other = self.write_cache(stream=b'other section', section=1)
+        self.store()
+        self.assertTrue(os.path.exists(other))
+
+    def test_a_stream_shorter_than_the_section_claims_is_rejected(self):
+        # This is the check that caught the block-parallel decoder: it wrote a stream 4.9 MB short
+        # of `uncompLen`, so every read of it was refused instead of silently analysing half a frame.
+        self.write_cache(stream=self.stream[:-4])
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+        self.assertEqual(R._cache_names(), [])
+
+    def test_a_truncated_payload_is_rejected(self):
+        cfile = self.write_cache(stream=self.stream)
+        with open(cfile, 'r+b') as fh:
+            fh.truncate(os.path.getsize(cfile) - 4)
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+        self.assertEqual(R._cache_names(), [])
+
+    def test_a_short_file_is_not_a_cache_file(self):
+        cfile = self.touch(os.path.basename(self.cache_file()), b'RDCCACHE')
+        self.assertIsNone(R._read_cache_header(cfile))
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+
+    def test_a_foreign_magic_is_not_a_cache_file(self):
+        cfile = self.write_cache(stream=self.stream, magic=b'NOTACACH')
+        self.assertIsNone(R._read_cache_header(cfile))
+
+    def test_another_format_version_is_not_a_cache_file(self):
+        cfile = self.write_cache(stream=self.stream, version=R.CACHE_VERSION + 1)
+        self.assertIsNone(R._read_cache_header(cfile))
+
+    def test_a_different_source_path_is_rejected(self):
+        self.write_cache(stream=self.stream, src=r'D:\other.rdc')
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+
+    def test_a_different_source_size_is_rejected(self):
+        self.write_cache(stream=self.stream, src_size=os.path.getsize(self.capture) + 1)
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+
+    def test_a_different_source_mtime_is_rejected(self):
+        self.write_cache(stream=self.stream, src_mtime=os.stat(self.capture).st_mtime_ns + 1)
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+
+    def test_a_header_for_another_section_is_rejected(self):
+        self.write_cache(stream=self.stream, section=1, at_section=0)
+        self.assertIsNone(R.cache_lookup(self.capture, self.info, 0))
+
+    def test_expected_len_is_zero_for_an_index_that_does_not_exist(self):
+        self.assertEqual(R._expected_len(self.info, 0), len(self.stream))
+        self.assertEqual(R._expected_len(self.info, 5), 0)
+        self.assertEqual(R._expected_len(self.info, -1), 0)
+
+
+class TestCacheEntries(CacheCase):
+    def test_no_directory_is_an_empty_list(self):
+        self.assertEqual(R.cache_entries(), [])
+        self.assertEqual(R.cache_clear(), (0, 0))
+
+    def test_entries_are_sorted_by_stream_length(self):
+        for name, payload in (('small.rdc', b'small' * 4), ('big.rdc', b'bigger' * 40)):
+            path = self.path(name, F.capture([F.chunk(1000, payload)], lz4=True))
+            info = R.parse_container(path)
+            stream, _how = R.get_stream(info)
+            R.cache_store(path, info, 0, stream, R.METHOD_LZ4, 1)
+        entries = R.cache_entries()
+        self.assertEqual([os.path.basename(e['srcPath']) for e in entries],
+                         ['big.rdc', 'small.rdc'])
+
+    def test_unusable_files_are_not_listed(self):
+        self.store()
+        self.touch('garbage' + R.CACHE_SUFFIX, b'nope')
+        self.assertEqual(len(R.cache_entries()), 1)
+        self.assertEqual(len(R._cache_names()), 2)
+
+    def test_temporary_files_are_not_listed(self):
+        self.touch('x' + R.CACHE_SUFFIX + '.tmp99', b'half a stream')
+        self.assertEqual(R.cache_entries(), [])
+
+    def test_clear_reports_and_removes_everything(self):
+        self.store()
+        expected = os.path.getsize(self.cache_file())
+        count, freed = R.cache_clear()
+        self.assertEqual(count, 1)
+        self.assertEqual(freed, expected)
+        self.assertEqual(R._cache_names(), [])
+
+    def test_clear_also_removes_interrupted_writes(self):
+        self.store()
+        self.touch('x' + R.CACHE_SUFFIX + '.tmp99', b'half a stream')
+        count, _freed = R.cache_clear()
+        self.assertEqual(count, 2)
+        self.assertEqual(R._cache_names(), [])
+
+
+class TestStreamCaching(CacheCase):
+    def test_first_call_decompresses_and_the_second_comes_from_the_cache(self):
+        _, first, how_first = R.load_stream(self.capture)
+        _, second, how_second = R.load_stream(self.capture)
+        self.assertEqual(first, self.stream)
+        self.assertEqual(second, self.stream)
+        self.assertEqual(how_first, 'lz4(2 blocks)')
+        self.assertEqual(how_second, 'lz4(2 blocks, cached)')
+
+    def test_nothing_is_written_when_the_cache_is_off(self):
+        with mock.patch.dict(os.environ, {'RDC_NO_CACHE': '1'}):
+            R.load_stream(self.capture)
+            _, _, how = R.load_stream(self.capture)
+            self.assertEqual(R._cache_names(), [])
+        self.assertEqual(how, 'lz4(2 blocks)')
+
+    def test_a_raw_capture_never_writes_a_cache_file(self):
+        path = self.capture_path([F.chunk(1000, b'raw')])
+        _, _, how = R.load_stream(path)
+        self.assertEqual(how, 'raw')
+        self.assertEqual(R._cache_names(), [])
+
+    def test_stream_stats_fills_the_cache_too(self):
+        self.assertEqual(R.stream_stats(self.capture, self.info),
+                         (len(self.stream), 'lz4(2 blocks)'))
+        self.assertEqual(len(R._cache_names()), 1)
+        self.assertEqual(R.stream_stats(self.capture, self.info),
+                         (len(self.stream), 'lz4(2 blocks, cached)'))
+
+    def test_stream_stats_answers_from_the_header_without_the_payload(self):
+        R.load_stream(self.capture)
+        cfile = self.cache_file()
+        with open(cfile, 'r+b') as fh:                      # break the payload, keep the header
+            fh.truncate(os.path.getsize(cfile) - 4)
+        self.assertEqual(R.stream_stats(self.capture, self.info),
+                         (len(self.stream), 'lz4(2 blocks, cached)'))
+        self.assertIsNone(R.cache_lookup(self.capture, self.info))
+
+    def test_stream_stats_raises_for_a_section_that_does_not_exist(self):
+        info = R.parse_container(self.path('empty.rdc', F.rdc([])))
+        with self.assertRaises(IndexError):
+            R.stream_stats(self.capture, info)
+
+    def test_a_deleted_cache_file_is_rebuilt(self):
+        R.load_stream(self.capture)
+        os.remove(self.cache_file())
+        _, stream, how = R.load_stream(self.capture)
+        self.assertEqual(stream, self.stream)
+        self.assertEqual(how, 'lz4(2 blocks)')
+        self.assertTrue(os.path.isfile(self.cache_file()))
+
+    def test_a_changed_capture_is_decompressed_again(self):
+        R.load_stream(self.capture)
+        other = [F.chunk(1000, b'different-' * 8)]
+        F.write_bytes(self.capture, F.capture(other, lz4=True))
+        _, stream, how = R.load_stream(self.capture)
+        self.assertEqual(stream, b''.join(other))
+        self.assertEqual(how, 'lz4(1 blocks)')
+
+    def test_an_unusable_cache_directory_only_warns_once(self):
+        blocked = self.path('blocked')                      # a file where the directory must be
+        F.write_bytes(blocked, b'not a directory')
+        buf = io.StringIO()
+        with mock.patch.object(R, 'cache_dir', lambda: blocked):
+            with mock.patch.object(R, '_CACHE_WARNED', False):
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    _, first, _ = R.load_stream(self.capture)
+                    _, second, _ = R.load_stream(self.capture)
+        self.assertEqual(first, self.stream)
+        self.assertEqual(second, self.stream)
+        self.assertEqual(buf.getvalue().count('warning: cannot write the stream cache'), 1)
 
 
 # =========================================================================== misc helpers

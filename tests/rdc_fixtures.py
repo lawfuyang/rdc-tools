@@ -164,10 +164,15 @@ def lz4_container(data: bytes, block_count: int = 1) -> bytes:
 # --------------------------------------------------------------------------- captures
 def capture(chunks: Sequence[bytes], lz4: bool = False, block_count: int = 1,
             name: str = 'FrameCapture', **kw: Any) -> bytes:
-    """A whole .rdc file with one frame-capture section holding `chunks`."""
+    """A whole .rdc file with one frame-capture section holding `chunks`.
+
+    `uncompLen` is the *decompressed* size, as RenderDoc writes it -- the compressed body is
+    `compLen`. (Without the explicit `uncomp_len` the section builder would record the compressed
+    length for both, which is not what a real capture does and is what `cache_store` validates.)
+    """
     data = b''.join(chunks)
     if lz4:
-        sec = section(name, lz4_container(data, block_count), flags=FLAG_LZ4)
+        sec = section(name, lz4_container(data, block_count), flags=FLAG_LZ4, uncomp_len=len(data))
     else:
         sec = section(name, data)
     return rdc([sec], **kw)

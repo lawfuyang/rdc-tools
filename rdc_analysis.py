@@ -33,14 +33,17 @@ Usage:
   python rdc_analysis.py sig      <rdc>
   python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
   python rdc_analysis.py dump-shaders <rdc> <outdir>
+  python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import struct
 import sys
+import time
 import unittest
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple, TypedDict, Union
 
@@ -106,6 +109,23 @@ class ChunkInfo(TypedDict):
     payload_offset: int
     pad_start: int
     pad_len: int
+
+
+class CacheEntry(TypedDict):
+    """One cached decompressed stream: where it is and what it was built from.
+
+    `hdrLen` is where the payload starts, `streamLen` how long it is; `srcPath`/`srcSize`/`srcMtime`
+    identify the capture it belongs to and are re-checked on every read.
+    """
+    file: str
+    srcPath: str
+    hdrLen: int
+    section: int
+    method: int
+    srcSize: int
+    srcMtime: int
+    streamLen: int
+    blocks: int
 
 
 #: One part of a DXBC/DXIL container: `(fourcc, offset, length)`. `offset` is absolute, past the
@@ -288,6 +308,16 @@ def decompress_lz4(blob: bytes, expect: int) -> Tuple[bytes, int]:
 
     Returns the produced bytes and the number of blocks consumed. `expect` is the expected
     uncompressed size; 0 means "consume every block regardless of size".
+
+    The one `out` buffer is carried across blocks on purpose: the blocks are **not** independent.
+    RenderDoc writes a section as a single continuous LZ4 stream cut into 1 MB pages and both ends
+    use the streaming API (`LZ4_compress_fast_continue` / `LZ4_decompress_safe_continue` with a
+    shared stream context, serialise/lz4io.cpp), so a match can point up to 64 KB back into the
+    previous page. Decoding blocks on their own therefore loses data -- a block-parallel version of
+    this function returned 625,911,281 bytes for the PC capture in this repo where the section
+    declares (and the serial walk produces) 630,790,592. That is why there is no parallel decoder
+    here: the speedup is the stream cache instead (`cache_dir`), measured at 3.6 s -> 0.27 s on
+    that capture.
     """
     out = bytearray()
     o = 0
@@ -321,16 +351,289 @@ def decompress_zstd(blob: bytes) -> bytes:
     return dctx.stream_reader(body).read()
 
 
-def get_stream(info: CaptureInfo, section_index: int = 0) -> Tuple[bytes, str]:
-    """Return the (decompressed) body of one section and a human-readable method label."""
+# ---------------------------------------------------------------------------
+# Decompressed-stream cache.
+#
+# Decompressing a frame-capture section costs seconds (pure-Python LZ4 over a few hundred MB of
+# blocks) and every command needs the same stream, so the decompressed bytes are cached on disk
+# and keyed by the capture's identity: absolute path + size + mtime + section index + format
+# version. A hit shows up in the method label as `lz4(N blocks, cached)`.
+#
+# The cache is pure optimisation. `$RDC_NO_CACHE=1` disables it, `$RDC_CACHE_DIR` moves it, an
+# unusable directory only warns (once), and a stale, truncated or foreign file is detected and
+# rebuilt rather than trusted. Nothing else a command prints depends on it.
+# ---------------------------------------------------------------------------
+CACHE_MAGIC = b'RDCCACHE'
+CACHE_VERSION = 1
+CACHE_SUFFIX = '.rdcstream'
+
+#: magic(8) version(I) headerLength(I) section(I) method(I) srcSize(Q) srcMtime(Q) streamLen(Q)
+#: blocks(I), followed by `headerLength - CACHE_HEADER.size` bytes of UTF-8 source path and then
+#: exactly `streamLen` bytes of decompressed stream.
+CACHE_HEADER = struct.Struct('<8sIIIIQQQI')
+
+#: Method codes stored in a cache header (see `_method_label`).
+METHOD_RAW, METHOD_LZ4, METHOD_ZSTD = 0, 1, 2
+
+#: Set once, so a broken cache directory warns a single time per process.
+_CACHE_WARNED = False
+
+
+def cache_dir() -> str:
+    """Directory holding the cached streams (`$RDC_CACHE_DIR` overrides the platform default)."""
+    env = os.environ.get('RDC_CACHE_DIR')
+    if env:
+        return env
+    if os.name == 'nt':
+        base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+    else:
+        base = os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache')
+    return os.path.join(base, 'rdc-tools', 'cache')
+
+
+def _cache_enabled() -> bool:
+    """False when `$RDC_NO_CACHE` is set to anything non-empty."""
+    return not os.environ.get('RDC_NO_CACHE')
+
+
+def _cache_file(abspath: str, size: int, mtime: int, section_index: int) -> str:
+    """Cache file for one (capture, section): the identity key hashed into a file name."""
+    key = '%s|%d|%d|%d|%d' % (abspath, size, mtime, section_index, CACHE_VERSION)
+    return os.path.join(cache_dir(),
+                        hashlib.sha1(key.encode('utf-8', 'replace')).hexdigest() + CACHE_SUFFIX)
+
+
+def _cache_identity(path: str) -> Optional[Tuple[int, int, str]]:
+    """`(size, mtime_ns, absolute path)` of the capture, or None when it cannot be stat'ed."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns, os.path.abspath(path)
+
+
+def _read_cache_header(cfile: str) -> Optional[CacheEntry]:
+    """Parse a cache file header; None when the file is missing, short or not a cache file."""
+    try:
+        with open(cfile, 'rb') as fh:
+            raw = fh.read(CACHE_HEADER.size)
+            if len(raw) < CACHE_HEADER.size:
+                return None
+            magic, version, hdr_len, section, method, src_size, src_mtime, stream_len, blocks = \
+                CACHE_HEADER.unpack(raw)
+            if magic != CACHE_MAGIC or version != CACHE_VERSION or hdr_len < CACHE_HEADER.size:
+                return None
+            src_path = fh.read(hdr_len - CACHE_HEADER.size).decode('utf-8', 'replace')
+    except OSError:
+        return None
+    return CacheEntry(file=cfile, srcPath=src_path, hdrLen=hdr_len, section=section, method=method,
+                      srcSize=src_size, srcMtime=src_mtime, streamLen=stream_len, blocks=blocks)
+
+
+def _expected_len(info: CaptureInfo, section_index: int) -> int:
+    """`uncompLen` of one section, or 0 for an out-of-range index (the caller raises, as before)."""
+    sections = info['sections']
+    if 0 <= section_index < len(sections):
+        return sections[section_index]['uncompLen']
+    return 0
+
+
+def _cache_entry(path: str, info: CaptureInfo, section_index: int) -> Optional[CacheEntry]:
+    """The usable cache entry for this capture/section, or None.
+
+    An entry is usable only when it was built from exactly this file (same absolute path, size and
+    mtime), for this section, and holds a stream at least as long as the section claims to
+    decompress to. A file that fails any check is deleted, so nothing stale survives a rebuild.
+    """
+    if not _cache_enabled():
+        return None
+    ident = _cache_identity(path)
+    if ident is None:
+        return None
+    size, mtime, abspath = ident
+    entry = _read_cache_header(_cache_file(abspath, size, mtime, section_index))
+    if entry is None:
+        return None
+    expect = _expected_len(info, section_index)
+    if (entry['srcPath'] != abspath or entry['srcSize'] != size or entry['srcMtime'] != mtime
+            or entry['section'] != section_index or (expect and entry['streamLen'] < expect)):
+        _remove_file(entry['file'])
+        return None
+    return entry
+
+
+def cache_lookup(path: str, info: CaptureInfo,
+                 section_index: int = 0) -> Optional[Tuple[bytes, str]]:
+    """The cached stream and its label for this capture/section, or None on a miss."""
+    entry = _cache_entry(path, info, section_index)
+    if entry is None:
+        return None
+    try:
+        with open(entry['file'], 'rb') as fh:
+            fh.seek(entry['hdrLen'])
+            stream = fh.read(entry['streamLen'])
+    except OSError:
+        return None
+    if len(stream) != entry['streamLen']:
+        _remove_file(entry['file'])
+        return None
+    return stream, _method_label(entry['method'], entry['blocks'], cached=True)
+
+
+def cache_stats(path: str, info: CaptureInfo,
+                section_index: int = 0) -> Optional[Tuple[int, str]]:
+    """`(stream length, label)` from a cache header alone -- no payload read."""
+    entry = _cache_entry(path, info, section_index)
+    if entry is None:
+        return None
+    return entry['streamLen'], _method_label(entry['method'], entry['blocks'], cached=True)
+
+
+def cache_store(path: str, info: CaptureInfo, section_index: int, stream: bytes, method: int,
+                blocks: int) -> Optional[str]:
+    """Write a decompressed stream to the cache; returns the file written, or None.
+
+    Raw sections are not cached (copying them would cost disk for nothing). The bytes go to a
+    temporary name first and are renamed into place afterwards, so an interrupted run can never
+    leave a half-written stream behind for the next one to read.
+    """
+    if method == METHOD_RAW or not _cache_enabled():
+        return None
+    ident = _cache_identity(path)
+    if ident is None:
+        return None
+    size, mtime, abspath = ident
+    cfile = _cache_file(abspath, size, mtime, section_index)
+    src = abspath.encode('utf-8', 'replace')
+    head = CACHE_HEADER.pack(CACHE_MAGIC, CACHE_VERSION, CACHE_HEADER.size + len(src), section_index,
+                             method, size, mtime, len(stream), blocks)
+    tmp = '%s.tmp%d' % (cfile, os.getpid())
+    try:
+        os.makedirs(os.path.dirname(cfile), exist_ok=True)
+        with open(tmp, 'wb') as fh:
+            fh.write(head)
+            fh.write(src)
+            fh.write(stream)
+        os.replace(tmp, cfile)
+    except OSError as exc:
+        _cache_warn(exc)
+        _remove_file(tmp)
+        return None
+    _cache_prune_stale(abspath, section_index, cfile)
+    return cfile
+
+
+def _remove_file(cfile: str) -> None:
+    """Delete a file, ignoring failure -- everything here is disposable."""
+    try:
+        os.remove(cfile)
+    except OSError:
+        pass
+
+
+def _cache_warn(exc: OSError) -> None:
+    """Report a cache problem once per process, on stderr: it must never fail a command."""
+    global _CACHE_WARNED
+    if not _CACHE_WARNED:
+        _CACHE_WARNED = True
+        print('warning: cannot write the stream cache: %s' % exc, file=sys.stderr)
+
+
+def _cache_names() -> List[str]:
+    """Every file in the cache directory that belongs to the cache (complete or not)."""
+    directory = cache_dir()
+    if not os.path.isdir(directory):
+        return []
+    return sorted(name for name in os.listdir(directory)
+                  if name.endswith(CACHE_SUFFIX) or CACHE_SUFFIX + '.tmp' in name)
+
+
+def cache_entries() -> List[CacheEntry]:
+    """Every readable cache file, biggest stream first; unusable files are not listed."""
+    directory = cache_dir()
+    entries: List[CacheEntry] = []
+    for name in _cache_names():
+        if name.endswith(CACHE_SUFFIX):
+            entry = _read_cache_header(os.path.join(directory, name))
+            if entry is not None:
+                entries.append(entry)
+    entries.sort(key=lambda e: e['streamLen'], reverse=True)
+    return entries
+
+
+def _cache_prune_stale(abspath: str, section_index: int, keep: str) -> int:
+    """Delete cached streams for the same capture and section built from a different version of it.
+
+    Only the newest entry for a capture/section is worth keeping, and a changed capture leaves the
+    old one behind (its file name encodes the old size/mtime, so the new identity never looks it
+    up). `cache_store` prunes after a successful write, so an edited capture does not accumulate a
+    several-hundred-MB orphan per edit; `cache clear` remains the sledgehammer.
+    """
+    removed = 0
+    for entry in cache_entries():
+        if (entry['file'] != keep and entry['srcPath'] == abspath
+                and entry['section'] == section_index):
+            _remove_file(entry['file'])
+            removed += 1
+    return removed
+
+
+def cache_clear() -> Tuple[int, int]:
+    """Delete every cache file; returns `(files removed, bytes freed)`."""
+    directory = cache_dir()
+    count = freed = 0
+    for name in _cache_names():
+        cfile = os.path.join(directory, name)
+        try:
+            freed += os.path.getsize(cfile)
+            os.remove(cfile)
+            count += 1
+        except OSError:
+            pass
+    return count, freed
+
+
+def _method_label(method: int, blocks: int, cached: bool = False) -> str:
+    """The label `get_stream` returns for a decompression method, plus `, cached` on a hit."""
+    if method == METHOD_LZ4:
+        return 'lz4(%d blocks%s)' % (blocks, ', cached' if cached else '')
+    name = 'zstd' if method == METHOD_ZSTD else 'raw'
+    return name + (', cached' if cached else '')
+
+
+def _decompress_section(info: CaptureInfo, section_index: int = 0) -> Tuple[bytes, int, int]:
+    """Decompress one section body; returns `(stream, method code, block count)`."""
     sec = info['sections'][section_index]
     blob = info['_data'][sec['dataOffset']:sec['dataOffset'] + sec['compLen']]
     if blob[:4] == ZSTD_MAGIC or blob[4:8] == ZSTD_MAGIC:
-        return decompress_zstd(blob), 'zstd'
+        return decompress_zstd(blob), METHOD_ZSTD, 0
     if sec['flags'] & 0x2:
         out, blocks = decompress_lz4(blob, sec['uncompLen'])
-        return out, 'lz4(%d blocks)' % blocks
-    return blob, 'raw'
+        return out, METHOD_LZ4, blocks
+    return blob, METHOD_RAW, 0
+
+
+def get_stream(info: CaptureInfo, section_index: int = 0) -> Tuple[bytes, str]:
+    """Return the (decompressed) body of one section and a human-readable method label.
+
+    This always decompresses: the disk cache is applied by `load_stream` / `stream_stats`.
+    """
+    stream, method, blocks = _decompress_section(info, section_index)
+    return stream, _method_label(method, blocks)
+
+
+def stream_stats(path: str, info: CaptureInfo, section_index: int = 0) -> Tuple[int, str]:
+    """Size and method label of one section, decompressing only on a cache miss.
+
+    `sections` uses this instead of the stream itself: on a hit the cache header answers both, so a
+    repeat run neither reads nor decompresses the stream.
+    """
+    hit = cache_stats(path, info, section_index)
+    if hit is not None:
+        return hit
+    stream, method, blocks = _decompress_section(info, section_index)
+    cache_store(path, info, section_index, stream, method, blocks)
+    return len(stream), _method_label(method, blocks)
 
 
 def cmd_sections(path: str) -> None:
@@ -344,9 +647,9 @@ def cmd_sections(path: str) -> None:
     for s in info['sections']:
         print('  type=%-3d flags=0x%x ver=%-3d comp=%-10d uncomp=%-10d %s'
               % (s['type'], s['flags'], s['version'], s['compLen'], s['uncompLen'], s['name']))
-    stream, how = get_stream(info)
+    stream_len, how = stream_stats(path, info)
     print('framecapture stream: %d bytes  (expected %d)  [%s]'
-          % (len(stream), info['sections'][0]['uncompLen'], how))
+          % (stream_len, info['sections'][0]['uncompLen'], how))
 
 
 def cmd_blocks(path: str) -> None:
@@ -357,11 +660,59 @@ def cmd_blocks(path: str) -> None:
         print('%-40s flags=0x%x first16=%s' % (s['name'], s['flags'], blob[:16].hex()))
 
 
-def load_stream(path: str) -> Tuple[CaptureInfo, bytes, str]:
-    """Parse the container, decompress section 0 and return (info, stream, method)."""
+def cmd_cache(args: Optional[Sequence[str]] = None) -> int:
+    """Inspect or clear the decompressed-stream cache: `cache [list|dir|clear]`.
+
+    Returns a process exit code: 0 normally, 2 for an unknown sub-command. This is the only
+    command that needs no capture file.
+    """
+    argv = list(args or [])
+    what = argv[0] if argv else 'list'
+    if what == 'dir':
+        print(cache_dir())
+        return 0
+    if what == 'clear':
+        count, freed = cache_clear()
+        print('removed %d cache files (%.1f MB) from %s'
+              % (count, freed / 1048576.0, cache_dir()))
+        return 0
+    if what != 'list':
+        print('usage: rdc_analysis.py cache [list|dir|clear]')
+        return 2
+    entries = cache_entries()
+    print('cache dir : %s' % cache_dir())
+    print('entries   : %d, %.1f MB of streams'
+          % (len(entries), sum(e['streamLen'] for e in entries) / 1048576.0))
+    for e in entries:
+        try:
+            built = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(e['file'])))
+        except OSError:
+            built = '?'
+        print('  %-12d %-18s %s  %s'
+              % (e['streamLen'], _method_label(e['method'], e['blocks']), built, e['srcPath']))
+    unusable = len(_cache_names()) - len(entries)
+    if unusable:
+        print('unusable  : %d (left over from another version or an interrupted write;'
+              ' `cache clear` removes them)' % unusable)
+    if not entries:
+        print('  (nothing cached yet -- any command that needs the stream fills it)')
+    return 0
+
+
+def load_stream(path: str, section_index: int = 0) -> Tuple[CaptureInfo, bytes, str]:
+    """Parse the container, decompress section 0 and return (info, stream, method).
+
+    The stream is served from the disk cache when there is one (see `cache_dir`), so a repeat
+    command skips decompression and its label reads `lz4(N blocks, cached)`; `$RDC_NO_CACHE=1`
+    turns the cache off and `$RDC_CACHE_DIR` moves it.
+    """
     info = parse_container(path)
-    stream, how = get_stream(info)
-    return info, stream, how
+    hit = cache_lookup(path, info, section_index)
+    if hit is not None:
+        return info, hit[0], hit[1]
+    stream, method, blocks = _decompress_section(info, section_index)
+    cache_store(path, info, section_index, stream, method, blocks)
+    return info, stream, _method_label(method, blocks)
 
 
 def cmd_strings(path: str, minlen: int = 6, maxlines: int = 200) -> None:
@@ -1414,6 +1765,8 @@ def main() -> None:
     argv = sys.argv
     if len(argv) > 1 and argv[1] in ('test', 'selftest'):
         sys.exit(cmd_selftest(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'cache':
+        sys.exit(cmd_cache(argv[2:]))
     if len(argv) < 3:
         print(__doc__)
         return

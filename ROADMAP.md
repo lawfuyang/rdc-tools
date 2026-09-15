@@ -7,9 +7,10 @@ Legend: **P0** = do next / unblocks current work · **P1** = high value, moderat
 opportunistic · **P3** = nice-to-have.
 
 Current state for reference: the tool parses the `.rdc` container, decompresses the frame-capture stream
-(LZ4 in-file, Zstd optional), walks the SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer
-payloads, extracts DXBC/DXIL containers with their GI-related reflection strings, and can check its own parse
-(`verify`). 22 commands, see `README.md`. Since 2026-09-15 it also has a
+(LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (README §4.8), walks the
+SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, extracts DXBC/DXIL containers
+with their GI-related reflection strings, and can check its own parse (`verify`). 24 commands, see
+`README.md`. Since 2026-09-15 it also has a
 hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright "Standard"
 (`npx --yes pyright@latest`); `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite
 is the safety net for everything below — land the tests with the change, not after it.
@@ -228,15 +229,12 @@ captures tested but is not guaranteed).
 
 ## 4. P2 — Quality of life
 
-**Promoted to P1 by §6** (these two close README §8 bullets): the *bundled chunk-name table* (§6.1) and
-*parallel / cached decompression* (§6.7).
+**Promoted to P1 by §6**: the *bundled chunk-name table* (§6.1), which closes the matching README §8 bullet.
 
 * **Bundled chunk-name table** — embed the D3D12/SystemChunk enums (generated from
   `<root>/rdc-tools/renderdoc-src/`) so the tool still prints readable names when the `renderdoc-src` copy is
   absent or when analysing captures made by a different RenderDoc version. Keep the `renderdoc-src` lookup as
   the preferred source, with the bundled table as the fallback. (~2 h)
-* **Parallel / cached decompression** — decompress LZ4 blocks with `multiprocessing`, and cache the
-  decompressed stream to a temp file keyed by (path, mtime, size) so repeated commands are instant. (~4 h)
 * **`--json` / CSV output** for `draws`, `summary`, `dxbc` — makes results diffable and scriptable. (~2 h)
 * **Diff two captures** (`diff <a.rdc> <b.rdc>`) — same draw index, what changed in PSO/CBVs/streams. This is
   the single most valuable feature for A/B investigations like mobile-vs-PC. (~1 day)
@@ -282,11 +280,10 @@ never silent ones).
 | 6.4 | `draws` state tracking is a heuristic | §5 `draws` state fidelity | P1 | ~4 h |
 | 6.5 | No texture decoding | §3.4 (+ §1 replay) | P1 | 2–3 d |
 | 6.6 | No shader disassembly | §3.6 | P2 | ~1 d |
-| 6.7 | Performance: single-threaded LZ4 | §4 parallel / cached decompression | P1 | ~4 h |
 
-**Order:** 6.1 and 6.7 are the two environment dependencies and are cheap; 6.2 unblocks the extra sections;
-6.4 is the biggest offline output-quality win. 6.3, 6.5 and 6.6 are what replay (§1) answers directly, so
-attempt them offline only if replay is still blocked.
+**Order:** 6.1 is the last cheap environment dependency; 6.2 unblocks the extra sections; 6.4 is the biggest
+offline output-quality win. 6.3, 6.5 and 6.6 are what replay (§1) answers directly, so attempt them offline
+only if replay is still blocked.
 
 ---
 
@@ -303,18 +300,16 @@ attempt them offline only if replay is still blocked.
   built from a synthetic stream with a CBV bound 3 draws earlier.
 * **6.5** (§3.4): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
 * **6.6** (§3.6): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
-* **6.7** (§4 caching): repeated commands on the same capture are instant; `sections`-only commands stay
-  instant; peak RSS does not grow with the cache.
 
 ---
 
 ## 7. Suggested order
 
-1. **README §8 fixes** (§6) — 6.1/6.7 are cheap environment wins, 6.2 and 6.4 improve offline output.
+1. **README §8 fixes** (§6) — 6.1 is a cheap environment win, 6.2 and 6.4 improve offline output.
 2. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data, and
    is the cheap route through §6.3, §6.5 and §6.6.
 3. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
 4. **Root signature / descriptor decode** (§3.1, §3.2) and **resource table** (§3.3) — make the offline output
    self-explanatory (skip §3.1 if replay landed first).
-5. **Bundled chunk names + caching** (§4, = §6.1/§6.7) — remove the two environment dependencies.
+5. **Bundled chunk names** (§4, = §6.1) — remove the last environment dependency.
 6. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.

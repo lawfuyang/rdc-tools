@@ -19,7 +19,7 @@ uniforms do they read.* It is used from the command line and from scripts; every
 
 ```
 rdc-tools/
-  rdc_analysis.py     the tool (single file, ~1300 lines)
+  rdc_analysis.py     the tool (single file, ~1800 lines)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
   tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
@@ -101,10 +101,10 @@ $env:RENDERDOC_SRC = 'D:\src\renderdoc'
 Remove-Item Env:\RENDERDOC_SRC
 ```
 
-**Cost model.** Every command decompresses the frame-capture stream first (≈2–4 s and ≈400 MB RAM for a
-374 MB capture, ≈7 s / ≈650 MB for the 631 MB one). Commands that only need the container (`sections`,
-`blocks`) are instant. For repeated queries on the same capture, run the tool inside a Python session and keep
-`stream` in a variable (see §7).
+**Cost model.** The *first* command on a capture decompresses the frame-capture stream (≈3.2 s for the 374 MB
+one, ≈3.6 s for the 631 MB one, plus the stream's size in RAM); every later command is served from the
+decompressed-stream cache in ≈0.3 s (§4.8), and commands that only need the container (`blocks`) are instant
+either way. For scripted queries inside one Python session, keep `stream` in a variable (see §7).
 
 ---
 
@@ -163,6 +163,12 @@ walks this into `info['sections']`, stopping at the first byte that is not 0 (th
 * **LZ4** (`flags & 0x2`) — a sequence of `u32 compressedBlockLength` prefixes, each followed by one **raw LZ4
   block** (no frame header). `lz4_block()` is a ~40-line decoder written in-file so the tool has no
   dependency; `decompress_lz4()` loops until `uncompLen` bytes are produced.
+
+  The blocks are **pages of one continuous LZ4 stream, not independent frames**: RenderDoc compresses with
+  `LZ4_compress_fast_continue` and decompresses with `LZ4_decompress_safe_continue` over a shared stream
+  context (`serialise/lz4io.cpp`), so a match may point up to 64 KB back into the previous page.
+  `decompress_lz4()` therefore carries a single output buffer across the blocks, and the blocks **cannot** be
+  decoded in parallel — see §8 and `decompress_lz4`'s docstring for the measured evidence.
 * **raw** — copied as-is.
 
 Only **section 0** (the frame capture) is decompressed; other sections are listed by `sections` but not parsed.
@@ -246,6 +252,7 @@ register u32, ...`), with the string table after the array. This is how per-inst
 | `sections` | `<rdc>` | file size, rdc version, progVersion, thumbnail, driver name/id; every section (type, flags, version, compressed/uncompressed size, name); then the decompressed size of section 0 vs expected, and the method used |
 | `verify` | `<rdc>` | walks the chunk stream and checks what would make a parse untrustworthy: frames claiming bytes the stream does not hold, and payload lengths that disagree with the layout the decoder expects (see §3.4). Also reports the alignment padding totals — non-zero padding is legal (stale buffer bytes) so it is a note, not a failure. Exit code 0/1, so it can gate a script |
 | `blocks` | `<rdc>` | per section: name, flags, first 16 bytes hex — enough to identify compression (`28b52ffd` = Zstd) |
+| `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 
 ### 4.2 Stream text mining
 
@@ -345,6 +352,41 @@ npx --yes pyright@latest        # expect: 0 errors, 0 warnings
 ```
 
 The coding rules that keep it that way are in `AGENTS.md`.
+
+### 4.8 Caching
+
+Decompressing a frame-capture section costs seconds (§8) and every command needs the same stream, so the
+decompressed bytes are cached on disk, keyed by the capture's identity: absolute path, size, mtime, section
+index and cache format version. The first command on a capture decompresses and writes the cache; every later
+one reads it back, and the method label says so:
+
+```
+framecapture stream: 630790592 bytes  (expected 630790592)  [lz4(602 blocks)]           <- first run
+framecapture stream: 630790592 bytes  (expected 630790592)  [lz4(602 blocks, cached)]   <- after that
+```
+
+Measured on the 61 MB PC capture in this repo: `sections` 3.56 s → 0.27 s, `verify` 4.0 s → 0.41 s.
+
+| Environment variable | Effect |
+|---|---|
+| `RDC_CACHE_DIR` | where the cache lives (default `%LOCALAPPDATA%\rdc-tools\cache`, or `$XDG_CACHE_HOME`/`~/.cache` elsewhere) |
+| `RDC_NO_CACHE` | set to anything non-empty to disable the cache: no reads, no writes |
+
+| Command | Effect |
+|---|---|
+| `python rdc_analysis.py cache` | list the entries: stream size, method, build time, source capture |
+| `python rdc_analysis.py cache dir` | print the cache directory |
+| `python rdc_analysis.py cache clear` | delete every entry (prints files removed and MB freed) |
+
+The cache is pure optimisation and cannot change what a command prints apart from that label. An entry is used
+only when it was built from exactly this file (same absolute path, size and mtime), for this section, and holds
+a stream at least as long as the section's `uncompLen` — anything else is ignored and rebuilt, and the file is
+deleted. Writes go to a temporary name and are renamed into place, so an interrupted run cannot leave a
+half-written stream behind, and a rebuild prunes the entries for the same capture/section that were built from
+an older version of it. Raw sections are never cached (there is nothing to decompress); a cache directory that
+cannot be written only warns once on stderr, and nothing else changes.
+
+The unit tests point `RDC_CACHE_DIR` at a scratch directory, so they never touch the real cache (§4.6).
 
 ---
 
@@ -511,8 +553,12 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
   implemented; only raw bytes can be dumped.
 * **No shader disassembly.** `dump-shaders` extracts containers; disassembling the `ILDN`/`ILDB` bytecode needs
   an external tool.
-* **Performance.** Decompression is single-threaded Python LZ4 (~2–4 s for 374 MB). Fine for interactive use,
-  not for batch processing hundreds of captures.
+* **Decompression is single-threaded and cannot be parallelised.** A section is one continuous LZ4 stream cut
+  into 1 MB pages with matches that reach across page boundaries (§3.2), so blocks cannot be decoded
+  independently: a block-parallel decoder built this way produced 625,911,281 bytes for the PC capture where
+  the section declares 630,790,592 — a silently truncated stream, caught only by the cache's length check.
+  The first command on a capture therefore pays the full cost (~3.6 s for the 61 MB PC capture, ~3.2 s for the
+  34 MB Android one); every later command is served from the stream cache in ~0.27 s (§4.8).
 
 ## 9. See also
 

@@ -72,6 +72,13 @@ class CmdCase(TempDirCase):
     def out(self, fn: Callable[..., object], *args: Any, **kwargs: Any) -> str:
         return capture_text(fn, *args, **kwargs)
 
+    def out_and_code(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Run `fn`, returning `(stdout, its return value)` -- for the commands that return a code."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = fn(*args, **kwargs)
+        return buf.getvalue(), code
+
     def line_with(self, text: str, needle: str) -> str:
         for line in text.splitlines():
             if needle in line:
@@ -111,6 +118,18 @@ class TestCmdSections(CmdCase):
         with self.assertRaises(IndexError):
             self.out(R.cmd_sections, path)
 
+    def test_second_run_is_served_from_the_cache(self):
+        chunks = [self.ch('PushMarker', b'BasePass\x00')]
+        path = self.cap(*chunks, lz4=True, block_count=2)
+        first = self.out(R.cmd_sections, path)
+        second = self.out(R.cmd_sections, path)
+        self.assertIn('[lz4(2 blocks)]', first)
+        self.assertIn('[lz4(2 blocks, cached)]', second)
+        expected = 'framecapture stream: %d bytes  (expected %d)' % (len(b''.join(chunks)),
+                                                                    len(b''.join(chunks)))
+        self.assertIn(expected, first)
+        self.assertIn(expected, second)
+
 
 class TestCmdBlocks(CmdCase):
     def test_lists_every_section_with_its_first_bytes(self):
@@ -130,6 +149,81 @@ class TestCmdBlocks(CmdCase):
 
     def test_no_sections_prints_nothing(self):
         self.assertEqual(self.out(R.cmd_blocks, self.path('e.rdc', F.rdc([]))).strip(), '')
+
+    def test_blocks_does_not_decompress_and_leaves_no_cache_file(self):
+        # it only reads the section headers, so it stays instant and must not fill the cache
+        path = self.cap(self.ch('PushMarker', b'Marker\x00'), lz4=True)
+        self.out(R.cmd_blocks, path)
+        self.assertEqual(R.cache_entries(), [])
+
+
+class TestCmdCache(CmdCase):
+    def garbage(self) -> str:
+        """A file in the cache directory that is not a cache file."""
+        os.makedirs(R.cache_dir(), exist_ok=True)
+        return F.write_bytes(os.path.join(R.cache_dir(), 'garbage' + R.CACHE_SUFFIX), b'nope')
+
+    def populated(self) -> str:
+        """A capture whose stream has been cached, and the capture path."""
+        path = self.cap(self.ch('PushMarker', b'Marker\x00'), lz4=True)
+        R.load_stream(path)
+        return path
+
+    def test_empty_cache(self):
+        out = self.out(R.cmd_cache)
+        self.assertIn('cache dir : %s' % R.cache_dir(), out)
+        self.assertIn('entries   : 0, 0.0 MB of streams', out)
+        self.assertIn('nothing cached yet', out)
+
+    def test_dir_prints_the_directory_alone(self):
+        self.assertEqual(self.out(R.cmd_cache, ['dir']).strip(), R.cache_dir())
+
+    def test_list_shows_the_entry_and_its_source(self):
+        path = self.populated()
+        out = self.out(R.cmd_cache, ['list'])
+        self.assertIn('entries   : 1,', out)
+        self.assertIn('lz4(1 blocks)', out)
+        self.assertIn(os.path.abspath(path), out)
+
+    def test_list_counts_unusable_files_separately(self):
+        self.garbage()
+        out = self.out(R.cmd_cache, ['list'])
+        self.assertIn('entries   : 0,', out)
+        self.assertIn('unusable  : 1', out)
+
+    def test_clear_removes_the_entries(self):
+        self.populated()
+        out = self.out(R.cmd_cache, ['clear'])
+        self.assertIn('removed 1 cache files', out)
+        self.assertIn(R.cache_dir(), out)
+        self.assertEqual(R.cache_entries(), [])
+        self.assertIn('entries   : 0,', self.out(R.cmd_cache, ['list']))
+
+    def test_unknown_subcommand_returns_2(self):
+        out, code = self.out_and_code(R.cmd_cache, ['nope'])
+        self.assertEqual(code, 2)
+        self.assertIn('usage: rdc_analysis.py cache [list|dir|clear]', out)
+
+    def test_verify_reports_a_cache_hit_on_the_second_run(self):
+        path = self.cap(self.ch('PushMarker', b'Marker\x00'), lz4=True)
+        self.out(R.cmd_verify, path)
+        self.assertIn('[lz4(1 blocks, cached)]', self.out(R.cmd_verify, path))
+
+    def test_main_dispatches_cache_without_a_capture_path(self):
+        # with the real sys.exit() this stops there; the mocked one lets main() fall through to the
+        # usage text, so only the first line is asserted
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'cache', 'dir']):
+            with mock.patch.object(sys, 'exit') as exit_mock:
+                out = self.out(R.main)
+        exit_mock.assert_called_once_with(0)
+        self.assertEqual(out.splitlines()[0], R.cache_dir())
+
+    def test_main_dispatches_a_bare_cache_to_list(self):
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'cache']):
+            with mock.patch.object(sys, 'exit') as exit_mock:
+                out = self.out(R.main)
+        exit_mock.assert_called_once_with(0)
+        self.assertIn('cache dir :', out)
 
 
 class TestLoadStream(CmdCase):

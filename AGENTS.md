@@ -53,12 +53,17 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 - `rdc_analysis.py` stays a single file — do not split it into a package or add a shim module.
 - Keep the documented public names (`parse_container`, `iter_chunks`, `decode_chunk`, `load_chunk_names`,
-  `cmd_*`, `RENDERDOC_SRC`, `MARKER_CHUNKS`, `CHUNK_*`, ...) — tests, docs and scripts reference them.
+  `load_stream`, `cache_dir`, `cache_lookup`, `cache_store`, `cmd_*`, `RENDERDOC_SRC`, `MARKER_CHUNKS`,
+  `CHUNK_*`, ...) — tests, docs and scripts reference them.
 - CLI parsing stays hand-rolled: `main()` prints the module docstring for a missing/unknown command and lets
-  `IndexError`/`ValueError` escape for bad arguments. Do not replace it with `argparse`.
+  `IndexError`/`ValueError` escape for bad arguments. Do not replace it with `argparse`. Commands that take no
+  capture path (`selftest`, `cache`) are dispatched before the `len(argv) < 3` check.
 - Behaviour is the contract. The quirks in README §8 (6-character string floor, `first=0x-1`, `rootconst`
-  offsets, heuristic `InitialContents` header scan, ...) are pinned by tests and must survive a refactor;
-  change them only as a deliberate, separately-tested fix.
+  offsets, the `decode_chunk` field labels, ...) are pinned by tests and must survive a refactor; change them
+  only as a deliberate, separately-tested fix.
+- The disk cache must stay invisible: it may only change the `, cached` marker in a method label, never what a
+  command prints. Do not add a cache-related output line, and keep the tests hermetic — `TempDirCase` points
+  `RDC_CACHE_DIR` at a scratch directory, so nothing writes to the real user cache.
 - No new runtime dependencies; `tests/` uses the stdlib only.
 
 ## Conventions

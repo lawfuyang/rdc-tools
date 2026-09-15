@@ -5,21 +5,27 @@ the frame-capture stream, walks the structured-data (SDChunk) stream, and decode
 **without `renderdoc.pyd`, without the GUI, and without a GPU**.
 
 Written to answer graphics questions that the RenderDoc UI makes tedious: *which pipeline state does this draw
-use, which constant buffers are bound and what is inside them, which shader permutations exist and what GI
-uniforms do they read.* It is used from the command line and from scripts; every command prints plain text.
+use, which constant buffers are bound, what each root parameter is, what a descriptor table resolves to, and
+where a resource id points.* It is used from the command line and from scripts; every command prints plain text.
+
+What it deliberately does **not** do is reconstruct frame data that RenderDoc's own replay engine hands over
+directly — uniform values, shader signatures, disassembly, decoded textures. Those are the replay driver's job
+(`ROADMAP.md` §1); this tool stays on the file's structure and the command stream, where it is fast and needs no
+device. §8 lists the sharp edges that follow from that.
 
 > ## Vibe coded — use at your own risk
 >
 > Every feature and every line of code here is **vibe coded**, written ad-hoc by me, for me, because I am lazy
 > and this was the fastest way to get my own answers while debugging RenderDoc captures. It is not a product,
 > not a library, not supported, and not reviewed. Commands exist because one specific capture needed them;
-> heuristics and hard-coded assumptions (signature scoring, state-tracking guesses, "this layout worked once")
-> are load-bearing throughout. **Use at your own risk** — validate anything you plan to rely on against the
-> capture you are actually debugging, and read §8 for the known sharp edges.
+> heuristics and hard-coded assumptions (chunk names parsed out of a source tree, descriptor-write and
+> state-tracking heuristics, "this layout worked once") are load-bearing throughout. **Use at your own risk** —
+> validate anything you plan to rely on against the capture you are actually debugging, and read §8 for the
+> known sharp edges.
 
 ```
 rdc-tools/
-  rdc_analysis.py     the tool (single file, ~2600 lines)
+  rdc_analysis.py     the tool (single file, ~2400 lines)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
   tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
@@ -122,8 +128,9 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | What does the descriptor heap hold that this table binding points into? | `descriptors`, `descriptors <rdc> <heapId>` |
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>` |
 | Is the parse trustworthy? | `verify` |
-| Which shaders are in this capture and what GI uniforms do they read? | `dxbc`, `sig` |
-| Where is this string / uniform name / float in the stream? | `grep`, `count`, `float`, `pattern` |
+| Which shaders are in this capture, and where? | `dxbc`, then `dump-shaders` |
+| What does a shader read? (uniform names, signatures) | the replay driver — `ROADMAP.md` §1, not this tool (§8) |
+| Where is this string / name in the stream? | `grep`, `count`, `names`, `strings` |
 | Dump all shaders to disk for disassembly | `dump-shaders <outdir>` |
 | Dump one chunk to disk | `dump-chunk <N> <outfile>` |
 
@@ -244,14 +251,10 @@ parts (`fourcc, offset, length`). Part meanings:
 | Part | Content |
 |---|---|
 | `RDEF` | resource bindings (cbuffers, textures, samplers, bind points) — **absent from every capture tested here**, see §8 |
-| `RDAT` | reflection blob — cbuffer variable names, source file names, type info (the tool harvests strings from it) |
-| `ISG1` / `OSG1` | input / output signatures (`parse_signature()` decodes them) |
+| `RDAT` | reflection blob — cbuffer variable names, source file names, type info (the tool only reads its strings as ordinary stream text; what a shader *reads* is the replay driver's job, §8) |
+| `ISG1` / `OSG1` | input / output signatures: `u32 count`, then `count` × 24-byte elements (`nameOffset u32, semanticIndex u32, register u32, ...`), with the string table after the array. The tool reads them only far enough to label a container `PS`/`VS` (`SV_Target` vs `SV_Position`) |
 | `ILDN` / `ILDB` | shader bytecode |
 | `RTS0` | **root signature** — decoded by `_parse_root_signature()` (§3.4, §8); `rootsig` prints it and `draws` annotates every `rpN` with it (§4.10) |
-
-`sig` decodes `ISG1`/`OSG1`: `u32 count`, then `count` × 24-byte elements (`nameOffset u32, semanticIndex u32,
-register u32, ...`), with the string table after the array. This is how per-instance vertex streams show up
-(`TEXCOORD6…TEXCOORD12`) and how PS/VS are told apart (`SV_Target` vs `SV_Position`).
 
 ---
 
@@ -284,20 +287,21 @@ so a two-character name is still not shown by those.
 | `count` | `<rdc> <pat1> [pat2 …]` | count and first offset for each pattern |
 | `hex` | `<rdc> <start> <length>` | hex + ASCII dump of a window (accepts `0x…`) |
 
-### 4.3 Numeric / pattern search
+### 4.3 Numeric / pattern search — removed
 
-| Command | Arguments | Output |
-|---|---|---|
-| `float` | `<rdc> <value>` | exact float32 bit-pattern search; prints the packed bytes, hit count, and ±64 bytes of text context per hit |
-| `pattern` | `<rdc> <f0,f1,…> [count=72]` | packs the float list as little-endian float32, finds **all** occurrences, and dumps the next `count` floats at each hit, 8 per row. Built for locating uniform buffers by a known prefix, e.g. the ILC buffer whose first 12 floats are `Add=(0,0,0) Scale=(1,1,1) MinUV=(0,0,0) MaxUV=(1,1,1)` → `pattern <rdc> 0,0,0,1,1,1,0,0,0,1,1,1` |
+`float` and `pattern` used to search the raw stream for uniform *values* (the tool's own docs called the
+pattern command "built for locating uniform buffers by a known prefix"). That is a guess at frame data the
+replay engine hands over directly and exactly — `GetCBufferVariableContents` returns the named members and
+their values — so both commands were removed rather than kept as a worse answer (`ROADMAP.md` §1). The
+structural search commands (`grep`, `count`, `names`, `strings`, `hex`, `dump`) stay: they inspect the *file*,
+which replay does not expose.
 
 ### 4.4 Shader level
 
 | Command | Arguments | Output |
 |---|---|---|
-| `dxbc` | `<rdc> [verbose]` | one row per DXBC/DXIL container: offset, stage (`PS`/`VS`/`CS`/`root-sig`/`?`), hash, parts, and the **GI-related cbuffer variable names** found in the container (`IndirectLighting*`, `VolumetricLightmap*`, `DirectionalLightShadowing`, `LightmapResourceCluster`, `SkyBentNormal`, `PrecomputedIndirect*`). Then per container: GI vars, VS input semantics, PS outputs, HLSL source file names; `verbose` adds all strings |
-| `sig` | `<rdc>` | decoded `ISG1`/`OSG1` per shader: `IN: nameN(regR)`, `OUT: nameN` |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts, GI vars) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc for disassembly |
+| `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §2) |
 
 ### 4.5 Chunk level
 
@@ -308,7 +312,6 @@ so a two-character name is still not shown by those.
 | `chunks` | `<rdc> [limit=200] [nameFilter]` | chunk index, offset, **name**, payload length, and a preview of the strings inside — the way to find a chunk by name |
 | `chunk` | `<rdc> <index>` | full inspector: id/name/flags/length, payload offset **and header size**, decoded fields via `decode_chunk`, 160-byte hex dump, and the payload's strings |
 | `draws` | `<rdc> [maxDraws=80]` | per-draw table (see below) |
-| `rootconst` | `<rdc> [maxChunks=8]` | `SetGraphicsRoot32BitConstant(s)` payloads decoded to root param index, value count, dest offset, and float values |
 | `rootsig` | `<rdc> [maxSigs=40]` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter with its type, register, space and descriptor ranges |
 | `dump-chunk` | `<rdc> <index> <outfile>` | writes the chunk payload to a file |
 
@@ -493,7 +496,8 @@ total slots: 16 (shown 16)
 ```
 
 `draws` uses the same table: a root descriptor table prints the descriptor in the slot it names
-(`rp0=heap298[279425] -> srv res384[Resource Allocator Under]`) and falls back to the heap's name when that
+(`rp0(table t0 n64 s0)=heap298[279425] -> srv res384[Resource Allocator Under]`) and falls back to the heap's
+name when that
 slot was never written during the capture (§8). The layouts are in §3.4; what matters here is:
 
 * a `Device_Create*View` payload holds the descriptor (the **resource id at +16**) and *ends* with the
@@ -519,29 +523,25 @@ slot was never written during the capture (§8). The layouts are in §3.4; what 
 
 **Read a constant buffer that a draw binds**
 
-Not possible offline any more: `draws` tells you *which* buffer is bound (`rp7=res342+0x8d200`) but not what is
-inside it. Reading the contents needs the replay driver (`GetCBufferVariableContents`, `ROADMAP.md` §1); the old
+Not possible offline any more: `draws` tells you *which* buffer is bound and at which register
+(`rp7(vs cbv b2 s0)=res342+0x8d200`) but not what is inside it. Reading the contents needs the replay driver
+(`GetCBufferVariableContents`, `ROADMAP.md` §1); the old
 `initial` command guessed the data offset by scoring a known signature against candidate header sizes, which
 did not survive contact with the captures it was pointed at, so it was removed rather than fixed.
 
-**Locate a uniform buffer by content**
+**Find out what a shader reads, or which permutation ran**
 
-```powershell
-# the ILC uniform always starts Add=(0,0,0) Scale=(1,1,1) MinUV=(0,0,0) MaxUV=(1,1,1)
-& $py rdc_analysis.py pattern 'mobile.rdc' 0,0,0,1,1,1,0,0,0,1,1,1
-```
-
-**See which shader permutations read GI**
-
-```powershell
-& $py rdc_analysis.py dxbc 'mobile.rdc' | Select-String -Pattern 'IndirectLighting|VolumetricLightmap'
-& $py rdc_analysis.py sig  'mobile.rdc' | Select-String -Pattern 'TEXCOORD1[0-2]'
-```
+Not offline. The tool used to guess at this — `pattern` hunted for a uniform's known value, `dxbc` scanned
+containers for GI-ish strings, `sig` decoded the vertex signatures — and all three were removed because the
+shader reflection answers it exactly: names, bind points, values, signatures, disassembly (`ROADMAP.md` §1).
+Offline you can still see *which* shaders the capture embeds and where (`dxbc`) and extract them
+(`dump-shaders`), and `draws` says what each one is bound to.
 
 **Dump shaders for external disassembly**
 
 ```powershell
-& $py rdc_analysis.py dump-shaders 'mobile.rdc' '.\out\mobile'
+& $py rdc_analysis.py dxbc          'mobile.rdc'          # where they are
+& $py rdc_analysis.py dump-shaders  'mobile.rdc' '.\out\mobile'
 ```
 
 ---
@@ -684,14 +684,17 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 
 ## 8. Pitfalls and known limitations
 
-Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.5); the plan
-is to clear the whole list, so a bullet here is a known defect, not a permanent design decision.
+Most of these bullets are **replay's job, not offline work** — decoded textures, disassembly, the non-frame
+sections, uniform names — and `ROADMAP.md` keeps them out of the offline plan on purpose ("what is deliberately
+not on this list"). The ones that stay offline work items are tracked with an acceptance gate in `ROADMAP.md`
+§5. A bullet here is a known limitation, not a permanent design decision.
 
 * **Chunk names need the RenderDoc source tree in the root folder.** The tool expects
   `<root>/rdc-tools/renderdoc-src/` (see §1.1); if it is absent, or if its version is older than the one that
   produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
   works — only the labels are missing.
-* **Only section 0 is decompressed.** Additional sections are listed but not parsed.
+* **Only section 0 is decompressed.** Additional sections are listed but not parsed. Replay reads them for you
+  (`ROADMAP.md` §1), so this is not planned as offline work.
 * **No name resolution for root parameters.** The serialised root signature carries no names, and neither do
   these captures' shaders: every one is DXIL with the reflection stripped (`RDEF` and `RDAT` are both absent),
   so there is nothing offline to map `rpN` to a uniform name with. What `draws` does instead is say what each
@@ -703,15 +706,18 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
   heap at startup: on the Android capture every table binding therefore still shows the heap name, while the PC
   capture resolves 9 of them. `descriptors` (§4.10) reports what is known and a slot the capture never wrote is
   reported as the heap — never guessed at. Descriptors *after* the first in a table are the root signature's
-  business (ROADMAP §3.1).
+  business: `rootsig` (§4.1) prints the ranges, which say how many descriptors each table covers.
 * **A binding into an allocator page names the page, not the buffer inside it.** UE sub-allocates, so
-  `rp1=res1907+0x93300[Resource Allocator Under]` is as specific as the D3D12 stream gets: the logical buffer's
+  `rp1(vs cbv b0 s0)=res1907+0x93300[Resource Allocator Under]` is as specific as the D3D12 stream gets: the
+  logical buffer's
   name lives in UE's own bookkeeping (§3.5). Descriptor-table bindings are the other half of this problem and
   have the same shape: what the capture wrote is resolved (§4.10), what it did not is only the heap.
 * **No texture decoding.** `GetTextureData`-style format decoding (BC/ASTC/float, mips, slices) is not
-  implemented; only raw bytes can be dumped.
+  implemented; only raw bytes can be dumped. Replay's `GetTextureData`/`SaveTexture` answers this
+  (`ROADMAP.md` §1), so it is not planned as offline work.
 * **No shader disassembly.** `dump-shaders` extracts containers; disassembling the `ILDN`/`ILDB` bytecode needs
-  an external tool.
+  an external tool. Replay's `ShaderReflection` carries the disassembly (`ROADMAP.md` §1), so it is not planned
+  as offline work either.
 
 ## 9. See also
 

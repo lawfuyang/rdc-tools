@@ -70,9 +70,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - CLI parsing stays hand-rolled: `main()` prints the module docstring for a missing/unknown command and lets
   `IndexError`/`ValueError` escape for bad arguments. Do not replace it with `argparse`. Commands that take no
   capture path (`selftest`, `cache`) are dispatched before the `len(argv) < 3` check.
-- Behaviour is the contract. The quirks in README §8 (6-character string floor, `first=0x-1`, `rootconst`
-  offsets, the `decode_chunk` field labels, ...) are pinned by tests and must survive a refactor; change them
-  only as a deliberate, separately-tested fix.
+- Behaviour is the contract. The quirks in README §8 (6-character string floor, `first=0x-1`, the
+  `decode_chunk` field labels, ...) are pinned by tests and must survive a refactor; change them only as a
+  deliberate, separately-tested fix.
+- Do not re-add a command that reconstructs *frame data* replay hands over directly (uniform values, shader
+  signatures, which shader reads what, root-constant values): `float`, `pattern`, `sig`, `rootconst` and
+  `report` were removed for exactly that reason, and the `dxbc`/`dump-shaders` GI-string harvest with them.
+  The tool stays on what replay does not expose — the file's structure and the command stream.
 - The disk cache must stay invisible: it may only change the `, cached` marker in a method label, never what a
   command prints. Do not add a cache-related output line, and keep the tests hermetic — `TempDirCase` points
   `RDC_CACHE_DIR` at a scratch directory, so nothing writes to the real user cache.

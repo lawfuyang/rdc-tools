@@ -15,7 +15,6 @@ from __future__ import annotations
 import contextlib
 import io
 import os
-import struct
 import sys
 import unittest
 from typing import Any, Callable, Sequence
@@ -592,71 +591,13 @@ class TestCmdHex(CmdCase):
         self.assertEqual(len(out.strip().splitlines()), 1)
 
 
-# =========================================================================== numeric search
-class TestCmdFloat(CmdCase):
-    def test_exact_bit_pattern_hits(self):
-        payload = F.f32b(1.0) + b'\x00' * 4 + F.f32b(1.0)
-        path = self.cap(self.ch('PushMarker', payload))
-        out = self.out(R.cmd_float, path, '1.0')
-        self.assertIn('exact float32 bits of 1.0 = %s' % struct.pack('<f', 1.0).hex(), out)
-        self.assertIn('exact hits: 2', out)
-        self.assertEqual(len([l for l in out.splitlines() if l.strip().startswith('0x')]), 2)
-
-    def test_no_hits(self):
-        path = self.cap(self.ch('PushMarker', b'\x00' * 64))
-        self.assertIn('exact hits: 0', self.out(R.cmd_float, path, '123.5'))
-
-    def test_context_is_limited_to_20_hits(self):
-        payload = F.f32b(2.0) * 25
-        path = self.cap(self.ch('PushMarker', payload))
-        out = self.out(R.cmd_float, path, '2.0')
-        self.assertIn('exact hits: 25', out)
-        self.assertEqual(len([l for l in out.splitlines() if l.strip().startswith('0x')]), 20)
-
-    def test_tolerance_argument_is_ignored(self):
-        path = self.cap(self.ch('PushMarker', F.f32b(3.0)))
-        self.assertIn('exact hits: 1', self.out(R.cmd_float, path, '3.0', 0.5))
-
-
-class TestCmdPattern(CmdCase):
-    def payload(self, extra=16):
-        return F.SINGLEPROBE_SIG + F.f32b(*[float(i) for i in range(1, extra + 1)])
-
-    def test_hit_and_following_floats(self):
-        path = self.cap(self.ch('PushMarker', self.payload()))
-        out = self.out(R.cmd_pattern, path, '0,0,0,1,1,1,0,0,0,1,1,1', 16)
-        self.assertIn('searching 12 floats: 0,0,0,1,1,1,0,0,0,1,1,1', out)
-        self.assertIn('hits: 1', out)
-        rows = [l.strip() for l in out.splitlines() if l.strip().startswith('+')]
-        self.assertTrue(rows[0].startswith('+0 '), rows[0])
-        self.assertTrue(rows[1].startswith('+32 '), rows[1])
-        self.assertIn('1.00000', rows[0])
-        self.assertIn('8.00000', rows[0])
-        self.assertIn('16.00000', rows[1])
-
-    def test_cap_and_more_hits_line(self):
-        chunks = [self.ch('PushMarker', F.SINGLEPROBE_SIG) for _ in range(41)]
-        path = self.cap(*chunks)
-        out = self.out(R.cmd_pattern, path, '0,0,0,1,1,1,0,0,0,1,1,1', 8)
-        self.assertIn('hits: 41', out)
-        self.assertIn('... 1 more hits', out)
-
-    def test_truncated_at_stream_end(self):
-        # no padding after the payload, so there are no floats left to dump after the hit
-        path = self.cap(F.chunk(self.ids['PushMarker'], F.SINGLEPROBE_SIG, align=False))
-        out = self.out(R.cmd_pattern, path, '0,0,0,1,1,1,0,0,0,1,1,1', 72)
-        self.assertIn('hits: 1', out)
-        self.assertNotIn('    +0', out)
-
-    def test_no_hits(self):
-        path = self.cap(self.ch('PushMarker', b'\x00' * 64))
-        out = self.out(R.cmd_pattern, path, '1,2,3')
-        self.assertIn('hits: 0', out)
-
-
 # =========================================================================== shaders
 def shader_capture_parts():
-    """Parts for a PS container with GI reflection data, inputs and a source file."""
+    """Parts for a PS container with reflection data, inputs and a source file.
+
+    The strings are the ones the removed GI harvest used to pick out of a container; a test below
+    pins that they are *not* reported any more.
+    """
     return [
         ('RDEF', b'\x00MobileBasePass\x00'),
         ('RDAT', b'\x00IndirectLightingSHCoefficients0\x00SomeOtherUniform\x00'),
@@ -667,6 +608,13 @@ def shader_capture_parts():
 
 
 class TestCmdDxbc(CmdCase):
+    """`dxbc` is a container inventory: where the shaders are and what parts they carry.
+
+    It deliberately says nothing about what a shader *reads*: that used to be guessed by scanning the
+    container for GI-ish strings, and it was removed because the shader reflection -- the replay
+    driver's job (ROADMAP §1) -- answers it exactly.
+    """
+
     def capture(self):
         blob = (F.dxbc(shader_capture_parts())
                 + F.dxbc([('ISG1', F.signature([('POSITION', 0, 0)])), ('OSG1', F.osg1_position()),
@@ -683,28 +631,22 @@ class TestCmdDxbc(CmdCase):
         self.assertIn('  root-sig  1', out)
         self.assertIn('  ?         1', out)
 
-    def test_gi_variables_are_listed(self):
+    def test_each_row_is_offset_size_stage_hash_and_parts(self):
         out = self.out(R.cmd_dxbc, self.capture())
-        self.assertIn('IndirectLightingSHCoefficients0', out)
-        self.assertNotIn('SomeOtherUniform', out.split('--- [0]')[0])
+        row = self.line_with(out, 'RDEF,RDAT,ISG1,OSG1,ILDN')
+        self.assertIn('PS', row)
+        self.assertIn('0x', row)
 
-    def test_detail_block(self):
+    def test_no_shader_content_is_harvested_any_more(self):
+        # the RDAT and ILDN strings are in the capture; the inventory must not read them out
         out = self.out(R.cmd_dxbc, self.capture())
-        self.assertIn('    GI vars : IndirectLightingSHCoefficients0', out)
-        self.assertIn('    VS input: POSITION, TEXCOORD0, TEXCOORD6', out)
-        self.assertIn('    PS out  : SV_Target, SV_Target', out)
-        self.assertIn('    files   : /Engine/Private/MobileBasePass.usf', out)
+        self.assertNotIn('IndirectLightingSHCoefficients0', out)
+        self.assertNotIn('SomeOtherUniform', out)
+        self.assertNotIn('MobileBasePass.usf', out)
+        self.assertNotIn('GI vars', out)
 
-    def test_root_signature_containers_are_skipped_in_the_detail_block(self):
-        out = self.out(R.cmd_dxbc, self.capture())
-        self.assertEqual(out.count('--- ['), 3)          # 4 containers minus the root signature
-
-    def test_verbose_prints_all_strings(self):
-        plain = self.out(R.cmd_dxbc, self.capture())
-        verbose = self.out(R.cmd_dxbc, self.capture(), 1)
-        self.assertNotIn('    all str :', plain)
-        self.assertIn('    all str :', verbose)
-        self.assertIn('SomeOtherUniform', verbose)
+    def test_the_root_signature_container_is_labelled(self):
+        self.assertIn('root-sig', self.out(R.cmd_dxbc, self.capture()))
 
     def test_cs_stage_is_unreachable_with_four_character_parts(self):
         # the 'CS' branch compares against a 4-byte fourcc, so it can never fire
@@ -716,49 +658,6 @@ class TestCmdDxbc(CmdCase):
     def test_no_containers(self):
         out = self.out(R.cmd_dxbc, self.cap(self.ch('PushMarker', b'\x00' * 32)))
         self.assertIn('DXBC/DXIL containers: 0', out)
-
-
-class TestCmdSig(CmdCase):
-    def capture(self):
-        blob = (F.dxbc([('ISG1', F.isg1_inputs()), ('OSG1', F.osg1_targets())])
-                + F.dxbc([('ISG1', F.signature([('POSITION', 0, 0)])), ('OSG1', F.osg1_position())])
-                + F.dxbc([('RTS0', b'\x02\x00\x00\x00')]))
-        return self.cap(self.ch('PushMarker', blob))
-
-    def test_signatures_are_decoded(self):
-        out = self.out(R.cmd_sig, self.capture())
-        self.assertIn('IN : POSITION0(reg0), TEXCOORD00(reg1), TEXCOORD60(reg2)', out)
-        self.assertIn('OUT: SV_Target0, SV_Target1', out)
-        self.assertIn('OUT: SV_Position0, TEXCOORD00', out)
-
-    def test_stage_is_inferred_from_the_output_signature(self):
-        out = self.out(R.cmd_sig, self.capture())
-        self.assertIn(' PS hash=', out)
-        self.assertIn(' VS hash=', out)
-
-    def test_root_signature_containers_are_skipped(self):
-        self.assertEqual(self.out(R.cmd_sig, self.capture()).count('--- 0x'), 2)
-
-
-class TestCmdReport(CmdCase):
-    def test_pattern_counts_and_shader_names(self):
-        payload = (b'\x00IndirectLightingCache\x00IndirectLightingCache\x00'
-                   b'\x00FShaderCompileJob\x00SomeUnrelatedName\x00')
-        path = self.cap(self.ch('PushMarker', payload))
-        out = self.out(R.cmd_report, path)
-        self.assertIn('=== pattern counts ===', out)
-        line = self.line_with(out, 'IndirectLightingCache')
-        self.assertIn('count=2', line)
-        self.assertIn('=== shader-ish / policy-ish names (unique) ===', out)
-        self.assertIn('FShaderCompileJob', out)
-        self.assertNotIn('SomeUnrelatedName', out)
-        self.assertIn('(1 unique)', out)
-
-    def test_no_matches(self):
-        path = self.cap(self.ch('PushMarker', b'\x00' * 64))
-        out = self.out(R.cmd_report, path)
-        self.assertIn('(0 unique)', out)
-        self.assertIn('count=0', out)
 
 
 # =========================================================================== chunk level
@@ -877,7 +776,7 @@ class TestCmdDraws(CmdCase):
         self.assertIn('total draws/dispatches: 1', out)
 
     def test_root_parameters_are_annotated_when_the_capture_has_the_signature(self):
-        # ROADMAP 3.1: `rpN` on its own says nothing about what the parameter holds, and assuming it
+        # `rpN` on its own says nothing about what the parameter holds, and assuming it
         # is what produced the wrong conclusion recorded in README 9
         chunks = [
             self.sig_chunk(4200, [('table', 0, 0, 0, 0, [('uav', 0, 16, 0, 0)]),
@@ -907,7 +806,7 @@ class TestCmdDraws(CmdCase):
         self.assertIn('total draws/dispatches: 2', out)
 
     def test_a_binding_made_three_draws_earlier_is_still_reported(self):
-        # the regression the roadmap asked for: inheritance, not "what changed since the last draw"
+        # the regression this state tracking exists for: inheritance, not "what changed since the last draw"
         chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10))]
         chunks += [self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))
                    for _ in range(3)]
@@ -1281,56 +1180,6 @@ class TestCmdMarkers(CmdCase):
         self.assertIn('PushMarker', out)
 
 
-class TestCmdRootconst(CmdCase):
-    def test_constants_are_decoded_to_floats(self):
-        # values sit after the inline u64 array count: length == 28 + 4n, values at +24
-        values = F.fbits(1.0, 2.0, 3.0)
-        chunks = [self.ch('List_SetGraphicsRoot32BitConstants',
-                          F.pl_32bit_constants(7, 2, values, 4))]
-        out = self.out(R.cmd_rootconst, self.cap(*chunks))
-        self.assertIn('List_SetGraphicsRoot32BitConstants', out)
-        self.assertIn('    rootParam=2 numValues=3 destOffset=4', out)
-        row = [l for l in out.splitlines() if l.startswith('    +0')][0]
-        self.assertIn('1.00000', row)
-        self.assertIn('2.00000', row)
-        self.assertIn('3.00000', row)
-        self.assertIn('root-constant chunks total: 1 (shown 1)', out)
-
-    def test_zero_values(self):
-        chunks = [self.ch('List_SetGraphicsRoot32BitConstants', F.pl_32bit_constants(7, 0, [], 0))]
-        out = self.out(R.cmd_rootconst, self.cap(*chunks))
-        self.assertIn('    rootParam=0 numValues=0 destOffset=0', out)
-
-    def test_length_sanity_check_falls_back_to_hex(self):
-        payload = F.pl_32bit_constants(7, 2, F.fbits(1.0)) + b'\x00\x00'   # 28 + 4 + 2 bytes
-        out = self.out(R.cmd_rootconst, self.cap(self.ch('List_SetGraphicsRoot32BitConstants', payload)))
-        self.assertIn('hex:', out)
-        self.assertNotIn('numValues=', out)
-
-    def test_inline_array_count_mismatch_warns(self):
-        payload = F.pl_32bit_constants(7, 2, F.fbits(1.0), 0, array_count=9)
-        out = self.out(R.cmd_rootconst, self.cap(self.ch('List_SetGraphicsRoot32BitConstants', payload)))
-        self.assertIn('warning: inline arrayCount=9 disagrees with numValues=1', out)
-        self.assertIn('rootParam=2 numValues=1 destOffset=0', out)
-
-    def test_single_constant_variant_prints_hex(self):
-        chunks = [self.ch('List_SetGraphicsRoot32BitConstant', F.pl_32bit_constant(7, 1, 7, 0))]
-        out = self.out(R.cmd_rootconst, self.cap(*chunks))
-        self.assertIn('List_SetGraphicsRoot32BitConstant', out)
-        self.assertIn('hex:', out)
-
-    def test_max_chunks_caps_the_dump(self):
-        chunks = [self.ch('List_SetGraphicsRoot32BitConstants', F.pl_32bit_constants(7, 1, [1], 0))
-                  for _ in range(3)]
-        out = self.out(R.cmd_rootconst, self.cap(*chunks), 1)
-        self.assertIn('root-constant chunks total: 3 (shown 1)', out)
-        self.assertEqual(out.count('--- chunk #'), 1)
-
-    def test_no_root_constant_chunks(self):
-        out = self.out(R.cmd_rootconst, self.cap(self.ch('PushMarker', b'X')))
-        self.assertIn('root-constant chunks total: 0 (shown 0)', out)
-
-
 class TestCmdDumpChunk(CmdCase):
     def test_payload_is_written_verbatim(self):
         payload = F.pl_draw_indexed(7, 2880, 1, 0, 0, 0)
@@ -1355,7 +1204,7 @@ class TestCmdDumpShaders(CmdCase):
                 + F.dxbc([('RTS0', b'\x02\x00\x00\x00')]))
         return self.cap(self.ch('PushMarker', blob))
 
-    def test_writes_blobs_and_summary(self):
+    def test_writes_blobs_and_an_index(self):
         outdir = os.path.join(self.tmp, 'nested', 'shaders')
         out = self.out(R.cmd_dump_shaders, self.capture(), outdir)
         self.assertIn('wrote 1 shader blobs + shaders.txt', out)
@@ -1365,8 +1214,10 @@ class TestCmdDumpShaders(CmdCase):
         with open(os.path.join(outdir, 'shaders.txt'), encoding='utf-8') as f:
             text = f.read()
         self.assertIn('parts=RDEF,RDAT,ISG1,OSG1,ILDN', text)
-        self.assertIn('GI vars : IndirectLightingSHCoefficients0', text)
         self.assertIn('.dxil', text)
+        # no reflection summary: reading a shader is the reflection's job, not the offline tool's
+        self.assertNotIn('GI vars', text)
+        self.assertNotIn('IndirectLightingSHCoefficients0', text)
 
     def test_written_blob_is_the_container(self):
         outdir = os.path.join(self.tmp, 'shaders')
@@ -1391,11 +1242,9 @@ class TestMain(CmdCase):
         return self.cap(
             self.ch('PushMarker', b'BasePassMarker\x00'),
             self.ch('List_SetPipelineState', F.pl_pso(7, 3042)),
-            self.ch('List_SetGraphicsRoot32BitConstants', F.pl_32bit_constants(7, 2, F.fbits(1.0), 0)),
             self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 2880, 1, 0, 0, 0)),
             self.ch('PushMarker', blob),
             self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1)),
-            self.ch('PushMarker', F.f32b(1.0) + b'\x00IndirectLightingCache\x00FShaderCompileJob\x00'),
         )
 
     def run_main(self, argv):
@@ -1425,9 +1274,6 @@ class TestMain(CmdCase):
             (['count', path, 'Marker'], 'count='),
             (['count', path, 'Marker', 'Absent'], 'count='),
             (['hex', path, '0x0', '0x10'], 'window 0x0..0x10'),
-            (['float', path, '1.0'], 'exact hits:'),
-            (['pattern', path, '0,0,0,1,1,1,0,0,0,1,1,1'], 'hits:'),
-            (['pattern', path, '0,0,0,1,1,1,0,0,0,1,1,1', '8'], 'hits:'),
             (['dump', path, '0', '64'], 'window 0x0..0x40'),
             (['dump', path, '0', '64', '8'], 'window 0x0..0x40'),
             (['chunks', path], 'total chunks:'),
@@ -1437,12 +1283,8 @@ class TestMain(CmdCase):
             (['draws', path, '1'], 'total draws/dispatches:'),
             (['summary', path], 'chunk count'),
             (['markers', path], 'PushMarker'),
-            (['rootconst', path], 'root-constant chunks total:'),
-            (['rootconst', path, '2'], 'root-constant chunks total:'),
+            (['rootsig', path], 'root signatures:'),
             (['dxbc', path], 'DXBC/DXIL containers:'),
-            (['dxbc', path, '1'], 'all str'),
-            (['sig', path], 'IN :'),
-            (['report', path], 'pattern counts'),
             (['dump-chunk', path, '1', os.path.join(self.tmp, 'out.bin')], '->'),
             (['dump-shaders', path, os.path.join(self.tmp, 'shaders')], 'wrote'),
         ]
@@ -1453,7 +1295,7 @@ class TestMain(CmdCase):
     def test_missing_arguments_raise_index_error(self):
         path = self.rich_capture()
         for argv in (['chunk', path], ['dump-chunk', path], ['dump-shaders', path],
-                     ['grep', path], ['hex', path, '0x0'], ['pattern', path], ['float', path],
+                     ['grep', path], ['hex', path, '0x0'],
                      ['dump', path, '0'], ['draws', path, 'notanint']):
             with self.subTest(argv=argv[0]):
                 with self.assertRaises((IndexError, ValueError)):
@@ -1526,7 +1368,7 @@ class TestRealCapture(unittest.TestCase):
 
     def test_commands_run_without_crashing(self):
         for cmd in (R.cmd_sections, R.cmd_summary, R.cmd_markers, R.cmd_chunks, R.cmd_draws,
-                    R.cmd_resources, R.cmd_dxbc, R.cmd_sig, R.cmd_rootconst):
+                    R.cmd_resources, R.cmd_descriptors, R.cmd_rootsig, R.cmd_dxbc):
             with self.subTest(cmd=cmd.__name__):
                 self.assertTrue(capture_text(cmd, self.path).strip())
 

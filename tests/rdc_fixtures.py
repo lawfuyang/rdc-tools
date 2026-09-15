@@ -43,15 +43,6 @@ def u64b(v: int) -> bytes:
     return struct.pack('<Q', v)
 
 
-def f32b(*vals: float) -> bytes:
-    return struct.pack('<%df' % len(vals), *vals)
-
-
-def fbits(*vals: float) -> List[int]:
-    """float32 values as their raw u32 bit patterns (what root constants carry)."""
-    return [struct.unpack('<I', struct.pack('<f', v))[0] for v in vals]
-
-
 # --------------------------------------------------------------------------- SDChunk stream
 def pad_to(data: bytes, align: int = ALIGN, pad_byte: int = 0xCC) -> bytes:
     """Pad to a multiple of `align` the way the serialiser does (padding is *not* zeroed)."""
@@ -354,23 +345,6 @@ def pl_index_buffer(cmdlist: int, resid: int, offset: int, size: int, fmt: int,
     return out
 
 
-def pl_32bit_constants(cmdlist: int, root_param: int, values: Sequence[int],
-                       dest_offset: int = 0, array_count: Optional[int] = None) -> bytes:
-    """cmdList | rootParam | numValues | arrayCount(u64) | values[n] | destOffset.
-
-    `SERIALISE_ELEMENT_ARRAY` writes the element count before the values, so the payload is
-    `28 + 4n` bytes. `array_count` overrides the inline count (for mismatch tests).
-    """
-    count = len(values) if array_count is None else array_count
-    out = u64b(cmdlist) + u32b(root_param) + u32b(len(values)) + u64b(count)
-    out += b''.join(u32b(v & 0xFFFFFFFF) for v in values)
-    return out + u32b(dest_offset)
-
-
-def pl_32bit_constant(cmdlist: int, root_param: int, value: int, dest_offset: int = 0) -> bytes:
-    return u64b(cmdlist) + u32b(root_param) + u32b(value & 0xFFFFFFFF) + u32b(dest_offset)
-
-
 def pl_create_pso(pso_id: int, tail: bytes = b'\xAB\xCD' * 16) -> bytes:
     return u64b(pso_id) + tail
 
@@ -448,9 +422,6 @@ def rdef(binds: Sequence[Tuple[str, str, int, int]], target_version: int = 0x501
     head = (u32b(0) + u32b(0) + u32b(len(binds)) + u32b(header_len) + u16b(target_version)
             + u16b(stage) + u32b(0) + u32b(0) + b'\x00' * 4)
     return head + entries + strings
-
-
-SINGLEPROBE_SIG = f32b(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
 
 
 # --------------------------------------------------------------------------- DXBC / DXIL

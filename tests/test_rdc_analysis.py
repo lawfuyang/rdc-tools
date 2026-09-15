@@ -2237,59 +2237,6 @@ class TestPartStrings(unittest.TestCase):
 
 
 # =========================================================================== signatures
-class TestParseSignature(unittest.TestCase):
-    def test_short_blob(self):
-        self.assertEqual(R.parse_signature(b''), [])
-        self.assertEqual(R.parse_signature(b'\x01\x00\x00\x00'), [])
-
-    def test_count_over_64_is_rejected(self):
-        self.assertEqual(R.parse_signature(F.u32b(65) + b'\x00' * 4 + b'\x00' * (65 * 24)), [])
-
-    def test_zero_count(self):
-        self.assertEqual(R.parse_signature(F.u32b(0) + F.u32b(8)), [])
-
-    def test_entries_with_string_table(self):
-        blob = F.signature([('POSITION', 0, 0), ('TEXCOORD6', 1, 3)])
-        self.assertEqual(R.parse_signature(blob), [('POSITION', 0, 0), ('TEXCOORD6', 1, 3)])
-
-    def test_truncated_element_list_breaks(self):
-        # count says 5 but only 2 elements are present: the loop stops at the end of the blob and the
-        # string-table guess (8 + count*24) no longer lands on the names, so they come out as '?'
-        blob = F.signature([('POSITION', 0, 0), ('TEXCOORD0', 0, 1)], count_override=5)
-        self.assertEqual(R.parse_signature(blob), [('?', 0, 0), ('?', 0, 1)])
-
-    def test_name_offsets_relative_to_the_element_array(self):
-        # names live at 8+name_off: the strtab guess misses, the base-8 fallback resolves it
-        elems = F.u32b(24) + F.u32b(0) + F.u32b(0) + b'\x00' * 12
-        blob = F.u32b(1) + F.u32b(0) + elems + b'HELLO\x00'
-        self.assertEqual(R.parse_signature(blob), [('HELLO', 0, 0)])
-
-    def test_declared_string_table_offset_is_used_as_a_fallback(self):
-        elems = (F.u32b(0) + F.u32b(0) + F.u32b(0) + b'\x00' * 12
-                 + F.u32b(0) + F.u32b(0) + F.u32b(0) + b'\x00' * 12)
-        blob = F.u32b(2) + F.u32b(32) + elems + b'HELLO\x00'
-        self.assertEqual(R.parse_signature(blob)[0], ('HELLO', 0, 0))
-
-    def test_unresolvable_name_becomes_question_mark(self):
-        elems = F.u32b(0) + F.u32b(0) + F.u32b(0) + b'\x00' * 12
-        blob = F.u32b(1) + F.u32b(0) + elems + b'\x01\x02\x03\x04\x05\x06'
-        self.assertEqual(R.parse_signature(blob), [('?', 0, 0)])
-
-    def test_non_printable_candidate_is_rejected(self):
-        elems = F.u32b(0) + F.u32b(0) + F.u32b(0) + b'\x00' * 12
-        blob = F.u32b(1) + F.u32b(0) + elems + b'AB\x01CD\x00'
-        self.assertEqual(R.parse_signature(blob), [('?', 0, 0)])
-
-    def test_name_without_nul_terminator_reads_32_bytes(self):
-        elems = F.u32b(0) + F.u32b(0) + F.u32b(0) + b'\x00' * 12
-        blob = F.u32b(1) + F.u32b(0) + elems + b'ABCDEF'
-        self.assertEqual(R.parse_signature(blob), [('ABCDEF', 0, 0)])
-
-    def test_semantic_index_and_register_are_decoded(self):
-        blob = F.signature([('TEXCOORD', 7, 12)])
-        self.assertEqual(R.parse_signature(blob), [('TEXCOORD', 7, 12)])
-
-
 # =========================================================================== real source tree
 class TestRealRenderdocSource(unittest.TestCase):
     """Integration check against the real `renderdoc-src` checkout, when present."""

@@ -21,7 +21,6 @@ Usage:
   python rdc_analysis.py chunks   <rdc> [limit] [nameFilter]
   python rdc_analysis.py chunk    <rdc> <chunkIndex>
   python rdc_analysis.py draws    <rdc> [maxDraws]
-  python rdc_analysis.py rootconst <rdc> [maxChunks]
   python rdc_analysis.py rootsig  <rdc> [maxSigs]        # decoded root signatures: parameter types,
                                                          #   registers, spaces, descriptor ranges
   python rdc_analysis.py strings  <rdc> [minlen] [maxlines]
@@ -30,11 +29,7 @@ Usage:
   python rdc_analysis.py dump     <rdc> <start> <length> [minlen]
   python rdc_analysis.py count    <rdc> <pattern> [pattern ...]
   python rdc_analysis.py hex      <rdc> <start> <length>
-  python rdc_analysis.py float    <rdc> <value>
-  python rdc_analysis.py pattern  <rdc> <f0,f1,...> [count]
-  python rdc_analysis.py report   <rdc>
   python rdc_analysis.py dxbc     <rdc> [verbose]
-  python rdc_analysis.py sig      <rdc>
   python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
   python rdc_analysis.py dump-shaders <rdc> <outdir>
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
@@ -245,10 +240,6 @@ DxbcPart = Tuple[str, int, int]
 
 #: A validated DXBC/DXIL container: `(offset, size, hash_hex, parts)`.
 DxbcContainer = Tuple[int, int, str, List[DxbcPart]]
-
-#: One decoded ISG1/OSG1 element: `(name, semanticIndex, register)`.
-SignatureElement = Tuple[str, int, int]
-
 
 #: Any object `struct.unpack_from` accepts (bytes, bytearray, memoryview).
 Buffer = Union[bytes, bytearray, memoryview]
@@ -982,20 +973,6 @@ def cmd_dump(path: str, start: int, length: int, minlen: int = 4) -> None:
         print('  (no strings)')
 
 
-GI_KEYS = [b'IndirectLightingSHCoefficients0', b'IndirectLightingSHCoefficients1',
-           b'IndirectLightingSHCoefficients2', b'IndirectLightingSHSingleCoefficient',
-           b'IndirectLightingCacheShowFlag', b'VolumetricLightmapBrickSHCoefficients',
-           b'VolumetricLightmapIndirectionTexture', b'DirectionalLightShadowing',
-           b'MobileBasePass', b'Primitive', b'View', b'IndirectLightingCache', b'PrecomputedLightingBuffer',
-           b'LightmapResourceCluster']
-INSTANCE_SEMS = [b'TEXCOORD6', b'TEXCOORD7', b'TEXCOORD8', b'TEXCOORD9', b'TEXCOORD10',
-                 b'TEXCOORD11', b'TEXCOORD12']
-
-#: Substrings that mark a reflection string as indirect-lighting related (`dxbc` / `dump-shaders`).
-GI_SUBSTRINGS = ('IndirectLighting', 'VolumetricLightmap', 'DirectionalLightShadowing',
-                 'PrecomputedIndirect', 'LightmapResourceCluster', 'SkyBentNormal')
-
-
 def parse_dxil_containers(stream: bytes) -> Iterator[DxbcContainer]:
     """Yield `(offset, size, hash_hex, parts)` for every DXBC/DXIL container in `stream`.
 
@@ -1044,46 +1021,30 @@ class DxbcRow(TypedDict):
     hash: str
     stage: str
     parts: List[str]
-    gi: List[str]
-    inst: List[str]
-    files: List[str]
-    isg: List[str]
-    osg: List[str]
-    rd: List[str]
 
 
-def cmd_dxbc(path: str, verbose: int = 0) -> None:
-    """One row per DXBC/DXIL container (stage, hash, parts, GI cbuffer vars), then details."""
+def cmd_dxbc(path: str) -> None:
+    """Inventory the DXBC/DXIL containers: offset, size, stage, hash and the parts each carries.
+
+    This is a *container* view, not a shader analysis: it says which shaders the capture embeds and
+    where, so `dump-shaders` can extract the interesting ones. What a shader *reads* -- uniform
+    names, bind points, signatures, disassembly -- is the shader reflection's job, and the reflection
+    is the replay driver's (ROADMAP §1). The tool used to guess at it by scanning containers for
+    GI-ish strings and `TEXCOORD6..12`; that harvest was a worse answer to a question replay answers
+    exactly, so it was removed rather than kept.
+    """
     _info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
     rows: List[DxbcRow] = []
     for off, size, h, parts in parse_dxil_containers(stream):
         names = [p[0] for p in parts]
-
-        def blob_of(fourcc: str) -> bytes:
-            p = next((x for x in parts if x[0] == fourcc), None)
-            if not p:
-                return b''
-            return stream[p[1]:p[1] + p[2]]
-
-        isg = blob_of('ISG1')
-        osg = blob_of('OSG1')
-        il = blob_of('ILDN')
-        whole = stream[off:off + size]
-        rd = part_strings(whole, 0, len(whole), 4)
-        isg_s = part_strings(isg, 0, len(isg), 2) if isg else []
-        osg_s = part_strings(osg, 0, len(osg), 3) if osg else []
-        il_s = part_strings(il, 0, len(il), 4) if il else []
+        osg = next((p for p in parts if p[0] == 'OSG1'), None)
+        osg_s = part_strings(stream, osg[1], osg[2], 3) if osg else []
         stage = 'root-sig' if 'RTS0' in names else (
             'PS' if any('SV_Target' in s for s in osg_s) else
             'VS' if any('SV_Position' in s for s in osg_s) else
             'CS' if 'CS' in names else '?')
-        gi = sorted({s for s in rd if any(k in s for k in GI_SUBSTRINGS)})
-        inst = sorted({s for s in isg_s if 'TEXCOORD' in s or 'COLOR' in s or 'POSITION' in s
-                       or 'NORMAL' in s or 'TANGENT' in s})
-        files = sorted({s for s in il_s if s.endswith(('.usf', '.ush', '.hlsl', '.h'))})
-        rows.append({'off': off, 'size': size, 'hash': h, 'stage': stage, 'parts': names,
-                     'gi': gi, 'inst': inst, 'files': files, 'isg': isg_s, 'osg': osg_s, 'rd': rd})
+        rows.append({'off': off, 'size': size, 'hash': h, 'stage': stage, 'parts': names})
     print('DXBC/DXIL containers: %d' % len(rows))
     by_stage: Dict[str, List[DxbcRow]] = {}
     for r in rows:
@@ -1091,22 +1052,10 @@ def cmd_dxbc(path: str, verbose: int = 0) -> None:
     for st in sorted(by_stage):
         print('  %-9s %d' % (st, len(by_stage[st])))
     print()
-    print('%-4s %-10s %-8s %-34s %s' % ('#', 'offset', 'stage', 'hash', 'GI cbuffer vars'))
+    print('%-4s %-10s %-8s %-8s %-34s %s' % ('#', 'offset', 'size', 'stage', 'hash', 'parts'))
     for idx, r in enumerate(rows):
-        print('%-4d 0x%-8x %-8s %-34s %s' % (idx, r['off'], r['stage'], r['hash'][:32],
-                                             ', '.join(r['gi']) or '(none)'))
-    print()
-    for idx, r in enumerate(rows):
-        if r['stage'] == 'root-sig':
-            continue
-        print('--- [%d] 0x%x %s hash=%s' % (idx, r['off'], r['stage'], r['hash'][:16]))
-        print('    GI vars : %s' % (', '.join(r['gi']) if r['gi'] else '(none)'))
-        print('    VS input: %s' % (', '.join(r['inst']) if r['inst'] else '(none)'))
-        print('    PS out  : %s' % ', '.join(r['osg'][:12]))
-        if r['files']:
-            print('    files   : %s' % ', '.join(r['files'][:10]))
-        if verbose:
-            print('    all str : %s' % ', '.join(r['rd'][:120]))
+        print('%-4d 0x%-8x %-8d %-8s %-34s %s'
+              % (idx, r['off'], r['size'], r['stage'], r['hash'][:32], ','.join(r['parts'])))
 
 
 def cmd_count(path: str, pats: Sequence[str]) -> None:
@@ -1128,149 +1077,6 @@ def cmd_hex(path: str, start: str, length: str) -> None:
         hx = ' '.join('%02x' % c for c in chunk)
         asc = ''.join(chr(c) if 32 <= c < 127 else '.' for c in chunk)
         print('%08x  %-47s  %s' % (i, hx, asc))
-
-
-def parse_signature(blob: bytes) -> List[SignatureElement]:
-    """Parse a D3D12 ISG1/OSG1 signature part: u32 count, then 24-byte elements, then the string table."""
-    if len(blob) < 8:
-        return []
-    count = u32(blob, 0)
-    if count > 64:
-        return []
-    strtab = 8 + count * 24
-    out: List[SignatureElement] = []
-    for i in range(count):
-        o = 8 + i * 24
-        if o + 24 > len(blob):
-            break
-        name_off = u32(blob, o)
-        sem_idx = u32(blob, o + 4)
-        reg = u32(blob, o + 8)
-        name = '?'
-        for base in (strtab, 8, u32(blob, 4)):
-            p = base + name_off
-            if 0 <= p < len(blob) and 32 <= blob[p] < 127:
-                end = blob.find(b'\x00', p)
-                cand = blob[p:end if end > 0 else p + 32].decode('ascii', 'replace')
-                if cand and all(32 <= ord(c) < 127 for c in cand):
-                    name = cand
-                    break
-        out.append((name, sem_idx, reg))
-    return out
-
-
-def cmd_sig(path: str) -> None:
-    """Print the parsed input/output signatures of every shader container."""
-    _info, stream, how = load_stream(path)
-    print('stream %d bytes [%s]' % (len(stream), how))
-    for off, _size, h, parts in parse_dxil_containers(stream):
-        names = [p[0] for p in parts]
-        if 'RTS0' in names:
-            continue
-
-        def blob_of(fourcc: str) -> bytes:
-            p = next((x for x in parts if x[0] == fourcc), None)
-            return stream[p[1]:p[1] + p[2]] if p else b''
-
-        isg = parse_signature(blob_of('ISG1'))
-        osg = parse_signature(blob_of('OSG1'))
-        stage = 'PS' if any(n == 'SV_Target' for n, _, _ in osg) else 'VS'
-        print('--- 0x%-8x %s hash=%s' % (off, stage, h[:16]))
-        print('    IN : %s' % ', '.join('%s%d(reg%d)' % (n, i, r) for n, i, r in isg))
-        print('    OUT: %s' % ', '.join('%s%d' % (n, i) for n, i, _ in osg))
-
-
-def cmd_pattern(path: str, spec: str, count: int = 72, cap: int = 40) -> None:
-    """Find every occurrence of a sequence of float32 values and dump the floats that follow.
-
-    The ILC uniform buffer (FIndirectLightingCacheUniformParameters) written by
-    SetupSingleProbeIndirectLightingParameters always starts with
-    Add=(0,0,0) Scale=(1,1,1) MinUV=(0,0,0) MaxUV=(1,1,1), so
-    '0,0,0,1,1,1,0,0,0,1,1,1' locates it and the following floats are
-    PointSkyBentNormal, DirectionalLightShadowing and the SH coefficients.
-    """
-    _info, stream, how = load_stream(path)
-    vals = [float(x) for x in spec.split(',')]
-    pat = b''.join(struct.pack('<f', v) for v in vals)
-    print('stream %d bytes [%s]' % (len(stream), how))
-    print('searching %d floats: %s' % (len(vals), spec))
-    hits: List[int] = []
-    pos = 0
-    while True:
-        i = stream.find(pat, pos)
-        if i < 0:
-            break
-        hits.append(i)
-        pos = i + 1
-    print('hits: %d' % len(hits))
-    for h in hits[:cap]:
-        print('--- hit @0x%x (stream pos, floats from hit+%d) ---' % (h, len(vals) * 4))
-        base = h + len(vals) * 4
-        row: List[float] = []
-        for k in range(count):
-            o = base + k * 4
-            if o + 4 > len(stream):
-                break
-            row.append(struct.unpack_from('<f', stream, o)[0])
-        for k in range(0, len(row), 8):
-            print('   +%-3d %s' % (k * 4, ' '.join('%12.5f' % v for v in row[k:k + 8])))
-    if len(hits) > cap:
-        print('... %d more hits' % (len(hits) - cap))
-
-
-def cmd_float(path: str, value: str, tol: float = 0.0) -> None:
-    """Exact float32 bit-pattern search (the `tol` argument is accepted but has never been used)."""
-    _info, stream, how = load_stream(path)
-    target = struct.pack('<f', float(value))
-    print('stream %d bytes [%s]; exact float32 bits of %s = %s'
-          % (len(stream), how, value, target.hex()))
-    hits: List[int] = []
-    pos = 0
-    while True:
-        i = stream.find(target, pos)
-        if i < 0:
-            break
-        hits.append(i)
-        pos = i + 1
-    print('exact hits: %d' % len(hits))
-    for o in hits[:20]:
-        lo, hi = max(0, o - 64), min(len(stream), o + 64)
-        text = ''.join(chr(c) if 32 <= c < 127 else '.' for c in stream[lo:hi])
-        print('  0x%08x | %s' % (o, text))
-
-
-PATTERNS = [
-    b'IndirectLightingCache', b'IndirectLightingSHCoefficients', b'IndirectLightingSHSingleCoefficient',
-    b'InstanceGIDiffuse', b'InstanceSHCoefficients', b'USE_INSTANCED_SH_COEFFICIENTS',
-    b'CACHED_POINT_INDIRECT_LIGHTING', b'PRECOMPUTED_IRRADIANCE_VOLUME_LIGHTING', b'MOBILE_SH_ORDER',
-    b'VolumetricLightmap', b'VolumetricLightmapBrick', b'LightmapResourceCluster',
-    b'PrecomputedLightingBuffer', b'MobileBasePass', b'BasePassPixelShader', b'MobileBasePassPixelShader',
-    b'GetLightMapColorLQ', b'FNoLightMapPolicy', b'FCachedPointIndirectLightingPolicy',
-    b'FPrecomputedVolumetricLightmapLightingPolicy', b'FMobileDirectionalLightAndSHIndirectPolicy',
-    b'FLocalVertexFactory', b'FInstancedStaticMeshVertexFactory', b'DirectionalLightShadowing',
-    b'PrimitiveSceneData', b'SceneColor', b'DrawIndexedInstanced', b'ShaderHash', b'ShaderName',
-    b'TBasePassPS', b'TBasePassVS', b'FShader', b'HISM', b'Sphere', b'StaticMeshActor',
-]
-
-
-def cmd_report(path: str) -> None:
-    """Pattern-count table plus the unique shader-ish / policy-ish strings in the stream."""
-    _info, stream, how = load_stream(path)
-    print('stream %d bytes [%s]' % (len(stream), how))
-    print('=== pattern counts ===')
-    for p in PATTERNS:
-        c = stream.count(p)
-        first = stream.find(p)
-        print('  %-46s count=%-6d first=0x%x' % (p.decode(), c, first if first >= 0 else 0))
-    print('=== shader-ish / policy-ish names (unique) ===')
-    seen: Dict[str, int] = {}
-    for off, s in string_runs(stream):
-        if re.search(r'(FShader|ShaderType|BasePass|LightMapPolicy|LightmapPolicy|VertexFactory|'
-                     r'Permutation|MaterialShader|TBasePass|GlobalShader)', s):
-            seen.setdefault(s, off)
-    for s in sorted(seen, key=lambda x: seen[x]):
-        print('  @0x%-9x %s' % (seen[s], s[:170]))
-    print('(%d unique)' % len(seen))
 
 
 # ---------------------------------------------------------------------------
@@ -1887,7 +1693,7 @@ def _descriptor_label(heaps: Dict[int, Dict[int, DescriptorInfo]],
 
 
 # ---------------------------------------------------------------------------
-# Root signatures (ROADMAP 3.1).
+# Root signatures.
 #
 # `Device_CreateRootSignature` carries the serialised D3D12 root signature as a DXBC container with
 # one `RTS0` part, and `DecodeRootSig` (driver/d3d12/d3d12_rootsig.cpp) is the layout:
@@ -2069,7 +1875,7 @@ def parse_rdef(data: bytes) -> List[ShaderBind]:
 def shader_bind_names(stream: bytes) -> Dict[str, Dict[Tuple[str, int, int], str]]:
     """`stage -> (kind, register, space) -> name` for every `RDEF` the capture still has.
 
-    This is the only source of root-parameter *names* in a capture (ROADMAP 3.1): the root signature
+    This is the only source of root-parameter *names* in a capture: the root signature
     itself has none, so a name can only come from what a shader says about its bindings. Keyed by
     stage because the same slot may be named differently in different stages, and the lookup in
     `_root_param_label` refuses to pick one when they disagree.
@@ -2341,7 +2147,8 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
     report the compute root bindings, draws the graphics ones plus the vertex streams and the index
     buffer. A root descriptor table is reported as `heap<id>[index]` plus what the capture wrote
     into that slot (`-> srv res2233[SkyViewLut]`, see `parse_descriptor_heaps`); the descriptors
-    after the first are the root signature's business (ROADMAP 3.1). Bound resources are annotated
+    after the first are the root signature's business (`rootsig` prints the ranges that say how many each
+    covers). Bound resources are annotated
     with the name the capture gave them, when it has one (`[SceneUniformBuffer]`, see
     `parse_resource_table`), and every `rpN` with what its root parameter *is*
     (`rp2(cbv b1 s0)`, see `_root_param_label`).
@@ -2434,47 +2241,6 @@ def cmd_markers(path: str) -> None:
             print('#%-6d %-16s %s' % (n, nm, ' | '.join(chunk_strings(stream, ch, 3, 3))))
 
 
-def cmd_rootconst(path: str, max_chunks: int = 8) -> None:
-    """Dump SetGraphicsRoot32BitConstant(s) payloads.
-
-    Payload layout (d3d12_command_list_wrap.cpp Serialise_SetGraphicsRoot32BitConstants):
-      ResourceId pCommandList(u64) | RootParameterIndex(u32) | Num32BitValuesToSet(u32)
-      | arrayCount(u64) | values[Num32BitValuesToSet](u32 each) | DestOffsetIn32BitValues(u32)
-    `SERIALISE_ELEMENT_ARRAY` writes the element count before the values (serialiser.h), so
-    length == 28 + 4*n -- which is used as a sanity check.
-    """
-    _info, stream, _how = load_stream(path)
-    names = load_chunk_names()
-    shown = 0
-    total = 0
-    for idx, ch in enumerate(iter_chunks(stream), 1):
-        nm = names.get(ch['id'], '')
-        if nm not in ('List_SetGraphicsRoot32BitConstants', 'List_SetGraphicsRoot32BitConstant'):
-            continue
-        total += 1
-        if shown >= max_chunks:
-            continue
-        blob = chunk_payload(stream, ch)
-        print('--- chunk #%d @0x%x %s len=%d' % (idx, ch['off'], nm, ch['length']))
-        if nm.endswith('Constants') and ch['length'] >= 28 and (ch['length'] - 28) % 4 == 0:
-            root_param = u32(blob, 8)
-            n = u32(blob, 12)
-            array_count = u64(blob, 16)
-            print('    rootParam=%d numValues=%d destOffset=%d'
-                  % (root_param, n, u32(blob, 24 + n * 4) if 24 + n * 4 + 4 <= len(blob) else -1))
-            if array_count != n:
-                print('    warning: inline arrayCount=%d disagrees with numValues=%d'
-                      % (array_count, n))
-            if 24 + n * 4 <= len(blob):
-                floats = struct.unpack_from('<%df' % n, blob, 24)
-                for k in range(0, n, 8):
-                    print('    +%-3d %s' % (k, ' '.join('%12.5f' % v for v in floats[k:k + 8])))
-        else:
-            print('    hex: %s' % blob[:96].hex())
-        shown += 1
-    print('root-constant chunks total: %d (shown %d)' % (total, shown))
-
-
 def cmd_dump_chunk(path: str, index: int, outfile: str) -> None:
     """Write one chunk's payload verbatim to `outfile`."""
     _info, stream, _how = load_stream(path)
@@ -2491,7 +2257,12 @@ def cmd_dump_chunk(path: str, index: int, outfile: str) -> None:
 
 
 def cmd_dump_shaders(path: str, outdir: str) -> None:
-    """Write every DXIL container plus a reflection summary to disk."""
+    """Write every DXBC/DXIL container to `outdir` as a `.dxil` file plus an index in `shaders.txt`.
+
+    This is the offline route to the D3D12 harness's input (ROADMAP §2) and a way to hand a shader to
+    `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
+    reflection's job, and the reflection is the replay driver's (ROADMAP §1).
+    """
     _info, stream, _how = load_stream(path)
     os.makedirs(outdir, exist_ok=True)
     lines: List[str] = []
@@ -2505,12 +2276,8 @@ def cmd_dump_shaders(path: str, outdir: str) -> None:
         fn = os.path.join(outdir, 'shader_%02d_%s.dxil' % (n, h[:12]))
         with open(fn, 'wb') as f:
             f.write(blob)
-        whole = blob
-        strs = part_strings(whole, 0, len(whole), 4)
-        gi = sorted({s for s in strs if any(k in s for k in GI_SUBSTRINGS)})
         lines.append('shader_%02d  hash=%s  size=%d  parts=%s' % (n, h, size, ','.join(names)))
         lines.append('    file    : %s' % fn)
-        lines.append('    GI vars : %s' % (', '.join(gi) if gi else '(none)'))
     with open(os.path.join(outdir, 'shaders.txt'), 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
     print('wrote %d shader blobs + shaders.txt to %s' % (n, outdir))
@@ -2602,16 +2369,12 @@ def main() -> None:
         cmd_summary(path)
     elif cmd == 'markers':
         cmd_markers(path)
-    elif cmd == 'rootconst':
-        cmd_rootconst(path, _arg(argv, 3, 8))
     elif cmd == 'rootsig':
         cmd_rootsig(path, _arg(argv, 3, 40))
     elif cmd == 'dump-chunk':
         cmd_dump_chunk(path, int(argv[3]), argv[4])
     elif cmd == 'dump-shaders':
         cmd_dump_shaders(path, argv[3])
-    elif cmd == 'report':
-        cmd_report(path)
     elif cmd == 'sections':
         cmd_sections(path)
     elif cmd == 'blocks':
@@ -2629,17 +2392,11 @@ def main() -> None:
     elif cmd == 'dump':
         cmd_dump(path, int(argv[3], 0), int(argv[4], 0), _arg(argv, 5, 4))
     elif cmd == 'dxbc':
-        cmd_dxbc(path, _arg(argv, 3, 0))
+        cmd_dxbc(path)
     elif cmd == 'count':
         cmd_count(path, argv[3:])
     elif cmd == 'hex':
         cmd_hex(path, argv[3], argv[4])
-    elif cmd == 'sig':
-        cmd_sig(path)
-    elif cmd == 'pattern':
-        cmd_pattern(path, argv[3], _arg(argv, 4, 72))
-    elif cmd == 'float':
-        cmd_float(path, argv[3])
     else:
         print(__doc__)
 

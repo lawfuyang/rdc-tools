@@ -6,15 +6,38 @@ is, why it is wanted, how it would be built, and what blocks it.
 Legend: **P0** = do next / unblocks current work · **P1** = high value, moderate effort · **P2** = useful,
 opportunistic · **P3** = nice-to-have.
 
+### What is deliberately *not* on this list
+
+Anything RenderDoc's own **replay engine** answers directly is not tracked as offline work here: the replay
+driver (§1) is the plan for it, and re-deriving it by hand would be building a worse version of a tool that
+already exists. The offline parser's job is what replay is bad at — the container-level, no-device, sub-second
+questions. Removed on those grounds: texture decoding (`GetTextureData` / `SaveTexture`), shader disassembly
+(`GetShader` → `ShaderReflection`), the non-frame `.rdc` sections (`d3d12core`, `d3d12sdklayers` — the engine
+reads them and the API surfaces what is in them), per-instance post-VS data (`GetPostVSData`), full pipeline
+state (`GetPipelineState`), true EID mapping (`SetFrameEvent` and the action list), typed constant-buffer values
+and the `DebugDumpState`-style helpers built on them (`GetCBufferVariableContents`), a per-pass summary (a fold
+over the action list), Vulkan support (replay is API-agnostic), and texture-format identification (which landed
+anyway: `resources` prints the DXGI format and dimensions of every texture).
+
+The same rule was applied to what was already **built**: `float` and `pattern` (searching the raw stream for a
+uniform's *value*), `sig` (decoding vertex signatures), `rootconst` (dumping root-constant values) and `report`
+(an inventory of UE shader/policy strings) were removed, together with the `dxbc`/`dump-shaders` harvest that
+picked GI-ish strings out of containers. Each one was a worse answer to a question `GetCBufferVariableContents`
+or `ShaderReflection` answers exactly. What is left is deliberately offline: the container and the chunk stream,
+`draws`/`resources`/`descriptors`/`rootsig`, the cache, `verify`, and the structural search commands.
+
+The **D3D12 harness** (§2) absorbs nothing: it exists for the one question replay cannot answer — what a shader
+does with inputs the capture does not contain — so no item here is "free with a harness".
+
 Current state for reference: the tool parses the `.rdc` container, decompresses the frame-capture stream
 (LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (README §4.8), walks the
-SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads and the resource table
-(id → kind/size/name, README §4.9), extracts DXBC/DXIL containers with their GI-related reflection strings,
-and can check its own parse (`verify`). 27 commands, see
-`README.md`. Since 2026-09-15 it also has a
-hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright "Standard"
-(`npx --yes pyright@latest`); `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite
-is the safety net for everything below — land the tests with the change, not after it.
+SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the resource table
+(id → kind/size/name, README §4.9), the descriptor heaps (§4.10) and the root signatures (§3.4), inventories
+the DXBC/DXIL containers, and can check its own parse (`verify`).
+22 commands, see `README.md`. Since 2026-09-15 it also has a hermetic unittest suite
+(`python rdc_analysis.py selftest`) and is clean under Pyright "Standard" (`npx --yes pyright@latest`);
+`AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite is the safety net for
+everything below — land the tests with the change, not after it.
 
 ### Environment convention — `renderdoc-src` in the root folder
 
@@ -56,8 +79,7 @@ engine and interrogates the frame programmatically, instead of re-deriving byte 
 **Why.** Every hard problem encountered so far was a *layout guess*: which uniform is bound at root parameter 7,
 how long the `InitialContents` header is, whether a constant buffer's tail is SH or lightmap bias. Replay
 removes that class of problem — the shader reflection supplies the names, and the replay engine supplies the
-values in typed form. It also unlocks things an offline parser cannot do at all: decoded textures, post-VS
-per-instance data, per-event rendered images, and shader patching.
+values in typed form. It also answers, directly, everything the top of this file leaves to it.
 
 **API surface** (verified in `renderdoc/api/replay/renderdoc_replay.h`):
 
@@ -65,7 +87,7 @@ per-instance data, per-event rendered images, and shader patching.
 |---|---|---|
 | `SetFrameEvent(eventId, force)` | 487 | select any draw as the current event |
 | `GetPipelineState()` | 545 | full state at that event |
-| `GetShader(pipeline, shader, entry)` | 893 | `ShaderReflection` — **constant-block names**, sizes, bind points, I/O signatures |
+| `GetShader(pipeline, shader, entry)` | 893 | `ShaderReflection` — **constant-block names**, sizes, bind points, I/O signatures, disassembly |
 | `GetCBufferVariableContents(pipe, shader, stage, entry, cbufslot, buffer, offset, len)` | 1080 | **named** uniform members and their values |
 | `GetStructuredFile()` | 765 | the chunk tree with **typed** parameters (validates the hand-written decoders) |
 | `GetBufferData(buff, offset, len)` | 1114 | buffer contents at any event |
@@ -87,9 +109,11 @@ per-instance data, per-event rendered images, and shader patching.
   * **B.** Write a small C++ driver against `renderdoc.dll` (`RENDERDOC_OpenCaptureFile` →
     `cap.OpenCapture(ReplayOptions, &controller)`), which needs no Python at all and is the more robust option
     for automation.
-* Replay version must be **≥ the capture's file-format version**; both captures in this project are D3D12 from
-  this PC (the "Android" one is the editor's mobile preview), so they replay locally on the same device ✔
-* Budget roughly the capture's resource footprint in memory (mobile: 92 MB buffer + 4 MB ring; PC: 631 MB stream).
+* Replay version must be **≥ the capture's file-format version**; the captures in this project are D3D12 from
+  this PC (the "Android" one is the editor's mobile preview) and the third is a hobby renderer, so they replay
+  locally on the same device ✔
+* Budget roughly the capture's resource footprint in memory (mobile: 92 MB buffer + 4 MB ring; PC: 631 MB
+  stream; hobby: 1.47 GB stream).
 
 **Sketch (Python, option A).**
 
@@ -115,9 +139,12 @@ for var in controller.GetCBufferVariableContents(
     print(var.name, var.value.fv)
 ```
 
-**Deliverables.** `replay_dump.py` (or `.exe`) with sub-commands mirroring the offline tool: `passes`,
-`draws`, `state <eid>`, `cb <eid> <cbufslot>`, `textures <eid>`, `mesh <eid> <instance>`, `image <eid> <out.png>`,
-`counters`, plus `--json` output so results can be diffed.
+**Deliverables.** `replay_dump.py` (or `.exe`) with sub-commands mirroring the offline tool: `passes`, `draws`,
+`state <eid>`, `cb <eid> <cbufslot>` (named values), `textures <eid>` (decoded, `SaveTexture`),
+`mesh <eid> <instance>`, `image <eid> <out.png>`, `shaders <eid>` (reflection + disassembly), `counters`, plus
+`--json` output so results can be diffed. Between them these cover everything this file deliberately leaves to
+replay (see the note at the top), which is the point: they are the reason those items are not tracked as
+offline work.
 
 **Blockers.** Building the Python module (or writing the C++ driver); version match with the capture.
 
@@ -128,7 +155,7 @@ formatting).
 
 ## 2. P0/P1 — D3D12 harness (only for *synthetic inputs*)
 
-**What.** A minimal standalone D3D12 program that creates its own device/PSO/buffers and runs a UE shader (the
+**What.** A minimal standalone D3D12 program that creates its own device/PSO/buffers and runs a shader (the
 DXIL extracted by `dump-shaders`) with constants that we choose.
 
 **Why (and why it is *not* a replacement for replay).** Replay can only re-run the captured commands with the
@@ -151,94 +178,49 @@ with hand-built constants — e.g. feed the mobile base-pass pixel shader the HI
 path in isolation — and even that can often be avoided by patching the shader in replay instead.
 
 **Sketch.** One `ID3D12Device` + a compute-style or full-screen-triangle PSO + a root signature matching the
-shader's bind points; upload a 256-byte constant buffer; dispatch/draw to a small RTV; read back with
-`ReadBackResource`. Inputs: the `.dxil` files from `dump-shaders` and a JSON of uniform values (which the replay
-driver can export directly).
+shader's bind points (the offline tool can now print that layout: `rootsig`, README §4.1); upload a 256-byte
+constant buffer; dispatch/draw to a small RTV; read back with `ReadBackResource`. Inputs: the `.dxil` files from
+`dump-shaders` and a JSON of uniform values (which the replay driver can export directly).
 
-**Blockers.** Needs the shader's exact root signature layout (available from the capture or the replay driver)
-and DXIL compilation to a PSO — `dxc` is available with the UE install.
+**Blockers.** Needs the shader's exact root signature layout (available from the capture — `rootsig` — or the
+replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE install.
 
 **Effort.** ~2–3 days for a single-purpose harness; scope it to one shader at a time.
 
 ---
 
-## 3. P1 — Offline parser gaps
-
-### 3.1 Texture dumping (format decoders)
-**What.** Decode BC1–7, ASTC, and float formats; write PNG/EXR; select mip/slice.
-**Why.** "Which lightmap/VLM brick is actually bound?" is a recurring question; today only raw bytes are
-dumpable.
-**Effort.** ~2–3 days (or delegate entirely to replay's `GetTextureData`/`SaveTexture` — recommended).
-
-### 3.2 Other `.rdc` sections
-**What.** Decompress and index the non-zero sections (init data / resource records) rather than only section 0.
-**Why.** Large captures can keep resource payloads outside the frame-capture stream; today they are invisible.
-**Note (2026-09-15).** Sections 1–2 (`d3d12core`, `d3d12sdklayers`, ~6 MB and ~9 MB uncompressed) are *not*
-readable with the current decoder — the zstd path fails on them — so whatever they hold (device-level init
-records, and maybe descriptor contents) is unreachable today.
-**Effort.** ~half a day.
-
-### 3.3 Shader disassembly
-**What.** Disassemble `ILDN`/`ILDB` bytecode to text, or shell out to `dxc`/`dxil-spirv`.
-**Why.** `dxbc` shows which uniforms a shader reads, but not the code path that consumes them.
-**Effort.** ~1 day if shelling out; much more if implemented in Python.
-
-### 3.4 Per-instance mesh data offline
-**What.** Reconstruct post-VS per-instance data from the instance vertex streams.
-**Why.** This is the "what instance SH did the VS actually emit" question; replay's `GetPostVSData` answers it,
-offline it needs the vertex-factory layout.
-**Effort.** ~2 days; replay is the better route.
-
-### 3.5 Full pipeline state reconstruction
-**What.** Track blend/rasterizer/depth-stencil/render-target state per draw so `draws` can print the complete
-state, not just PSO/CBVs/streams.
-**Effort.** ~1 day.
-
-### 3.6 True EID mapping
-**What.** Map chunk indices to real RenderDoc EIDs (the current assumption "chunk index ≈ EID" holds in the
-captures tested but is not guaranteed).
-**Why.** So output can be cross-referenced with the GUI and the replay API.
-**Effort.** ~half a day (find the EID-assignment chunks/order).
-
----
-
-## 4. P2 — Quality of life
-
-**Promoted to P1 by §6**: the *bundled chunk-name table* (§6.1), which closes the matching README §8 bullet.
+## 3. P2 — Quality of life
 
 * **Bundled chunk-name table** — embed the D3D12/SystemChunk enums (generated from
   `<root>/rdc-tools/renderdoc-src/`) so the tool still prints readable names when the `renderdoc-src` copy is
   absent or when analysing captures made by a different RenderDoc version. Keep the `renderdoc-src` lookup as
   the preferred source, with the bundled table as the fallback. (~2 h)
-* **`--json` / CSV output** for `draws`, `summary`, `dxbc` — makes results diffable and scriptable. (~2 h)
+* **`--json` / CSV output** for `draws`, `summary`, `dxbc` — makes results diffable and scriptable *without
+  loading a device*, which is the offline tool's whole advantage over the replay driver's own `--json`. (~2 h)
 * **Diff two captures** (`diff <a.rdc> <b.rdc>`) — same draw index, what changed in PSO/CBVs/streams. This is
-  the single most valuable feature for A/B investigations like mobile-vs-PC. (~1 day)
+  the single most valuable feature for A/B investigations like mobile-vs-PC, and the offline tool is the right
+  place for it because it needs no device: `draws` now carries the command-list state, resource names,
+  descriptor resolution and the `rpN` type/register annotations, so a diff can say *"rp2 was a compute CBV at b0,
+  now a vertex CBV at b1; `SkyViewLut` left the table"* rather than "the numbers differ". (~1 day)
 * **HTML report generator** — one self-contained page per capture: marker tree, draw table, shader table, CB
   dumps. (~1 day)
-* **UE-specific helpers** — resolve `FShader` hashes to shader type/permutation names, material instance and
-  primitive names, `LightmapType`/`ShouldUseVLM` per primitive, i.e. bring `LM.DebugDumpState`-style data into
-  the capture report. (~1–2 days)
-* **Pass summary** — draw count, triangle count and state changes per pass, so a frame can be triaged in one
-  screen. (~4 h)
-* **Texture-format identification** — at least report the DXGI format and dimensions of every texture. (~2 h)
 
-## 5. P3 — Robustness and scope
+## 4. P3 — Robustness and scope
 
-* **Vulkan support** — the container/framing code is API-agnostic; needs `VulkanChunk` enums plus payload
-  decoders for `vkCmdDraw*`, descriptor sets, etc. (~3–5 days)
 * **Zstd without the dependency** — either vendor a decoder or fail with a clear message (today it needs
   `pip install zstandard`). (~4 h)
-* **Golden output files for the decoders** — snapshot `summary` / `draws` / `dxbc` output per capture and
+* **Golden output files for the decoders** — snapshot `summary` / `draws` / `rootsig` output per capture and
   diff it on every run, so a decoder change shows up as a reviewable diff instead of a silent drift. (~2 h)
-* **Memory-mapped stream access** — avoid holding ~650 MB in RAM for the largest captures. (~4 h)
+* **Memory-mapped stream access** — avoid holding ~1.5 GB in RAM for the largest captures. (~4 h)
 * **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
   (~1 h)
 
 ---
 
-## 6. Clear README §8 ("Pitfalls and known limitations")
+## 5. Clear README §8 ("Pitfalls and known limitations")
 
-One entry per bullet in README §8, with the change that closes it and the gate that proves it is closed.
+One entry per bullet in README §8 that is *not* left to replay (see the note at the top), with the change that
+closes it and the gate that proves it is closed.
 
 **"Resolved" means** the bullet is deleted from README §8, the `CHARACTERIZATION` tests that pinned the old
 behaviour are replaced by tests of the *correct* behaviour, and every doc that described the limitation is
@@ -247,38 +229,22 @@ never silent ones).
 
 | # | README §8 bullet | Plan | Priority | Effort |
 |---|---|---|---|---|
-| 6.1 | Chunk names need `renderdoc-src` | §4 bundled chunk-name table | P1 | ~2 h |
-| 6.2 | Only section 0 is decompressed | §3.2 other `.rdc` sections | P1 | ~4 h |
-| 6.3 | No name resolution for root parameters | §1 replay (the offline decode landed: `rpN` is typed and registered now) | P2 | free with replay |
-| 6.4 | No texture decoding | §3.1 (+ §1 replay) | P1 | 2–3 d |
-| 6.5 | No shader disassembly | §3.3 | P2 | ~1 d |
-
-**Order:** 6.1 is the last cheap environment dependency and 6.2 unblocks the extra sections; 6.3, 6.4 and 6.5
-are what replay (§1) answers directly, so attempt them offline only if replay is still blocked.
-
----
+| 5.1 | Chunk names need `renderdoc-src` | §3 bundled chunk-name table | P2 | ~2 h |
 
 ### Acceptance gates
 
-* **6.1** (§4 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
+* **5.1** (§3 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
   newer than the tree; the table is generated by a checked-in script and carries its RenderDoc version; the
   §1.1 warning becomes "using bundled names for RenderDoc X".
-* **6.2** (§3.2): `sections` reports every section's decompressed size and first bytes; a `section <name>`
-  command can dump any of them; section 0 behaviour unchanged.
-* **6.3** (§1): every `rpN` in `draws` carries a name from the shader reflection. The offline half landed —
-  `draws` prints what each parameter *is* (type, register, space, visibility) and the wrong conclusion recorded
-  in README §9 can no longer be reached from the output alone — but a *name* needs replay, because these
-  captures strip the reflection (README §8).
-* **6.4** (§3.1): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
-* **6.5** (§3.3): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
 
 ---
 
-## 7. Suggested order
+## 6. Suggested order
 
-1. **README §8 fixes** (§6) — 6.1 is a cheap environment win, 6.2 improves offline output.
-2. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data, and
-   is the cheap route through §6.3, §6.4 and §6.5.
-3. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
-4. **Bundled chunk names** (§4, = §6.1) — remove the last environment dependency.
+1. **Replay driver** (§1) — the big unblock: it answers the whole list at the top of this file, so every day
+   spent on an offline version of one of those items is a day spent twice.
+2. **Bundled chunk names** (§3, = §5.1) — ~2 h, removes the last environment dependency and closes the last
+   README §8 bullet that is not replay's job.
+3. **Golden output files** (§4) — ~2 h, the regression gate that makes the next big change safe.
+4. **Diff two captures** (§3) — ~1 day, the highest-value new offline feature, and offline is where it belongs.
 5. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.

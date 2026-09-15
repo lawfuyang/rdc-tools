@@ -23,6 +23,7 @@ Usage:
   python rdc_analysis.py rootconst <rdc> [maxChunks]
   python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
   python rdc_analysis.py dump-shaders <rdc> <outdir>
+  python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 """
 import os
 import re
@@ -1000,7 +1001,59 @@ def cmd_dump_shaders(path, outdir):
     print('wrote %d shader blobs + shaders.txt to %s' % (n, outdir))
 
 
+def _filter_suite(suite, patterns):
+    """Keep only the tests whose id contains one of `patterns` (like `unittest -k`)."""
+    import unittest
+    out = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            out.addTest(_filter_suite(test, patterns))
+        elif any(p in test.id() for p in patterns):
+            out.addTest(test)
+    return out
+
+
+def cmd_selftest(args=None):
+    """Run the unit-test suite in the `tests` folder next to this file.
+
+    Extra arguments: `-v` for verbose, `-k <substring>` to run matching tests only.
+    Returns a process exit code (0 = all passed).
+    """
+    import unittest
+    args = list(args or [])
+    verbosity, patterns, unknown = 1, [], []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ('-v', '--verbose'):
+            verbosity = 2
+        elif a in ('-q', '--quiet'):
+            verbosity = 1
+        elif a in ('-k', '--pattern') and i + 1 < len(args):
+            i += 1
+            patterns.append(args[i])
+        else:
+            unknown.append(a)
+        i += 1
+    if unknown:
+        print('usage: rdc_analysis.py selftest [-v] [-k <substring>]')
+        return 2
+    here = os.path.dirname(os.path.abspath(__file__))
+    tests_dir = os.path.join(here, 'tests')
+    if not os.path.isdir(tests_dir):
+        print('no tests folder next to %s (expected %s)' % (os.path.basename(__file__), tests_dir))
+        return 1
+    print('running tests from %s' % tests_dir)
+    suite = unittest.TestLoader().discover(tests_dir, pattern='test_*.py', top_level_dir=tests_dir)
+    if patterns:
+        suite = _filter_suite(suite, patterns)
+    result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ('test', 'selftest'):
+        sys.exit(cmd_selftest(sys.argv[2:]))
     if len(sys.argv) < 3:
         print(__doc__)
         return

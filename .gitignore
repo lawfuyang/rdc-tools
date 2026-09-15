@@ -1,3 +1,5 @@
 .codebuddy/
 .vscode/
 renderdoc-src/
+*.pyc
+*.log

@@ -22,6 +22,7 @@ rdc-tools/
   rdc_analysis.py     the tool (single file, ~1000 lines)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
+  tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
 ```
 
 ---
@@ -308,6 +309,29 @@ Because the `InitialContents` header length is not constant across resource type
 scanning candidate header sizes (8…200, step 4) and scoring each against the known SingleProbe ILC signature;
 the chosen header and its score are printed so the guess is visible, never silent.
 
+### 4.6 Tests
+
+`tests/` holds a self-contained unittest suite (~280 tests) covering every parser, decoder, command and the
+CLI dispatch. It needs **no capture file, no GPU, no `renderdoc.pyd` and no `renderdoc-src` checkout**: the
+fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and DXBC containers in memory
+(`tests/rdc_fixtures.py`), and the chunk-name map is stubbed with a fake enum tree.
+
+| Command | Effect |
+|---|---|
+| `python rdc_analysis.py selftest` | run the whole suite (`test` is an alias) |
+| `python rdc_analysis.py selftest -v` | per-test output |
+| `python rdc_analysis.py selftest -k Draws` | only tests whose id contains `Draws` |
+| `python tests/test_rdc_analysis.py` | parsers and decoders only |
+| `python tests/test_rdc_commands.py` | commands and CLI dispatch only |
+| `python -m unittest discover -s tests -t tests` | the same suite through unittest |
+
+Exit code is 0 when everything passes, 1 on failure, 2 for a bad option.
+
+Two integration tests are skipped unless a real capture is pointed at them
+(`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'`); a third class parses the real `renderdoc-src` enums and
+is skipped when the tree is absent. Tests that pin behaviour which looks wrong are marked
+`CHARACTERIZATION` in the source, so a deliberate fix does not read as a regression.
+
 ---
 
 ## 5. Worked examples
@@ -451,6 +475,18 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
   produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
   works — only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed.
+* **Strings shorter than 6 characters are invisible.** `STR_RE` only matches runs of 6+ printable bytes, so
+  `chunk_strings` / `part_strings` silently drop anything shorter: marker names under 6 characters print as
+  `?` in `markers` / `summary` / `draws`, and passing a `minlen` below 6 has no effect. `dxbc` and `sig`
+  inherit the same floor.
+* **Two consumers of the same chunk can disagree.** `draws` reads the 28-byte
+  `List_SetGraphicsRootConstantBufferView` payload as `(rootParam, resId, offset)`, while `chunk` /
+  `decode_chunk` read the same bytes as `(rootParam, VA)` — labelling the resource id as a VA. For
+  `List_IASetIndexBuffer`, `draws` uses the 32-byte form while `decode_chunk` reads `size` / `format` 8 bytes
+  earlier. For `List_SetGraphicsRoot32BitConstants`, `rootconst` assumes `length == 20 + 4n`, but
+  `SERIALISE_ELEMENT_ARRAY` writes a `u64` element count before the values (`serialiser.h`), i.e. `28 + 4n` —
+  so its values and dest offset come out 8 bytes early. The tests pin the current offsets and mark them
+  `CHARACTERIZATION`.
 * **`InitialContents` header is heuristic.** The data start is inferred by signature scoring and the chosen
   header is printed; it is validated for buffers in the captures tested but is not a general solution.
 * **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be
@@ -464,28 +500,7 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 * **Performance.** Decompression is single-threaded Python LZ4 (~2–4 s for 374 MB). Fine for interactive use,
   not for batch processing hundreds of captures.
 
----
-
-## 9. Case study — the black-spheres GI investigation
-
-The tool was built to chase "baked GI renders black on instanced meshes" in a UE5 fork. What it established:
-
-* The mobile base pass contains **two groups of five sphere draws**, distinguished by PSO (3042 vs 3048) and by
-  vertex streams: one group has a per-draw 40-byte-stride instance stream, the other a **NULL 6th stream**.
-* The two groups bind **different per-primitive constant buffers at root parameter 7** — one group's buffer tail
-  is zeroed, the other's holds real values.
-* Every buffer in the capture matching the ILC uniform layout has **zeroed SH**, and the one that was resolved
-  precisely is **not bound by any base-pass draw in that frame**.
-* No shader in the capture contains a per-instance SH code path (`USE_INSTANCED_SH_COEFFICIENTS` is never
-  defined), and the PC capture's pixel shaders reference the VLM textures instead.
-
-It also produced a correction: an early claim that rp7 *was* the ILC uniform was withdrawn after the layout was
-checked — the tool's job is to make that check cheap, and the docs in the investigation folder record both the
-claim and the retraction.
-
----
-
-## 10. See also
+## 9. See also
 
 * `ROADMAP.md` — features not implemented yet, including the **replay driver** and the **D3D12 harness**.
 * RenderDoc source, expected at `<root>/rdc-tools/renderdoc-src/` (§1.1). The files this tool and its docs rely

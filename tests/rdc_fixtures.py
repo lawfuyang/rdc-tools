@@ -214,8 +214,13 @@ def pl_root_view(cmdlist: int, root_param: int, resid: int, offset: int) -> byte
     return u64b(cmdlist) + u32b(root_param) + u64b(resid) + u64b(offset)
 
 
-def pl_root_table(cmdlist: int, root_param: int, gpu_handle: int) -> bytes:
-    return u64b(cmdlist) + u32b(root_param) + u64b(gpu_handle)
+def pl_root_table(cmdlist: int, root_param: int, heap: int, index: int) -> bytes:
+    """cmdList | rootParam | PortableHandle(heapId u64, descriptorIndex u32) = 24 bytes.
+
+    A `D3D12_GPU_DESCRIPTOR_HANDLE` serialises as a `PortableHandle` (d3d12_manager.h), not as a
+    raw pointer.
+    """
+    return u64b(cmdlist) + u32b(root_param) + u64b(heap) + u32b(index)
 
 
 def pl_root_signature(cmdlist: int, rootsig: int) -> bytes:
@@ -263,15 +268,6 @@ def pl_32bit_constant(cmdlist: int, root_param: int, value: int, dest_offset: in
 
 def pl_create_pso(pso_id: int, tail: bytes = b'\xAB\xCD' * 16) -> bytes:
     return u64b(pso_id) + tail
-
-
-def pl_initial_contents(resid: int, data: bytes, hdr_filler: int = 48,
-                        total_len: Optional[int] = None, filler_byte: int = 0x00) -> bytes:
-    """[u64 resourceId][header filler][data]; cmd_initial scans header sizes 8..200 step 4."""
-    blob = u64b(resid) + bytes([filler_byte]) * hdr_filler + data
-    if total_len is not None and len(blob) < total_len:
-        blob += bytes([filler_byte]) * (total_len - len(blob))
-    return blob
 
 
 SINGLEPROBE_SIG = f32b(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)

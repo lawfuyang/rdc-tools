@@ -8,8 +8,8 @@ opportunistic · **P3** = nice-to-have.
 
 Current state for reference: the tool parses the `.rdc` container, decompresses the frame-capture stream
 (LZ4 in-file, Zstd optional), walks the SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer
-payloads, extracts DXBC/DXIL containers with their GI-related reflection strings, and can read a resource's
-`InitialContents` by `(resourceId, byteOffset)`. 23 commands, see `README.md`. Since 2026-09-15 it also has a
+payloads, extracts DXBC/DXIL containers with their GI-related reflection strings, and can check its own parse
+(`verify`). 22 commands, see `README.md`. Since 2026-09-15 it also has a
 hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright "Standard"
 (`npx --yes pyright@latest`); `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite
 is the safety net for everything below — land the tests with the change, not after it.
@@ -180,6 +180,9 @@ together — and replay (item 1) answers it directly.
 descriptor-table root bindings, so SRV/UAV/CBV tables can be resolved to resources.
 **Why.** Many UE bindings are descriptor tables, not root CBVs; without this, only root-bound resources are
 visible.
+**Found 2026-09-15** (`verify`): every `List_SetGraphicsRootDescriptorTable` payload is 24 bytes, because the
+GPU handle serialises as a `PortableHandle` (`u64 heapId, u32 descriptorIndex`, `d3d12_manager.h`). The binding
+therefore already names the heap and the index; this item is about resolving that pair to resources.
 **Effort.** ~1 day (descriptor increments, heap types, per-range mapping).
 
 ### 3.3 Resource table (id → name / type / description)
@@ -188,40 +191,34 @@ visible.
 **Why.** `draws` currently speaks only in numeric resource ids, which makes cross-referencing painful.
 **Effort.** ~half a day.
 
-### 3.4 Generalised `InitialContents` parsing
-**What.** Parse the resource/subresource description properly instead of scoring candidate header sizes.
-**Why.** `initial` currently guesses the data start; a real parse removes the guess and enables mip/slice
-selection for textures.
-**Effort.** ~half a day (read `Serialise_InitialState` in the D3D12 resource manager).
-
-### 3.5 Texture dumping (format decoders)
+### 3.4 Texture dumping (format decoders)
 **What.** Decode BC1–7, ASTC, and float formats; write PNG/EXR; select mip/slice.
 **Why.** "Which lightmap/VLM brick is actually bound?" is a recurring question; today only raw bytes are
 dumpable.
 **Effort.** ~2–3 days (or delegate entirely to replay's `GetTextureData`/`SaveTexture` — recommended).
 
-### 3.6 Other `.rdc` sections
+### 3.5 Other `.rdc` sections
 **What.** Decompress and index the non-zero sections (init data / resource records) rather than only section 0.
 **Why.** Large captures can keep resource payloads outside the frame-capture stream; today they are invisible.
 **Effort.** ~half a day.
 
-### 3.7 Shader disassembly
+### 3.6 Shader disassembly
 **What.** Disassemble `ILDN`/`ILDB` bytecode to text, or shell out to `dxc`/`dxil-spirv`.
 **Why.** `dxbc` shows which uniforms a shader reads, but not the code path that consumes them.
 **Effort.** ~1 day if shelling out; much more if implemented in Python.
 
-### 3.8 Per-instance mesh data offline
+### 3.7 Per-instance mesh data offline
 **What.** Reconstruct post-VS per-instance data from the instance vertex streams.
 **Why.** This is the "what instance SH did the VS actually emit" question; replay's `GetPostVSData` answers it,
 offline it needs the vertex-factory layout.
 **Effort.** ~2 days; replay is the better route.
 
-### 3.9 Full pipeline state reconstruction
+### 3.8 Full pipeline state reconstruction
 **What.** Track blend/rasterizer/depth-stencil/render-target state per draw so `draws` can print the complete
 state, not just PSO/CBVs/streams.
 **Effort.** ~1 day.
 
-### 3.10 True EID mapping
+### 3.9 True EID mapping
 **What.** Map chunk indices to real RenderDoc EIDs (the current assumption "chunk index ≈ EID" holds in the
 captures tested but is not guaranteed).
 **Why.** So output can be cross-referenced with the GUI and the replay API.
@@ -231,8 +228,8 @@ captures tested but is not guaranteed).
 
 ## 4. P2 — Quality of life
 
-**Promoted to P1 by §6** (these two close README §8 bullets): the *bundled chunk-name table* (§6.3) and
-*parallel / cached decompression* (§6.10).
+**Promoted to P1 by §6** (these two close README §8 bullets): the *bundled chunk-name table* (§6.1) and
+*parallel / cached decompression* (§6.7).
 
 * **Bundled chunk-name table** — embed the D3D12/SystemChunk enums (generated from
   `<root>/rdc-tools/renderdoc-src/`) so the tool still prints readable names when the `renderdoc-src` copy is
@@ -262,13 +259,13 @@ captures tested but is not guaranteed).
   diff it on every run, so a decoder change shows up as a reviewable diff instead of a silent drift. (~2 h)
 * **Memory-mapped stream access** — avoid holding ~650 MB in RAM for the largest captures. (~4 h)
 * **`draws` state fidelity** — track state per PSO properly (and root-signature-aware), so inherited bindings
-  are reported instead of omitted. (~4 h) — this is §6.7, and closes the matching README §8 bullet.
+  are reported instead of omitted. (~4 h) — this is §6.4, and closes the matching README §8 bullet.
 * **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
   (~1 h)
 
 ---
 
-## 6. P0 — Clear README §8 ("Pitfalls and known limitations")
+## 6. Clear README §8 ("Pitfalls and known limitations")
 
 One entry per bullet in README §8, with the change that closes it and the gate that proves it is closed.
 
@@ -277,111 +274,47 @@ behaviour are replaced by tests of the *correct* behaviour, and every doc that d
 updated in the same change (AGENTS.md: behaviour is the contract, so these are deliberate, tested fixes —
 never silent ones).
 
-Two bullets had no home elsewhere in this file and are planned in full below; the rest already have a plan,
-so §6 only states the acceptance gate for them.
-
 | # | README §8 bullet | Plan | Priority | Effort |
 |---|---|---|---|---|
-| 6.1 | Payload offset: never assume `+8` | new, below | P0 | ~3 h |
-| 6.2 | Alignment padding is garbage | new, below | P0 | ~2 h |
-| 6.3 | Chunk names need `renderdoc-src` | §4 bundled chunk-name table | P1 | ~2 h |
-| 6.4 | Only section 0 is decompressed | §3.6 other `.rdc` sections | P1 | ~4 h |
-| 6.5 | `InitialContents` header is heuristic | §3.4 generalised `InitialContents` | P1 | ~4 h |
-| 6.6 | No name resolution for root parameters | §3.1 (+ §1 replay) | P1 | ~4 h, or free with replay |
-| 6.7 | `draws` state tracking is a heuristic | §5 `draws` state fidelity | P1 | ~4 h |
-| 6.8 | No texture decoding | §3.5 (+ §1 replay) | P1 | 2–3 d |
-| 6.9 | No shader disassembly | §3.7 | P2 | ~1 d |
-| 6.10 | Performance: single-threaded LZ4 | §4 parallel / cached decompression | P1 | ~4 h |
+| 6.1 | Chunk names need `renderdoc-src` | §4 bundled chunk-name table | P1 | ~2 h |
+| 6.2 | Only section 0 is decompressed | §3.5 other `.rdc` sections | P1 | ~4 h |
+| 6.3 | No name resolution for root parameters | §3.1 (+ §1 replay) | P1 | ~4 h, or free with replay |
+| 6.4 | `draws` state tracking is a heuristic | §5 `draws` state fidelity | P1 | ~4 h |
+| 6.5 | No texture decoding | §3.4 (+ §1 replay) | P1 | 2–3 d |
+| 6.6 | No shader disassembly | §3.6 | P2 | ~1 d |
+| 6.7 | Performance: single-threaded LZ4 | §4 parallel / cached decompression | P1 | ~4 h |
 
-**Order:** 6.1/6.2 first (make the failure modes loud), then the two environment dependencies (6.3, 6.10),
-then 6.4. The remaining items (6.5–6.9) are the ones replay (§1) answers directly, so they should be
-attempted offline only if replay is still blocked.
+**Order:** 6.1 and 6.7 are the two environment dependencies and are cheap; 6.2 unblocks the extra sections;
+6.4 is the biggest offline output-quality win. 6.3, 6.5 and 6.6 are what replay (§1) answers directly, so
+attempt them offline only if replay is still blocked.
 
 ---
 
-### 6.1 Payload offset — make the wrong slice impossible to write
+### Acceptance gates
 
-**What.** `ChunkInfo.data` (the payload offset) becomes `ChunkInfo.payload_offset`, `chunk_payload()` stays the
-only supported accessor, and a new `verify` command re-walks a stream and reports every frame that cannot be
-true instead of silently stopping at it.
-
-**Why.** The original bogus "PSO id" came from reading chunk metadata as payload; today a hand-written
-`stream[ch['off'] + 8 : ...]` still produces plausible numbers. Renaming the key turns that mistake into an
-`AttributeError`/`KeyError` at the point of the bug, and `verify` turns a truncated or corrupt stream into an
-explicit report rather than a short chunk list.
-
-**How.**
-* Rename the key in `iter_chunks`, `chunk_payload`, `chunk_strings`, `cmd_*` and `tests/rdc_fixtures.py`
-  (mechanical; nothing outside the repo reads it).
-* Add `verify` (and `iter_chunks(..., strict=True)`): for every chunk check `data - off >= 8`,
-  `data + length <= len(stream)`, `off % 64 == 0` for all but the first chunk, and that the next chunk starts
-  at `align_up(data + length)`. Print a table of problems with offsets; exit non-zero when any are found.
-* Keep the current lenient behaviour for the default walk (a capture with trailing garbage must still analyse),
-  and keep `test_length_past_end_stops` as the test for it.
-* Architecture test: assert no function in `rdc_analysis.py` other than `iter_chunks` slices the stream using
-  `['off']` arithmetic (a small AST scan over the module source in `tests/test_rdc_analysis.py`).
-
-**Acceptance.** `python rdc_analysis.py verify <capture.rdc>` reports 0 problems on both real captures; new
-tests cover each problem class (short frame, length past end, misaligned start, payload running into the next
-chunk); the architecture test passes; README §8 bullet deleted and §3.3/§6 reworded to "the offset is
-validated by `verify`".
-
-**Effort.** ~3 h.
-
----
-
-### 6.2 Alignment padding — surface it instead of warning about it
-
-**What.** Report the padding explicitly so nobody has to remember it exists: `verify` lists non-zero padding
-runs per chunk (they are stale capture-buffer bytes, not data), and the padding is exposed from `iter_chunks`.
-
-**Why.** README §8 warns that padding can contain stale bytes; nothing today shows where, so a decoder that
-reads past `length` sees plausible garbage. Making it visible is what turns the warning into a checkable fact.
-
-**How.** Extend the yielded record with `pad_start`/`pad_len` (or add `iter_chunk_padding(stream)`), have
-`verify` print the number of non-zero padding bytes per chunk plus a hex sample of the first non-zero run, and
-add a regression test that `chunk_payload()` never returns padding when a payload ends exactly on a 64-byte
-boundary.
-
-**Acceptance.** Unit tests for zero and non-zero padding; `verify` output on both real captures; README §8
-bullet deleted, with the fact kept as a note in §3.3 ("padding is stale buffer content; `verify` reports it").
-
-**Effort.** ~2 h.
-
----
-
-### 6.3–6.10 Acceptance gates for the cross-referenced items
-
-* **6.3** (§4 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
+* **6.1** (§4 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
   newer than the tree; the table is generated by a checked-in script and carries its RenderDoc version; the
   §1.1 warning becomes "using bundled names for RenderDoc X".
-* **6.4** (§3.6): `sections` reports every section's decompressed size and first bytes; a `section <name>`
+* **6.2** (§3.5): `sections` reports every section's decompressed size and first bytes; a `section <name>`
   command can dump any of them; section 0 behaviour unchanged.
-* **6.5** (§3.4): `initial` no longer scores candidate headers — the data start is parsed from the serialised
-  resource description, and the printed header offset matches a replay-verified value on both captures.
-  **Observed 2026-09-15:** on `PC Renderer.rdc` (res 61556) and `Android Renderer.rdc` (res 302) the current
-  scan scores only the zero-only 6/12 partial match and settles on the first candidate (header 8/24), so the
-  floats it prints are header bytes (zeros and `nan`). The heuristic does not transfer to these captures —
-  this item is a prerequisite for trusting `initial` on them.
-* **6.6** (§3.1 + §1): every `rpN` in `draws` carries a name (from `RDEF`/reflection) or is explicitly
+* **6.3** (§3.1 + §1): every `rpN` in `draws` carries a name (from `RDEF`/reflection) or is explicitly
   marked unnamed; the wrong conclusion recorded in README §9 can no longer be reached from the output alone.
-* **6.7** (§5): a draw that inherits bindings from earlier in the frame reports them; add a regression test
+* **6.4** (§5): a draw that inherits bindings from earlier in the frame reports them; add a regression test
   built from a synthetic stream with a CBV bound 3 draws earlier.
-* **6.8** (§3.5): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
-* **6.9** (§3.7): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
-* **6.10** (§4 caching): repeated commands on the same capture are instant; `sections`-only commands stay
+* **6.5** (§3.4): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
+* **6.6** (§3.6): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
+* **6.7** (§4 caching): repeated commands on the same capture are instant; `sections`-only commands stay
   instant; peak RSS does not grow with the cache.
 
 ---
 
 ## 7. Suggested order
 
-1. **README §8 fixes** (§6) — 6.1/6.2 make the failure modes loud, then the rest is a mix of cheap wins and
-   items replay supersedes.
+1. **README §8 fixes** (§6) — 6.1/6.7 are cheap environment wins, 6.2 and 6.4 improve offline output.
 2. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data, and
-   is the cheap route through §6.5–§6.9.
+   is the cheap route through §6.3, §6.5 and §6.6.
 3. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
 4. **Root signature / descriptor decode** (§3.1, §3.2) and **resource table** (§3.3) — make the offline output
    self-explanatory (skip §3.1 if replay landed first).
-5. **Bundled chunk names + caching** (§4, = §6.3/§6.10) — remove the two environment dependencies.
+5. **Bundled chunk names + caching** (§4, = §6.1/§6.7) — remove the two environment dependencies.
 6. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.

@@ -12,15 +12,25 @@ readable content (D3D12: resource names, shader debug names, cbuffer reflection 
 
 Usage:
   python rdc_analysis.py sections <rdc>
-  python rdc_analysis.py strings  <rdc> [minlen] [maxlines]
-  python rdc_analysis.py grep     <rdc> <pattern> [context]
-  python rdc_analysis.py names    <rdc> [minlen]
-  python rdc_analysis.py float    <rdc> <value> [tol]
-  python rdc_analysis.py blocks   <rdc>          # LZ4/zstd block accounting
-  python rdc_analysis.py chunks   <rdc> [limit] [nameFilter]
+  python rdc_analysis.py blocks   <rdc>          # per-section compression accounting
+  python rdc_analysis.py verify   <rdc>          # framing/padding/payload checks, exit 1 on problems
   python rdc_analysis.py summary  <rdc>
   python rdc_analysis.py markers  <rdc>
+  python rdc_analysis.py chunks   <rdc> [limit] [nameFilter]
+  python rdc_analysis.py chunk    <rdc> <chunkIndex>
+  python rdc_analysis.py draws    <rdc> [maxDraws]
   python rdc_analysis.py rootconst <rdc> [maxChunks]
+  python rdc_analysis.py strings  <rdc> [minlen] [maxlines]
+  python rdc_analysis.py names    <rdc> [minlen]
+  python rdc_analysis.py grep     <rdc> <pattern> [context]
+  python rdc_analysis.py dump     <rdc> <start> <length> [minlen]
+  python rdc_analysis.py count    <rdc> <pattern> [pattern ...]
+  python rdc_analysis.py hex      <rdc> <start> <length>
+  python rdc_analysis.py float    <rdc> <value>
+  python rdc_analysis.py pattern  <rdc> <f0,f1,...> [count]
+  python rdc_analysis.py report   <rdc>
+  python rdc_analysis.py dxbc     <rdc> [verbose]
+  python rdc_analysis.py sig      <rdc>
   python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
   python rdc_analysis.py dump-shaders <rdc> <outdir>
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
@@ -32,7 +42,7 @@ import re
 import struct
 import sys
 import unittest
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple, TypedDict, Union, cast
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple, TypedDict, Union
 
 ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
 STR_RE = re.compile(rb'[\x20-\x7e]{6,}')
@@ -84,14 +94,18 @@ class CaptureInfo(TypedDict):
 class ChunkInfo(TypedDict):
     """One framed SDChunk.
 
-    `off` is the chunk start and `data` is the payload offset *after* the per-chunk metadata
-    (36 bytes in for the usual flags, see README 3.3) -- never assume `off + 8`.
+    `off` is the chunk start and `payload_offset` is where the payload begins, *after* the per-chunk
+    metadata (36 bytes in for the usual flags, see README 3.3) -- never assume `off + 8`. The
+    payload is `length` bytes at `payload_offset`; `pad_start`/`pad_len` describe the 64-byte
+    alignment padding after it (stale buffer bytes, not data -- see `check_stream`).
     """
     off: int
     id: int
     flags: int
     length: int
-    data: int
+    payload_offset: int
+    pad_start: int
+    pad_len: int
 
 
 #: One part of a DXBC/DXIL container: `(fourcc, offset, length)`. `offset` is absolute, past the
@@ -770,6 +784,22 @@ _SRC_WARNED = False
 DRAW_CHUNKS = ('List_DrawIndexedInstanced', 'List_DrawInstanced', 'List_Dispatch',
                'List_ExecuteIndirect')
 
+#: Payload lengths the decoders expect for the chunks with a fixed layout, used as a checksum by
+#: `verify` (README 3.4: "chunk length is a checksum for your decoder"). Chunks carrying arrays or
+#: variable-length data are deliberately absent.
+EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
+    'List_SetPipelineState': (16,),
+    'List_DrawIndexedInstanced': (28,),
+    'List_DrawInstanced': (24,),
+    'List_Dispatch': (20,),
+    'List_SetGraphicsRootSignature': (16,),
+    'List_SetGraphicsRootDescriptorTable': (24,),
+    'List_SetGraphicsRootConstantBufferView': (28,),
+    'List_SetGraphicsRootShaderResourceView': (28,),
+    'List_SetGraphicsRootUnorderedAccessView': (28,),
+    'List_IASetIndexBuffer': (9, 33),      # 9 = null view, 33 = present flag + view
+}
+
 #: `align_up`'s default (kept as a module constant so callers can name it).
 ALIGN_UP_DEFAULT = CHUNK_ALIGN
 
@@ -836,39 +866,79 @@ def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: str = 'D3D12') -> Di
     return names
 
 
-def iter_chunks(stream: bytes, limit: int = 0) -> Iterator[ChunkInfo]:
-    """Yield one `ChunkInfo` per framed SDChunk in `stream` (see the framing note above)."""
+class FrameError(Exception):
+    """A chunk frame that cannot be true -- raised by `iter_chunks(strict=True)`, collected by
+    `check_stream()`. The default walk stops at such a frame instead (see `iter_chunks`)."""
+
+
+def _read_frame(stream: bytes, pos: int) -> Optional[Tuple[ChunkInfo, int]]:
+    """Parse the frame at `pos`: return `(chunk, next_pos)`, or None at the end of the stream.
+
+    Raises `FrameError` when the frame claims bytes the stream does not hold (truncated metadata or
+    a payload that runs past the end). `ChunkInfo.pad_start`/`pad_len` describe the 64-byte
+    alignment padding that follows the payload; for the last chunk that padding may be absent from
+    the stream, so callers must clamp with `min(pad_len, len(stream) - pad_start)`.
+    """
+    start = pos
+    c = u32(stream, pos)
+    pos += 4
+    cid = c & 0xFFFF
+    if cid == 0:
+        return None
+    if c & CHUNK_CALLSTACK:
+        num = u32(stream, pos)
+        pos += 4 + num * 8
+    if c & CHUNK_THREADID:
+        pos += 8
+    if c & CHUNK_DURATION:
+        pos += 8
+    if c & CHUNK_TIMESTAMP:
+        pos += 8
+    if c & CHUNK_64BITSIZE:
+        if pos + 8 > len(stream):
+            raise FrameError('chunk @0x%x (id %d): metadata runs past the end of the stream'
+                             % (start, cid))
+        ln = u64(stream, pos)
+        pos += 8
+    else:
+        if pos + 4 > len(stream):
+            raise FrameError('chunk @0x%x (id %d): metadata runs past the end of the stream'
+                             % (start, cid))
+        ln = u32(stream, pos)
+        pos += 4
+    if ln > len(stream) - pos:
+        raise FrameError('chunk @0x%x (id %d): payload of %d bytes runs %d past the end of the stream'
+                         % (start, cid, ln, ln - (len(stream) - pos)))
+    pad_start = pos + ln
+    chunk: ChunkInfo = {'off': start, 'id': cid, 'flags': c & 0xFFFF0000, 'length': ln,
+                        'payload_offset': pos, 'pad_start': pad_start,
+                        'pad_len': align_up(pad_start) - pad_start}
+    return chunk, align_up(pad_start)
+
+
+def iter_chunks(stream: bytes, limit: int = 0, strict: bool = False) -> Iterator[ChunkInfo]:
+    """Yield one `ChunkInfo` per framed SDChunk in `stream` (see the framing note above).
+
+    The walk is lenient by default: a frame that cannot be true ends the iteration, which is what a
+    capture with trailing garbage needs. With `strict=True` such a frame raises `FrameError`
+    instead; `check_stream()` reports *all* of them rather than stopping at the first.
+    """
     pos = 0
     n = 0
     while pos + 4 <= len(stream):
-        start = pos
-        c = u32(stream, pos)
-        pos += 4
-        cid = c & 0xFFFF
-        if cid == 0:
-            break
-        if c & CHUNK_CALLSTACK:
-            num = u32(stream, pos)
-            pos += 4 + num * 8
-        if c & CHUNK_THREADID:
-            pos += 8
-        if c & CHUNK_DURATION:
-            pos += 8
-        if c & CHUNK_TIMESTAMP:
-            pos += 8
-        if c & CHUNK_64BITSIZE:
-            ln = u64(stream, pos)
-            pos += 8
-        else:
-            ln = u32(stream, pos)
-            pos += 4
-        if ln > len(stream) - pos:
-            break
-        yield {'off': start, 'id': cid, 'flags': c & 0xFFFF0000, 'length': ln, 'data': pos}
-        pos = align_up(pos + ln)
+        try:
+            frame = _read_frame(stream, pos)
+        except FrameError:
+            if strict:
+                raise
+            return
+        if frame is None:
+            return
+        ch, pos = frame
+        yield ch
         n += 1
         if limit and n >= limit:
-            break
+            return
 
 
 def chunk_strings(stream: bytes, ch: ChunkInfo, minlen: int = 4, limit: int = 6) -> List[str]:
@@ -886,7 +956,77 @@ def chunk_strings(stream: bytes, ch: ChunkInfo, minlen: int = 4, limit: int = 6)
 
 def chunk_payload(stream: bytes, ch: ChunkInfo) -> bytes:
     """The payload bytes of a chunk (use this, never `off + 8`)."""
-    return stream[ch['data']:ch['data'] + ch['length']]
+    return stream[ch['payload_offset']:ch['payload_offset'] + ch['length']]
+
+
+def check_stream(stream: bytes, names: Optional[Dict[int, str]] = None,
+                 note_samples: int = 5) -> Tuple[List[str], List[str]]:
+    """Walk `stream` and return `(problems, notes)`; used by `verify`.
+
+    Unlike the lenient walk this does not stop at the first bad frame, so a corrupt capture gets a
+    full report.
+
+    `problems` mean the parse cannot be trusted and should be fixed:
+
+    * a frame that cannot be true (truncated metadata, payload past the end of the stream);
+    * a payload whose length disagrees with the layout the decoder expects (`EXPECTED_LENGTHS`) --
+      the chunk length is the checksum for the decoder (README 3.4).
+
+    `notes` are legal but worth knowing:
+
+    * non-zero alignment padding. Padding is stale capture-buffer content, so this is normal; it is
+      reported because a decoder that read past `length` would see those bytes as plausible data.
+      `note_samples` caps how many chunks are listed, the rest are counted.
+    * bytes left over after the last chunk (only when there is more than a terminator word).
+    """
+    if names is None:
+        names = load_chunk_names()
+    problems: List[str] = []
+    notes: List[str] = []
+    stale_chunks = 0
+    stale_bytes = 0
+    padding_bytes = 0
+    broken = False
+    pos = 0
+    n = 0
+    while pos + 4 <= len(stream):
+        try:
+            frame = _read_frame(stream, pos)
+        except FrameError as exc:
+            problems.append(str(exc))
+            broken = True
+            break
+        if frame is None:
+            break
+        ch, pos = frame
+        n += 1
+        name = names.get(ch['id'], 'Chunk%d' % ch['id'])
+        pad_len = min(ch['pad_len'], max(0, len(stream) - ch['pad_start']))
+        pad = stream[ch['pad_start']:ch['pad_start'] + pad_len]
+        padding_bytes += pad_len
+        stale = sum(1 for b in pad if b)
+        if stale:
+            stale_chunks += 1
+            stale_bytes += stale
+            if len(notes) < note_samples:
+                notes.append('chunk #%d @0x%x (%s): %d of %d padding bytes are non-zero (%s)'
+                             % (n, ch['off'], name, stale, pad_len, pad[:16].hex()))
+        expected = EXPECTED_LENGTHS.get(name)
+        if expected is not None and ch['length'] not in expected:
+            problems.append('chunk #%d @0x%x (%s): payload is %d bytes, the decoder expects %s'
+                            % (n, ch['off'], name, ch['length'],
+                               ' or '.join(str(e) for e in expected)))
+    if stale_chunks:
+        notes.append('padding: %d of %d chunks carry %d non-zero bytes of %d checked - padding is '
+                     'stale capture-buffer content, not data'
+                     % (stale_chunks, n, stale_bytes, padding_bytes))
+    else:
+        notes.append('padding: %d bytes checked in %d chunks, all zero' % (padding_bytes, n))
+    trailing = len(stream) - pos
+    if trailing > 4 and not broken:
+        notes.append('%d bytes follow the last chunk (first 16: %s)'
+                     % (trailing, stream[pos:pos + 16].hex()))
+    return problems, notes
 
 
 def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
@@ -916,9 +1056,13 @@ def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
             # serialises as Id + Offset (d3d12_serialise.cpp), so this is the same pair `draws` uses.
             out.append('cmdList=%d rootParam=%d res=%d+0x%x'
                        % (u64(blob, 0), u32(blob, 8), u64(blob, 12), u64(blob, 20)))
-        elif name == 'List_SetGraphicsRootDescriptorTable' and len(blob) >= 16:
-            out.append('cmdList=%d rootParam=%d gpuHandle=0x%x' % (u64(blob, 0), u32(blob, 8),
-                                                                   u64(blob, 12)))
+        elif name == 'List_SetGraphicsRootDescriptorTable' and len(blob) >= 24:
+            # [u64 cmdList][u32 rootParam][PortableHandle: u64 heapId, u32 descriptorIndex]:
+            # a D3D12_GPU_DESCRIPTOR_HANDLE is serialised as (heap resource, index) rather than as
+            # a raw pointer (d3d12_serialise.cpp DoSerialise + PortableHandle in d3d12_manager.h),
+            # so the payload is 24 bytes and there is no pointer to print
+            out.append('cmdList=%d rootParam=%d heap=%d index=%d'
+                       % (u64(blob, 0), u32(blob, 8), u64(blob, 12), u32(blob, 20)))
         elif name == 'List_SetGraphicsRootSignature' and len(blob) >= 16:
             out.append('cmdList=%d rootSig=%d' % (u64(blob, 0), u64(blob, 8)))
         elif name == 'List_IASetVertexBuffers' and len(blob) >= 24:
@@ -963,7 +1107,8 @@ def cmd_chunk_detail(path: str, index: int, hexlen: int = 160) -> None:
         nm = names.get(ch['id'], 'Chunk%d' % ch['id'])
         print('chunk #%d  @0x%x  id=%d (%s)  flags=0x%x  length=%d'
               % (i, ch['off'], ch['id'], nm, ch['flags'], ch['length']))
-        print('payload @0x%x (header+metadata = %d bytes)' % (ch['data'], ch['data'] - ch['off']))
+        print('payload @0x%x (header+metadata = %d bytes)'
+              % (ch['payload_offset'], ch['payload_offset'] - ch['off']))
         blob = chunk_payload(stream, ch)
         for line in decode_chunk(nm, blob):
             print('  ' + line)
@@ -999,6 +1144,27 @@ def cmd_chunks(path: str, limit: int = 200, name_filter: Optional[str] = None) -
                   % (total, ch['off'], nm, ch['length'], (' ' + ' | '.join(strs)) if strs else ''))
             shown += 1
     print('total chunks: %d (shown %d)' % (total, shown))
+
+
+def cmd_verify(path: str) -> int:
+    """Check the chunk framing, the alignment padding and the payload lengths of a capture.
+
+    Returns 0 when nothing is wrong, 1 when a frame or a payload length does not check out, so it
+    can gate a script. These are the checks that would have caught past decoding mistakes -- the
+    index-buffer payload length being the most recent one.
+    """
+    _info, stream, how = load_stream(path)
+    names = load_chunk_names()
+    problems, notes = check_stream(stream, names)
+    print('stream %d bytes [%s]' % (len(stream), how))
+    print('problems: %d' % len(problems))
+    for problem in problems:
+        print('  ' + problem)
+    if notes:
+        print('notes: %d' % len(notes))
+        for note in notes:
+            print('  ' + note)
+    return 1 if problems else 0
 
 
 def cmd_draws(path: str, max_draws: int = 80) -> None:
@@ -1054,58 +1220,6 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
                     print('        IB : %s' % ib)
             vbs, ib, cbvs = [], None, []
     print('total draws/dispatches: %d' % n_draw)
-
-
-SINGLEPROBE_SIG = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
-
-
-def cmd_initial(path: str, resid: int = 0, probe_offset: int = -1, length: int = 256) -> None:
-    """List InitialContents chunks (resource id + size), or dump floats for one resource+offset.
-
-    Payload layout: [u64 resourceId] then the resource/subresource description, then the data.
-    The header length is not fixed across resource types, so the data start is found by validating
-    the known SingleProbe ILC signature at `probe_offset`.
-    """
-    _info, stream, _how = load_stream(path)
-    names = load_chunk_names()
-    for idx, ch in enumerate(iter_chunks(stream), 1):
-        if names.get(ch['id'], '') != 'InitialContents':
-            continue
-        blob = chunk_payload(stream, ch)
-        rid = u64(blob, 0)
-        if resid and rid != resid:
-            continue
-        if not resid:
-            print('#%-5d @0x%-10x res=%-7d chunkLen=%-10d head=%s'
-                  % (idx, ch['off'], rid, ch['length'], blob[8:40].hex()))
-            continue
-        print('chunk #%d res=%d chunkLen=%d payload@0x%x' % (idx, rid, ch['length'], ch['data']))
-        if probe_offset < 0:
-            return
-        best: Optional[Tuple[int, int, Tuple[float, ...]]] = None
-        for hdr in range(8, 200, 4):
-            o = hdr + probe_offset
-            if o + 48 > len(blob):
-                break
-            vals = struct.unpack_from('<12f', blob, o)
-            score = sum(1 for a, b in zip(vals, SINGLEPROBE_SIG) if abs(a - b) < 1e-6)
-            if best is None or score > best[0]:
-                best = (score, hdr, vals)
-            if score == 12:
-                break
-        # `best` stays None only when no header candidate fitted at all (payload too short). The
-        # original code raised TypeError there and a test pins exactly that, so the subscript is
-        # deliberately left unguarded (CHARACTERIZATION - do not "fix" this).
-        best = cast(Tuple[int, int, Tuple[float, ...]], best)
-        print('  best header guess: %d bytes, signature match %d/12' % (best[1], best[0]))
-        data = blob[best[1]:]
-        vals = struct.unpack_from('<%df' % (length // 4), data, probe_offset)
-        print('  floats @+0x%x (SingleProbe ILC layout: Add|Scale|MinUV|MaxUV|SkyBentNormal|Shadow|SH0[3]|SH1[3]|SH2):'
-              % probe_offset)
-        for k in range(0, len(vals), 6):
-            print('    +%-4d %s' % (k * 4, ' '.join('%11.5f' % v for v in vals[k:k + 6])))
-        return
-    print('resource %d not found in InitialContents chunks' % resid)
 
 
 def cmd_summary(path: str) -> None:
@@ -1170,7 +1284,7 @@ def cmd_rootconst(path: str, max_chunks: int = 8) -> None:
         total += 1
         if shown >= max_chunks:
             continue
-        blob = stream[ch['data']:ch['data'] + ch['length']]
+        blob = chunk_payload(stream, ch)
         print('--- chunk #%d @0x%x %s len=%d' % (idx, ch['off'], nm, ch['length']))
         if nm.endswith('Constants') and ch['length'] >= 28 and (ch['length'] - 28) % 4 == 0:
             root_param = u32(blob, 8)
@@ -1197,7 +1311,7 @@ def cmd_dump_chunk(path: str, index: int, outfile: str) -> None:
     names = load_chunk_names()
     for i, ch in enumerate(iter_chunks(stream), 1):
         if i == index:
-            blob = stream[ch['data']:ch['data'] + ch['length']]
+            blob = chunk_payload(stream, ch)
             with open(outfile, 'wb') as f:
                 f.write(blob)
             print('chunk #%d %s (id=%d, flags=0x%x) -> %s (%d bytes)'
@@ -1308,10 +1422,10 @@ def main() -> None:
         cmd_chunk_detail(path, int(argv[3]))
     elif cmd == 'draws':
         cmd_draws(path, _arg(argv, 3, 80))
-    elif cmd == 'initial':
-        cmd_initial(path, _arg(argv, 3, 0), _arg(argv, 4, -1, base=0))
     elif cmd == 'chunks':
         cmd_chunks(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+    elif cmd == 'verify':
+        sys.exit(cmd_verify(path))
     elif cmd == 'summary':
         cmd_summary(path)
     elif cmd == 'markers':

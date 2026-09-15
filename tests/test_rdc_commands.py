@@ -691,60 +691,47 @@ class TestCmdDraws(CmdCase):
         self.assertIn('total draws/dispatches: 1', out)
 
 
-class TestCmdInitial(CmdCase):
-    def capture(self, resid=342, hdr_filler=48, total_len=400):
-        payload = F.pl_initial_contents(resid, F.SINGLEPROBE_SIG + b'\x00' * (total_len - 48 - 48),
-                                       hdr_filler=hdr_filler)
-        return self.cap(self.ch('InitialContents', payload))
+class TestCmdVerify(CmdCase):
+    def clean_capture(self):
+        # zero padding: stale padding is reported as a note, so it must not be in a "clean" fixture
+        return self.cap(self.ch('List_SetPipelineState', F.pl_pso(7, 3042), pad_byte=0x00),
+                        self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0),
+                                pad_byte=0x00))
 
-    def test_listing_mode(self):
-        out = self.out(R.cmd_initial, self.capture())
-        self.assertIn('res=342', out)
-        self.assertIn('chunkLen=', out)
-        # listing mode falls through to the "not found" line because resid == 0
-        self.assertIn('resource 0 not found in InitialContents chunks', out)
+    def verify(self, path):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = R.cmd_verify(path)
+        return code, out.getvalue()
 
-    def test_probe_finds_the_signature_behind_the_header(self):
-        out = self.out(R.cmd_initial, self.capture(), 342, 0)
-        self.assertIn('chunk #1 res=342', out)
-        self.assertIn('  best header guess: 56 bytes, signature match 12/12', out)
-        self.assertIn('floats @+0x0', out)
-        self.assertIn('    1.00000', out)
+    def test_clean_capture_reports_no_problems(self):
+        code, out = self.verify(self.clean_capture())
+        self.assertEqual(code, 0)
+        self.assertIn('problems: 0', out)
+        self.assertIn('notes: 1', out)
+        self.assertIn('padding: ', out)          # the padding totals are always shown
 
-    def test_probe_offset_shifts_the_signature(self):
-        payload = F.pl_initial_contents(342, b'\x00' * 16 + F.SINGLEPROBE_SIG + b'\x00' * 400)
-        path = self.cap(self.ch('InitialContents', payload))
-        out = self.out(R.cmd_initial, path, 342, 16)
-        self.assertIn('  best header guess: 56 bytes, signature match 12/12', out)
+    def test_payload_length_mismatch_is_a_problem(self):
+        path = self.cap(self.ch('List_SetPipelineState', F.pl_pso(7, 3042) + b'\x00' * 4,
+                                pad_byte=0x00))
+        code, out = self.verify(path)
+        self.assertEqual(code, 1)
+        self.assertIn('the decoder expects 16', out)
 
-    def test_no_signature_scores_zero(self):
-        payload = F.pl_initial_contents(342, b'\xff' * 400, filler_byte=0xFF)
-        path = self.cap(self.ch('InitialContents', payload))
-        out = self.out(R.cmd_initial, path, 342, 0)
-        self.assertIn('best header guess: 8 bytes, signature match 0/12', out)
+    def test_stale_padding_is_a_note_only(self):
+        path = self.cap(self.ch('List_SetPipelineState', F.pl_pso(7, 3042), pad_byte=0xCC))
+        code, out = self.verify(path)
+        self.assertEqual(code, 0)
+        self.assertIn('problems: 0', out)
+        self.assertIn('notes:', out)
+        self.assertIn('padding bytes are non-zero', out)
 
-    def test_zeroed_payload_still_scores_six(self):
-        # the signature has six zero components, so an all-zero payload scores 6/12 and the first
-        # header candidate (8) wins - the heuristic is visible in the output rather than silent
-        payload = F.pl_initial_contents(342, b'\x00' * 400)
-        path = self.cap(self.ch('InitialContents', payload))
-        out = self.out(R.cmd_initial, path, 342, 0)
-        self.assertIn('best header guess: 8 bytes, signature match 6/12', out)
-
-    def test_negative_probe_offset_only_prints_the_chunk(self):
-        out = self.out(R.cmd_initial, self.capture(), 342)
-        self.assertIn('chunk #1 res=342', out)
-        self.assertNotIn('best header guess', out)
-
-    def test_unknown_resource(self):
-        out = self.out(R.cmd_initial, self.capture(), 999, 0)
-        self.assertIn('resource 999 not found in InitialContents chunks', out)
-
-    def test_payload_too_short_for_the_scan_raises(self):
-        # documents the unguarded `best[1]` when no header candidate fits
-        path = self.cap(self.ch('InitialContents', F.u64b(342) + b'\x00' * 8))
-        with self.assertRaises(TypeError):
-            self.out(R.cmd_initial, path, 342, 0)
+    def test_main_dispatches_verify_and_exits_with_its_code(self):
+        path = self.clean_capture()
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'verify', path]):
+            with mock.patch.object(sys, 'exit') as exit_mock:
+                self.out(R.main)
+        exit_mock.assert_called_once_with(0)
 
 
 class TestCmdSummary(CmdCase):
@@ -923,7 +910,6 @@ class TestMain(CmdCase):
             self.ch('List_SetPipelineState', F.pl_pso(7, 3042)),
             self.ch('List_SetGraphicsRoot32BitConstants', F.pl_32bit_constants(7, 2, F.fbits(1.0), 0)),
             self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 2880, 1, 0, 0, 0)),
-            self.ch('InitialContents', F.pl_initial_contents(342, F.SINGLEPROBE_SIG + b'\x00' * 352)),
             self.ch('PushMarker', blob),
             self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1)),
             self.ch('PushMarker', F.f32b(1.0) + b'\x00IndirectLightingCache\x00FShaderCompileJob\x00'),
@@ -970,8 +956,6 @@ class TestMain(CmdCase):
             (['markers', path], 'PushMarker'),
             (['rootconst', path], 'root-constant chunks total:'),
             (['rootconst', path, '2'], 'root-constant chunks total:'),
-            (['initial', path], 'resource 0 not found'),
-            (['initial', path, '342', '0'], 'best header guess'),
             (['dxbc', path], 'DXBC/DXIL containers:'),
             (['dxbc', path, '1'], 'all str'),
             (['sig', path], 'IN :'),
@@ -1059,7 +1043,7 @@ class TestRealCapture(unittest.TestCase):
 
     def test_commands_run_without_crashing(self):
         for cmd in (R.cmd_sections, R.cmd_summary, R.cmd_markers, R.cmd_chunks, R.cmd_draws,
-                    R.cmd_dxbc, R.cmd_sig, R.cmd_initial, R.cmd_rootconst):
+                    R.cmd_dxbc, R.cmd_sig, R.cmd_rootconst):
             with self.subTest(cmd=cmd.__name__):
                 self.assertTrue(capture_text(cmd, self.path).strip())
 

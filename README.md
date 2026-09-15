@@ -91,7 +91,7 @@ the capture's own version).
 
 If none of them contains `renderdoc/core/core.h`, the tool prints a one-line warning to stderr and continues
 with **numeric chunk IDs**. Everything else — container parsing, decompression, payload decoding, `draws`,
-`initial`, `dxbc` — is unaffected.
+`dxbc`, `verify` — is unaffected.
 
 To point at a tree somewhere else for a single run:
 
@@ -119,7 +119,7 @@ Remove-Item Env:\RENDERDOC_SRC
 | Which draw is the one I care about? | `markers`, then `chunks <limit> List_Draw` |
 | What pipeline state, constant buffers and vertex streams does draw N use? | `draws` |
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>` |
-| What is inside a buffer/resource? | `initial <resId> <byteOffset>` |
+| Is the parse trustworthy? | `verify` |
 | Which shaders are in this capture and what GI uniforms do they read? | `dxbc`, `sig` |
 | Where is this string / uniform name / float in the stream? | `grep`, `count`, `float`, `pattern` |
 | Dump all shaders to disk for disassembly | `dump-shaders <outdir>` |
@@ -209,10 +209,13 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `List_SetGraphicsRootConstantBufferView` | `u64 cmdList, u32 rootParam, u64 resId, u64 offset` |
 | `List_SetGraphicsRoot{ShaderResource,UnorderedAccess}View` | `u64 cmdList, u32 rootParam, u64 resId, u64 offset` |
 | `List_SetGraphicsRoot32BitConstants` | `u64 cmdList, u32 rootParam, u32 numValues, u64 arrayCount, u32 values[n], u32 destOffset` (so `length == 28 + 4n`) |
-| `InitialContents` | `u64 resourceId` + resource description, then the data (see §6) |
+| `List_SetGraphicsRootDescriptorTable` | `u64 cmdList, u32 rootParam, u64 heapId, u32 descriptorIndex` — a `D3D12_GPU_DESCRIPTOR_HANDLE` is a `PortableHandle`, not a pointer |
+| `InitialContents` | `u64 resourceId` + resource description, then the data — only the id and the first header bytes are decoded (`chunk <N>`); reading the contents is the replay driver's job |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
 
 Chunk **length is a checksum for your decoder**: `IASetVertexBuffers` with 7 views must be `24 + 24*7 = 192`.
+`verify` checks the fixed-length payloads in this table against every chunk in a capture, which is how the
+descriptor-table length (24, not the 20 the struct alone suggests) was caught.
 
 ### 3.5 DXBC / DXIL containers
 
@@ -241,6 +244,7 @@ register u32, ...`), with the string table after the array. This is how per-inst
 | Command | Arguments | Output |
 |---|---|---|
 | `sections` | `<rdc>` | file size, rdc version, progVersion, thumbnail, driver name/id; every section (type, flags, version, compressed/uncompressed size, name); then the decompressed size of section 0 vs expected, and the method used |
+| `verify` | `<rdc>` | walks the chunk stream and checks what would make a parse untrustworthy: frames claiming bytes the stream does not hold, and payload lengths that disagree with the layout the decoder expects (see §3.4). Also reports the alignment padding totals — non-zero padding is legal (stale buffer bytes) so it is a note, not a failure. Exit code 0/1, so it can gate a script |
 | `blocks` | `<rdc>` | per section: name, flags, first 16 bytes hex — enough to identify compression (`28b52ffd` = Zstd) |
 
 ### 4.2 Stream text mining
@@ -284,7 +288,6 @@ so a two-character name is still not shown by those.
 | `chunk` | `<rdc> <index>` | full inspector: id/name/flags/length, payload offset **and header size**, decoded fields via `decode_chunk`, 160-byte hex dump, and the payload's strings |
 | `draws` | `<rdc> [maxDraws=80]` | per-draw table (see below) |
 | `rootconst` | `<rdc> [maxChunks=8]` | `SetGraphicsRoot32BitConstant(s)` payloads decoded to root param index, value count, dest offset, and float values |
-| `initial` | `<rdc> [resId] [offset]` | resource contents (see below) |
 | `dump-chunk` | `<rdc> <index> <outfile>` | writes the chunk payload to a file |
 
 #### `draws` — the per-draw table
@@ -296,25 +299,14 @@ constant-buffer bindings. On every draw/dispatch it prints:
 ```
 #452    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
         CBV: rp10=res1907+0x120000  rp11=res342+0x3b000  rp6=res342+0x3b000  rp7=res342+0x8d200
-        VB : res315+0x3f7400(sz6708,st12)  res315+0x3f5900(sz2236,st4)  res0+0x0(sz0,st0)
-        IB : res80641+0x3f2b0000
+        VB : res315+0x3f7400(sz6708,st12)  res315+0x3f5900(sz2236,st4)  res315+0x300(sz16,st0)
+        IB : res315+0x3f2b00
 ```
 
 `rp<n>=res<id>+0x<offset>` is a root-parameter CBV binding; `res<id>+0x<off>(sz,st)` is a vertex stream
 (resource, byte offset, size, stride). A `res0+0x0(sz0,st0)` entry is a **NULL vertex buffer** — a useful
 signature in itself. State lists reset when the PSO changes and after each draw, so the printed CBVs are the
-ones bound *for that draw*.
-
-#### `initial` — resource contents
-
-* `initial <rdc>` — lists every `InitialContents` chunk with its resource id and payload size.
-* `initial <rdc> <resId> <offset>` — finds that resource's chunk, determines where the data starts, and prints
-  the floats at `offset` in `FIndirectLightingCacheUniformParameters` order
-  (`Add | Scale | MinUV | MaxUV | PointSkyBentNormal | Shadow | SH…`), 6 per row.
-
-Because the `InitialContents` header length is not constant across resource types, the data start is found by
-scanning candidate header sizes (8…200, step 4) and scoring each against the known SingleProbe ILC signature;
-the chosen header and its score are printed so the guess is visible, never silent.
+ones bound *for that draw* (see §8: inherited bindings are not reported).
 
 ### 4.6 Tests
 
@@ -367,10 +359,10 @@ The coding rules that keep it that way are in `AGENTS.md`.
 
 **Read a constant buffer that a draw binds**
 
-```powershell
-# 1. from `draws`, note e.g. rp7=res342+0x8d200
-& $py rdc_analysis.py initial 'mobile.rdc' 342 0x8d200
-```
+Not possible offline any more: `draws` tells you *which* buffer is bound (`rp7=res342+0x8d200`) but not what is
+inside it. Reading the contents needs the replay driver (`GetCBufferVariableContents`, `ROADMAP.md` §1); the old
+`initial` command guessed the data offset by scoring a known signature against candidate header sizes, which
+did not survive contact with the captures it was pointed at, so it was removed rather than fixed.
 
 **Locate a uniform buffer by content**
 
@@ -399,13 +391,16 @@ The coding rules that keep it that way are in `AGENTS.md`.
 These were derived from the RenderDoc source and then confirmed against real captures; they are the assumptions
 the decoders rely on.
 
-* Chunk payload = `chunk['data']`, which is **36 bytes** past the chunk start when flags are `0xf0000`.
-* Chunks are **64-byte aligned**; the padding between them is *not* zeroed and must not be read as data.
+* Chunk payload = `chunk['payload_offset']`, which is **36 bytes** past the chunk start when flags are `0xf0000`.
+* Chunks are **64-byte aligned**; the padding after a payload is not guaranteed to be zeroed, so it must not be
+  read as data. `verify` reports the padding totals and lists non-zero runs — both captures tested have all-zero
+  padding, so this is a hazard rather than an observed problem.
 * `ResourceId` is a `u64`; `0` means null.
 * `D3D12BufferLocation` (CBV/SRV/UAV and vertex/index views) serialises as **(resourceId, byteOffset)** — this is
   the VA→resource mapping, obtained for free.
-* `InitialContents` starts with `u64 resourceId`, then a resource/subresource description, then the data. For
-  `res342` in the mobile capture the data is at **payload + 128** (validated by a 12/12 signature match).
+* `D3D12_GPU_DESCRIPTOR_HANDLE` serialises as a **`PortableHandle` (`u64 heapId, u32 descriptorIndex`)**, not as
+  a pointer (`d3d12_manager.h`), which is why `List_SetGraphicsRootDescriptorTable` payloads are 24 bytes.
+  Verified on both captures, and it is what `verify` caught: the decoder assumed 20.
 * The serialised D3D12 root signature (`RTS0` part) is
   `u32 version=2 | u32 numRootParameters | u32 rootParametersOffset | u32 numStaticSamplers | u32 staticSamplersOffset | u32 flags`,
   followed by the parameters and descriptor ranges — and it contains **no parameter names**. Names live in the
@@ -500,19 +495,14 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 
 ## 8. Pitfalls and known limitations
 
-Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.10); the plan
+Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.7); the plan
 is to clear the whole list, so a bullet here is a known defect, not a permanent design decision.
 
-* **Payload offset.** Never assume `+8`; use `chunk_payload()`. Reading metadata as data produces plausible but
-  wrong numbers (this exact mistake produced a bogus "PSO id" early on).
-* **Alignment padding is garbage.** Chunk-to-chunk padding can contain stale bytes from the capture buffer.
 * **Chunk names need the RenderDoc source tree in the root folder.** The tool expects
   `<root>/rdc-tools/renderdoc-src/` (see §1.1); if it is absent, or if its version is older than the one that
   produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
   works — only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed.
-* **`InitialContents` header is heuristic.** The data start is inferred by signature scoring and the chosen
-  header is printed; it is validated for buffers in the captures tested but is not a general solution.
 * **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be
   mapped to a uniform name offline. This is the main reason for the replay driver in `ROADMAP.md`.
 * **`draws` state tracking is a heuristic.** CBV/VB lists are "bindings since the previous draw", reset on PSO
@@ -530,5 +520,5 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
 * RenderDoc source, expected at `<root>/rdc-tools/renderdoc-src/` (§1.1). The files this tool and its docs rely
   on: `serialise/serialiser.cpp` (chunk framing), `serialise/rdcfile.cpp` (container), `core/core.h` and
   `driver/d3d12/d3d12_common.h` (chunk-name enums), `driver/d3d12/d3d12_command_list_wrap.cpp` (payload
-  layouts), `driver/d3d12/d3d12_resources.cpp` (resource/`InitialContents` serialisation),
+  layouts), `driver/d3d12/d3d12_serialise.cpp` + `d3d12_manager.h` (`D3D12BufferLocation`, `PortableHandle`),
   `api/replay/renderdoc_replay.h` (the replay API used by the planned replay driver).

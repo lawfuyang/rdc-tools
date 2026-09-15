@@ -12,6 +12,7 @@ implemented and says so in a comment.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import os
@@ -21,7 +22,7 @@ import sys
 import tempfile
 import types
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -613,10 +614,10 @@ class TestIterChunks(unittest.TestCase):
         ch = chunks[0]
         self.assertEqual(ch['id'], 1234)
         self.assertEqual(ch['off'], 0)
-        self.assertEqual(ch['data'], 8)
+        self.assertEqual(ch['payload_offset'], 8)
         self.assertEqual(ch['length'], 3)
         self.assertEqual(ch['flags'], 0)
-        self.assertEqual(data[ch['data']:ch['data'] + ch['length']], b'abc')
+        self.assertEqual(data[ch['payload_offset']:ch['payload_offset'] + ch['length']], b'abc')
 
     def test_all_metadata_fields(self):
         data = F.stream(F.chunk(1200, b'payload', callstack=[0x7ff0, 0x1234], threadid=42,
@@ -625,8 +626,8 @@ class TestIterChunks(unittest.TestCase):
         self.assertEqual(ch['id'], 1200)
         self.assertEqual(ch['flags'], 0x000F0000)
         self.assertEqual(ch['length'], 7)
-        self.assertEqual(ch['data'], 4 + 4 + 16 + 8 + 8 + 8 + 4)
-        self.assertEqual(data[ch['data']:ch['data'] + 7], b'payload')
+        self.assertEqual(ch['payload_offset'], 4 + 4 + 16 + 8 + 8 + 8 + 4)
+        self.assertEqual(data[ch['payload_offset']:ch['payload_offset'] + 7], b'payload')
 
     def test_individual_flag_combinations(self):
         cases = [
@@ -640,21 +641,21 @@ class TestIterChunks(unittest.TestCase):
             with self.subTest(kwargs=kwargs):
                 ch = list(R.iter_chunks(F.stream(F.chunk(1000, b'X', **kwargs))))[0]
                 self.assertEqual(ch['flags'], flags)
-                self.assertEqual(ch['data'], data_off)
+                self.assertEqual(ch['payload_offset'], data_off)
 
     def test_zero_callstack_frames(self):
         # a chunk with the callstack flag but no frames: 36 bytes of header (README section 6)
         raw = F.u32b(1200 | F.FLAG_CALLSTACK | F.FLAG_THREADID | F.FLAG_DURATION | F.FLAG_TIMESTAMP)
         raw += F.u32b(0) + F.u64b(0) + F.u64b(0) + F.u64b(0) + F.u32b(2) + b'hi'
         ch = list(R.iter_chunks(F.pad_to(raw)))[0]
-        self.assertEqual(ch['data'] - ch['off'], 36)
+        self.assertEqual(ch['payload_offset'] - ch['off'], 36)
         self.assertEqual(ch['length'], 2)
 
     def test_64bit_length_flag(self):
         ch = list(R.iter_chunks(F.stream(F.chunk(1000, b'hello', size64=True))))[0]
         self.assertEqual(ch['flags'], R.CHUNK_64BITSIZE)
         self.assertEqual(ch['length'], 5)
-        self.assertEqual(ch['data'], 4 + 8)          # u32 flags + u64 length, no other metadata
+        self.assertEqual(ch['payload_offset'], 4 + 8)          # u32 flags + u64 length, no other metadata
 
     def test_unknown_high_flag_bits_are_reported(self):
         raw = F.u32b(1000 | 0x00200000) + F.u32b(3) + b'abc'
@@ -673,7 +674,7 @@ class TestIterChunks(unittest.TestCase):
         self.assertEqual([c['off'] for c in chunks], [0, 64, 192])
         for c in chunks:
             self.assertEqual(c['off'] % 64, 0)
-            self.assertEqual(data[c['data']:c['data'] + c['length']],
+            self.assertEqual(data[c['payload_offset']:c['payload_offset'] + c['length']],
                              {1000: b'A' * 5, 1001: b'B' * 70, 1002: b'C'}[c['id']])
 
     def test_padding_bytes_are_not_part_of_the_payload(self):
@@ -685,7 +686,7 @@ class TestIterChunks(unittest.TestCase):
     def test_zero_length_payload(self):
         ch = list(R.iter_chunks(F.stream(F.chunk(1000, b''))))[0]
         self.assertEqual(ch['length'], 0)
-        self.assertEqual(ch['data'], 8)
+        self.assertEqual(ch['payload_offset'], 8)
 
     def test_limit_stops_iteration(self):
         data = F.stream(F.chunk(1000, b'a'), F.chunk(1001, b'b'), F.chunk(1002, b'c'))
@@ -715,7 +716,161 @@ class TestIterChunks(unittest.TestCase):
     def test_last_chunk_without_padding(self):
         ch = list(R.iter_chunks(F.chunk(1000, b'xyz', align=False)))[0]
         self.assertEqual(ch['length'], 3)
-        self.assertEqual(ch['data'], 8)
+        self.assertEqual(ch['payload_offset'], 8)
+
+    def test_padding_fields_describe_the_alignment_gap(self):
+        ch = list(R.iter_chunks(F.stream(F.chunk(1000, b'AB'))))[0]
+        self.assertEqual(ch['pad_start'], 10)
+        self.assertEqual(ch['pad_len'], 54)                      # 64 - 10
+        self.assertEqual(ch['pad_start'] + ch['pad_len'], 64)
+
+    def test_padding_is_logical_for_a_final_chunk_without_it(self):
+        ch = list(R.iter_chunks(F.chunk(1000, b'xyz', align=False)))[0]
+        self.assertEqual(ch['pad_start'], 11)
+        self.assertEqual(ch['pad_len'], 53)                      # logical; the stream ends at 11
+
+    def test_strict_raises_on_a_payload_past_the_end(self):
+        raw = F.u32b(1000) + F.u32b(9999) + b'short'
+        with self.assertRaises(R.FrameError):
+            list(R.iter_chunks(raw, strict=True))
+        self.assertEqual(list(R.iter_chunks(raw)), [])            # the lenient walk just stops
+
+    def test_strict_raises_on_truncated_metadata(self):
+        # four bytes of flags and no length field at all: the lenient walk must not raise (this used
+        # to be an unguarded struct.error), strict must report it
+        raw = F.u32b(1000 | F.FLAG_THREADID)
+        self.assertEqual(list(R.iter_chunks(raw)), [])
+        with self.assertRaises(R.FrameError):
+            list(R.iter_chunks(raw, strict=True))
+
+    def test_strict_accepts_a_well_formed_stream(self):
+        data = F.stream(F.chunk(1000, b'a'), F.chunk(1001, b'b'))
+        self.assertEqual(len(list(R.iter_chunks(data, strict=True))), 2)
+
+    def test_frame_error_is_a_value_error_subclass(self):
+        # scripts that catch ValueError around a walk keep working
+        self.assertTrue(issubclass(R.FrameError, Exception))
+
+
+def _is_off_key(node: ast.expr) -> bool:
+    """True when `node` is the literal key `'off'`.
+
+    Python 3.8 wraps subscript keys in `ast.Index` while 3.9+ uses the expression directly, so the
+    unwrapping is done by class name: on 3.9+ `ast.Index` is an alias for `expr`, which would make
+    an `isinstance` check both meaningless and untypeable.
+    """
+    inner = getattr(node, 'value', node) if type(node).__name__ == 'Index' else node
+    return isinstance(inner, ast.Constant) and inner.value == 'off'
+
+
+def off_arithmetic_hits(source: str) -> List[Tuple[str, int]]:
+    """Return `(function, line)` for every subscript whose slice uses `x['off']` arithmetic."""
+    hits: List[Tuple[str, int]] = []
+    stack = ['<module>']
+
+    class Visitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+        def visit_Subscript(self, node: ast.Subscript) -> None:
+            if any(isinstance(inner, ast.Subscript) and _is_off_key(inner.slice)
+                   for inner in ast.walk(node.slice)):
+                hits.append((stack[-1], node.lineno))
+            self.generic_visit(node)
+
+    Visitor().visit(ast.parse(source))
+    return hits
+
+
+class TestCheckStream(unittest.TestCase):
+    def names(self) -> Dict[int, str]:
+        return {1000: 'List_SetPipelineState', 1001: 'PushMarker'}
+
+    def test_clean_stream_has_no_problems(self):
+        data = F.stream(F.chunk(1000, F.pl_pso(7, 1), pad_byte=0x00),
+                        F.chunk(1001, b'BasePass\x00', pad_byte=0x00))
+        problems, notes = R.check_stream(data, self.names())
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 1)                          # the padding summary
+        self.assertIn('all zero', notes[0])
+
+    def test_payload_past_the_end_is_a_problem(self):
+        problems, notes = R.check_stream(F.u32b(1000) + F.u32b(9999) + b'short', self.names())
+        self.assertEqual(len(problems), 1)
+        self.assertIn('runs 9994 past the end of the stream', problems[0])
+        # a broken walk must not also be reported as trailing bytes
+        self.assertEqual(len(notes), 1)
+
+    def test_wrong_payload_length_is_a_problem(self):
+        # List_SetPipelineState is 16 bytes, so a 20-byte payload means the decoder is misaligned
+        data = F.stream(F.chunk(1000, F.pl_pso(7, 1) + b'\x00' * 4, pad_byte=0x00))
+        problems, _ = R.check_stream(data, self.names())
+        self.assertEqual(len(problems), 1)
+        self.assertIn('payload is 20 bytes, the decoder expects 16', problems[0])
+
+    def test_unknown_chunk_names_are_not_length_checked(self):
+        data = F.stream(F.chunk(9999, b'x' * 13, pad_byte=0x00))
+        problems, notes = R.check_stream(data, self.names())
+        self.assertEqual(problems, [])
+        self.assertIn('all zero', notes[0])
+
+    def test_non_zero_padding_is_a_note_not_a_problem(self):
+        data = F.stream(F.chunk(1000, F.pl_pso(7, 1), pad_byte=0xCC))
+        problems, notes = R.check_stream(data, self.names())
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 2)                          # the sample plus the summary
+        self.assertIn('padding bytes are non-zero', notes[0])
+        self.assertIn('stale capture-buffer content', notes[1])
+
+    def test_padding_samples_are_capped(self):
+        data = F.stream(*[F.chunk(1000, F.pl_pso(7, i), pad_byte=0xCC) for i in range(4)])
+        _, notes = R.check_stream(data, self.names(), note_samples=2)
+        self.assertEqual(len(notes), 3)                          # 2 samples + the summary
+        self.assertIn('padding: 4 of 4 chunks carry', notes[-1])
+
+    def test_trailing_bytes_are_a_note(self):
+        data = F.stream(F.chunk(1000, F.pl_pso(7, 1), pad_byte=0x00), terminator=True,
+                        tail=b'\xAA' * 100)
+        problems, notes = R.check_stream(data, self.names())
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 2)                          # padding summary + trailing bytes
+        self.assertIn('104 bytes follow the last chunk', notes[1])
+
+    def test_lone_terminator_is_not_reported(self):
+        data = F.stream(F.chunk(1000, F.pl_pso(7, 1), pad_byte=0x00), terminator=True)
+        problems, notes = R.check_stream(data, self.names())
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 1)
+
+    def test_expected_lengths_cover_the_fixed_layout_chunks(self):
+        for name in ('List_SetPipelineState', 'List_DrawIndexedInstanced', 'List_DrawInstanced',
+                     'List_Dispatch', 'List_SetGraphicsRootSignature',
+                     'List_SetGraphicsRootConstantBufferView', 'List_IASetIndexBuffer'):
+            with self.subTest(name=name):
+                self.assertIn(name, R.EXPECTED_LENGTHS)
+
+
+class TestNoRawPayloadSlicing(unittest.TestCase):
+    """Architecture test: payloads are only reached through `chunk_payload()`.
+
+    `ChunkInfo.payload_offset` exists so that `off + 8` arithmetic cannot produce plausible-looking
+    garbage; this fails if a future decoder reintroduces it.
+    """
+
+    def test_the_check_finds_the_pattern_it_forbids(self):
+        bad = 'def f(stream, ch):\n    return stream[ch["off"] + 8:ch["off"] + 16]\n'
+        self.assertEqual([fn for fn, _ in off_arithmetic_hits(bad)], ['f'])
+
+    def test_the_check_ignores_the_allowed_accessor(self):
+        good = 'def f(stream, ch):\n    return stream[ch["payload_offset"]:ch["length"]]\n'
+        self.assertEqual(off_arithmetic_hits(good), [])
+
+    def test_only_the_walker_slices_by_chunk_offset(self):
+        with open(R.__file__, encoding='utf-8') as fh:
+            hits = off_arithmetic_hits(fh.read())
+        self.assertEqual(hits, [], 'payload sliced by chunk offset: %r' % (hits,))
 
 
 class TestChunkPayloadAndStrings(unittest.TestCase):
@@ -859,11 +1014,16 @@ class TestDecodeChunk(unittest.TestCase):
                 self.assertEqual(R.decode_chunk(name, blob), [])
 
     def test_descriptor_table(self):
-        self.assertEqual(R.decode_chunk('List_SetGraphicsRootDescriptorTable', F.pl_root_table(7, 5, 0xDEADBEEF)),
-                         ['cmdList=7 rootParam=5 gpuHandle=0xdeadbeef'])
+        # 24 bytes: the GPU descriptor handle is a PortableHandle (heap resource id + index), which
+        # is what `verify` caught: every descriptor-table payload in both captures is 24 bytes
+        blob = F.pl_root_table(7, 5, 8421, 37)
+        self.assertEqual(len(blob), 24)
+        self.assertEqual(R.decode_chunk('List_SetGraphicsRootDescriptorTable', blob),
+                         ['cmdList=7 rootParam=5 heap=8421 index=37'])
 
     def test_descriptor_table_truncated(self):
-        self.assertEqual(R.decode_chunk('List_SetGraphicsRootDescriptorTable', F.pl_root_table(7, 5, 1)[:15]), [])
+        self.assertEqual(R.decode_chunk('List_SetGraphicsRootDescriptorTable',
+                                        F.pl_root_table(7, 5, 1, 2)[:23]), [])
 
     def test_root_signature(self):
         self.assertEqual(R.decode_chunk('List_SetGraphicsRootSignature', F.pl_root_signature(7, 42)),
@@ -941,7 +1101,10 @@ class TestDecodeChunk(unittest.TestCase):
         self.assertEqual(R.decode_chunk('Device_CreatePipelineState', b'\x00' * 7), [])
 
     def test_initial_contents(self):
-        blob = F.pl_initial_contents(342, F.SINGLEPROBE_SIG)
+        # `chunk <N>` still reports the resource id and header bytes for these chunks; the old
+        # `initial` command that tried to guess where the data starts is gone (replay reads
+        # resource contents properly, see ROADMAP section 1)
+        blob = F.u64b(342) + b'\xab' * 48
         expected = 'id=342 hdr=%s' % blob[8:40].hex()
         self.assertEqual(R.decode_chunk('InitialContents', blob), [expected])
         self.assertEqual(R.decode_chunk('InitialContentsList', blob), [expected])

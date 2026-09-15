@@ -232,6 +232,49 @@ def pl_root_signature(cmdlist: int, rootsig: int) -> bytes:
     return u64b(cmdlist) + u64b(rootsig)
 
 
+def pl_set_name(resid: int, name: str) -> bytes:
+    """`SetName`: [u64 resourceId][u32 length][utf-8 name]."""
+    raw = name.encode('utf-8')
+    return u64b(resid) + u32b(len(raw)) + raw
+
+
+def pl_resource_desc(dimension: int = 1, width: int = 1024, height: int = 1, depth: int = 1,
+                     mips: int = 1, fmt: int = 0, alignment: int = 0) -> bytes:
+    """A `D3D12_RESOURCE_DESC` (48 bytes).
+
+    Dimension is a `D3D10_RESOURCE_DIMENSION` (1 = buffer, 2/3/4 = texture1d/2d/3d); for a buffer
+    `width` is the size in bytes, for a texture `depth` doubles as the array size.
+    """
+    return (u32b(dimension) + u64b(alignment) + u64b(width) + u32b(height) + u16b(depth)
+            + u16b(mips) + u32b(fmt) + u32b(1) + u32b(0) + u32b(0) + u32b(0))
+
+
+def _creation_tail(resid: int, gpu_address: int = 0) -> bytes:
+    """The end of a resource-creation payload: state(4) | clear-value flag(1) | IID(16) | id | VA.
+
+    Real payloads carry 8 further bytes of IID/padding before the id, which nothing reads; the
+    fixture keeps them so the lengths match the captures exactly (117 committed, 109 placed, 93
+    reserved) -- the parser reads the descriptor and the id at `len - 16` and nothing else.
+    """
+    return u32b(0) + b'\x00' + b'\x00' * 16 + b'\x00' * 8 + u64b(resid) + u64b(gpu_address)
+
+
+def pl_committed_resource(resid: int, desc: bytes, gpu_address: int = 0) -> bytes:
+    """`Device_CreateCommittedResource`: heap props(20) | heap flags(4) | desc | tail (117 bytes)."""
+    return b'\x02' + b'\x00' * 19 + u32b(0) + desc + _creation_tail(resid, gpu_address)
+
+
+def pl_placed_resource(resid: int, desc: bytes, heap: int = 1, heap_offset: int = 0,
+                       gpu_address: int = 0) -> bytes:
+    """`Device_CreatePlacedResource`: heap(8) | heap offset(8) | desc | tail (109 bytes)."""
+    return u64b(heap) + u64b(heap_offset) + desc + _creation_tail(resid, gpu_address)
+
+
+def pl_reserved_resource(resid: int, desc: bytes, gpu_address: int = 0) -> bytes:
+    """`Device_CreateReservedResource`: desc | tail (93 bytes)."""
+    return desc + _creation_tail(resid, gpu_address)
+
+
 def pl_reset(cmdlist: int, initial_pso: int = 0) -> bytes:
     """`List_Reset`: 64 bytes, with the command-list id at +40 and the initial PSO at +48.
 
@@ -399,6 +442,9 @@ enum class D3D12Chunk : uint32_t
   List_SetComputeRootSignature,
   List_SetComputeRootDescriptorTable,
   List_SetComputeRootConstantBufferView,
+  Device_CreateCommittedResource,
+  Device_CreatePlacedResource,
+  Device_CreateReservedResource,
 };
 '''
 
@@ -414,14 +460,29 @@ enum class D3D11Chunk : uint32_t
 '''
 
 
+FAKE_DDS_READWRITE_CPP = '''\
+// from dxgiformat.h
+enum DXGI_FORMAT
+{
+  DXGI_FORMAT_UNKNOWN = 0,
+  DXGI_FORMAT_R32G32B32A32_FLOAT = 2,
+  DXGI_FORMAT_R16G16B16A16_FLOAT = 10,
+  DXGI_FORMAT_R8G8B8A8_UNORM = 28,
+  DXGI_FORMAT_BC4_UNORM = 90,
+};
+'''
+
+
 def make_fake_src(root: str) -> Tuple[str, Dict[int, str]]:
     """Write a minimal but faithful `renderdoc-src` tree and return (root, names)."""
     core = os.path.join(root, 'renderdoc', 'core')
+    common = os.path.join(root, 'renderdoc', 'common')
     d12 = os.path.join(root, 'renderdoc', 'driver', 'd3d12')
     d11 = os.path.join(root, 'renderdoc', 'driver', 'd3d11')
-    for d in (core, d12, d11):
+    for d in (core, common, d12, d11):
         os.makedirs(d, exist_ok=True)
     write_bytes(os.path.join(core, 'core.h'), FAKE_CORE_H.encode())
+    write_bytes(os.path.join(common, 'dds_readwrite.cpp'), FAKE_DDS_READWRITE_CPP.encode())
     write_bytes(os.path.join(d12, 'd3d12_common.h'), FAKE_D3D12_COMMON_H.encode())
     write_bytes(os.path.join(d11, 'd3d11_common.h'), FAKE_D3D11_COMMON_H.encode())
     return root, R.load_chunk_names(root, 'D3D12')

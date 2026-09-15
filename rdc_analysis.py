@@ -13,6 +13,7 @@ readable content (D3D12: resource names, shader debug names, cbuffer reflection 
 Usage:
   python rdc_analysis.py sections <rdc>
   python rdc_analysis.py blocks   <rdc>          # per-section compression accounting
+  python rdc_analysis.py resources <rdc> [limit] [nameFilter]   # id -> kind/size/name
   python rdc_analysis.py verify   <rdc>          # framing/padding/payload checks, exit 1 on problems
   python rdc_analysis.py summary  <rdc>
   python rdc_analysis.py markers  <rdc>
@@ -128,6 +129,26 @@ class CacheEntry(TypedDict):
     blocks: int
 
 
+class ResourceInfo(TypedDict):
+    """One D3D12 resource: what it is, how big, and what the capture calls it.
+
+    `kind` is `buffer` / `texture1d` / `texture2d` / `texture3d` / `unknown` (the last one for ids
+    that are only *named*: heaps, queues, fences, PSOs). `size` is the byte size of a buffer and 0
+    for textures, which are described by `width`/`height`/`depth` (depth doubles as array size),
+    `mips` and `format` instead. `name` is empty when the capture never named the resource, and
+    `gpuAddress` is the base VA of a buffer.
+    """
+    kind: str
+    name: str
+    size: int
+    width: int
+    height: int
+    depth: int
+    mips: int
+    format: int
+    gpuAddress: int
+
+
 class DrawState(TypedDict):
     """The D3D12 command-list state `draws` reports at each draw.
 
@@ -146,7 +167,7 @@ class DrawState(TypedDict):
     gfxTable: Dict[int, Tuple[int, int]]
     compTable: Dict[int, Tuple[int, int]]
     vbs: Dict[int, Tuple[int, int, int, int]]
-    ib: Optional[str]
+    ib: Optional[Tuple[int, int]]
 
 
 #: One part of a DXBC/DXIL container: `(fourcc, offset, length)`. `offset` is absolute, past the
@@ -720,6 +741,53 @@ def cmd_cache(args: Optional[Sequence[str]] = None) -> int:
     return 0
 
 
+def _resource_size(info: ResourceInfo, formats: Dict[int, str]) -> str:
+    """The size column of `resources`: bytes for a buffer, dimensions + format for a texture."""
+    if info['kind'] == 'buffer':
+        return '%d B' % info['size']
+    if info['kind'] == 'unknown':
+        return '-'
+    return '%dx%dx%d mips=%d fmt=%s' % (info['width'], info['height'], info['depth'], info['mips'],
+                                        formats.get(info['format'], str(info['format'])))
+
+
+def _name_suffix(table: Dict[int, ResourceInfo], rid: int, width: int = 24) -> str:
+    """`[Name]` for a resource the capture named, else '' (used by `draws`, truncated to `width`)."""
+    entry = table.get(rid)
+    if entry is None or not entry['name']:
+        return ''
+    return '[%s]' % entry['name'][:width]
+
+
+def cmd_resources(path: str, limit: int = 200, name_filter: Optional[str] = None) -> None:
+    """List the resource table: id, kind, size or dimensions, and the capture's own name.
+
+    The names are the application's (UE names its buffers, e.g. `SkyAtmosphere.SkyViewLut`), which
+    is what makes `res342` in `draws` readable. Ids that are only named -- heaps, queues, fences --
+    have no descriptor and show `-`. `limit` counts rows and 0 means no limit, so
+    `resources <rdc> 0 lut` answers "which buffers mention a LUT".
+    """
+    _info, stream, _how = load_stream(path)
+    table = parse_resource_table(stream, load_chunk_names())
+    formats = load_format_names()
+    described = sum(1 for r in table.values() if r['kind'] != 'unknown')
+    named = sum(1 for r in table.values() if r['name'])
+    print('resources: %d ids (%d with a descriptor, %d named)'
+          % (len(table), described, named))
+    if not formats:
+        print('note: DXGI format names need the RenderDoc source (README 1.1); showing numbers')
+    shown = 0
+    for rid in sorted(table):
+        info = table[rid]
+        if name_filter and name_filter.lower() not in info['name'].lower():
+            continue
+        if not limit or shown < limit:
+            print('res%-8d %-9s %-34s %s'
+                  % (rid, info['kind'], _resource_size(info, formats), info['name'] or '-'))
+            shown += 1
+    print('total resources: %d (shown %d)' % (len(table), shown))
+
+
 def load_stream(path: str, section_index: int = 0) -> Tuple[CaptureInfo, bytes, str]:
     """Parse the container, decompress section 0 and return (info, stream, method).
 
@@ -1190,6 +1258,25 @@ EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
 #: `align_up`'s default (kept as a module constant so callers can name it).
 ALIGN_UP_DEFAULT = CHUNK_ALIGN
 
+#: Resource-creation chunks and where their `D3D12_RESOURCE_DESC` starts in the payload: committed
+#: = heap props (20 bytes) + heap flags (4), placed = heap id (8) + heap offset (8), reserved =
+#: straight in (d3d12_device_rescreate_wrap.cpp). Every one of them ends with
+#: `IID(16) | resourceId(8) | gpuAddress(8)`, so the id is at `length - 16` and a buffer's base VA
+#: at `length - 8`.
+RESOURCE_CHUNKS: Dict[str, int] = {
+    'Device_CreateCommittedResource': 24,
+    'Device_CreatePlacedResource': 16,
+    'Device_CreateReservedResource': 0,
+}
+
+#: `D3D10_RESOURCE_DIMENSION` (common/dds_readwrite.cpp): what a descriptor's Dimension field means.
+RESOURCE_KINDS: Dict[int, str] = {1: 'buffer', 2: 'texture1d', 3: 'texture2d', 4: 'texture3d'}
+
+#: Bytes of `D3D12_RESOURCE_DESC` to read, and the least that can follow it in a creation payload
+#: (the initial state, the optional-clear flag, the IID and the two trailing u64s).
+_RESOURCE_DESC_SIZE = 48
+_RESOURCE_TAIL = 32
+
 
 def align_up(x: int, a: int = ALIGN_UP_DEFAULT) -> int:
     """Round `x` up to the next multiple of `a` (chunks are 64-byte aligned)."""
@@ -1197,12 +1284,14 @@ def align_up(x: int, a: int = ALIGN_UP_DEFAULT) -> int:
 
 
 def parse_chunk_enum(text: str, enum_name: str) -> Dict[int, str]:
-    """Parse a C++ `enum class <enum_name> : uint32_t { ... }` into an {id: name} map.
+    """Parse a C++ enum into an {id: name} map.
 
-    Values are taken from explicit initialisers, from `FirstDriverChunk` (= 1000) and otherwise
-    auto-incremented, exactly like C++ would.
+    Handles both `enum class <name> : uint32_t { ... }` (the chunk enums) and a plain
+    `enum <name> { ... }` (RenderDoc's copy of `DXGI_FORMAT`). Values come from explicit
+    initialisers, from `FirstDriverChunk` (= 1000) and otherwise auto-increment like C++ would.
     """
-    m = re.search(r'enum class %s\s*:\s*uint32_t\s*\{(.*?)\n\};' % enum_name, text, re.S)
+    m = re.search(r'enum(?:\s+class)?\s+%s\s*(?::\s*uint32_t\s*)?\{(.*?)\n\};' % enum_name,
+                  text, re.S)
     if not m:
         return {}
     out: Dict[int, str] = {}
@@ -1491,6 +1580,77 @@ def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
     return out
 
 
+def load_format_names(src_root: Optional[str] = None) -> Dict[int, str]:
+    """DXGI format id -> short name (`R8G8B8A8_UNORM`), from RenderDoc's own copy of the enum.
+
+    `DXGI_FORMAT` belongs to the Windows SDK, but `common/dds_readwrite.cpp` carries a copy with
+    explicit values. Without the source tree this returns `{}` and formats print as numbers, exactly
+    like chunk names do (README 1.1). `src_root` defaults to `RENDERDOC_SRC` at call time, so tests
+    (and `$RENDERDOC_SRC`) can point it somewhere else.
+    """
+    path = os.path.join(RENDERDOC_SRC if src_root is None else src_root,
+                        'renderdoc', 'common', 'dds_readwrite.cpp')
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8', errors='replace') as fh:
+        raw = parse_chunk_enum(fh.read(), 'DXGI_FORMAT')
+    return {fmt_id: name.replace('DXGI_FORMAT_', '', 1) for fmt_id, name in raw.items()}
+
+
+def _parse_resource(blob: bytes, desc_off: int) -> Optional[ResourceInfo]:
+    """Decode the `D3D12_RESOURCE_DESC` of one creation payload, or None if it does not fit.
+
+    The dimension field is the check that this really is a descriptor (0/unknown means it is not),
+    which keeps the decoder honest without pinning a payload length that varies with the optional
+    clear value.
+    """
+    if len(blob) < desc_off + _RESOURCE_DESC_SIZE + _RESOURCE_TAIL:
+        return None
+    dim = u32(blob, desc_off)
+    if dim not in RESOURCE_KINDS:
+        return None
+    width = u64(blob, desc_off + 12)
+    return ResourceInfo(kind=RESOURCE_KINDS[dim], name='', size=width if dim == 1 else 0,
+                        width=width, height=u32(blob, desc_off + 20),
+                        depth=u16(blob, desc_off + 24), mips=u16(blob, desc_off + 26),
+                        format=u32(blob, desc_off + 28), gpuAddress=u64(blob, len(blob) - 8))
+
+
+def parse_resource_table(stream: bytes,
+                         names: Optional[Dict[int, str]] = None) -> Dict[int, ResourceInfo]:
+    """Build the resource table (id -> description) from the creation chunks and `SetName`.
+
+    `RESOURCE_CHUNKS` says where each creation payload's descriptor starts, and the resource id is
+    always at `length - 16`. `SetName` names any D3D12 object, so ids that are only named -- heaps,
+    queues, fences, PSOs -- end up in the table too, with `kind == 'unknown'` and no size; that is
+    what `draws` prints as `heap298[279377]`.
+    """
+    if names is None:
+        names = load_chunk_names()
+    table: Dict[int, ResourceInfo] = {}
+    named: Dict[int, str] = {}
+    for ch in iter_chunks(stream):
+        nm = names.get(ch['id'], '')
+        if nm == 'SetName':
+            blob = chunk_payload(stream, ch)
+            nlen = u32(blob, 8) if len(blob) >= 12 else 0
+            if nlen <= len(blob) - 12:
+                named[u64(blob, 0)] = blob[12:12 + nlen].decode('utf-8', 'replace')
+        elif nm in RESOURCE_CHUNKS:
+            blob = chunk_payload(stream, ch)
+            info = _parse_resource(blob, RESOURCE_CHUNKS[nm])
+            if info is not None:
+                table[u64(blob, len(blob) - 16)] = info
+    for rid, name in named.items():
+        entry = table.get(rid)
+        if entry is None:
+            table[rid] = ResourceInfo(kind='unknown', name=name, size=0, width=0, height=0,
+                                      depth=0, mips=0, format=0, gpuAddress=0)
+        else:
+            entry['name'] = name
+    return table
+
+
 def cmd_chunk_detail(path: str, index: int, hexlen: int = 160) -> None:
     """Full inspector for one chunk: header, decoded fields, hex dump and payload strings."""
     _info, stream, _how = load_stream(path)
@@ -1532,7 +1692,7 @@ def cmd_chunks(path: str, limit: int = 200, name_filter: Optional[str] = None) -
         nm = names.get(ch['id'], 'Chunk%d' % ch['id'])
         if name_filter and name_filter.lower() not in nm.lower():
             continue
-        if shown < limit:
+        if not limit or shown < limit:         # 0 = no limit, like `resources`
             strs = chunk_strings(stream, ch)
             print('#%-6d @0x%-10x %-40s len=%-8d%s'
                   % (total, ch['off'], nm, ch['length'], (' ' + ' | '.join(strs)) if strs else ''))
@@ -1629,33 +1789,42 @@ def _apply_state_chunk(name: str, blob: bytes, states: Dict[int, DrawState]) -> 
         if not blob[8]:
             st['ib'] = None
         elif len(blob) >= 33:
-            st['ib'] = 'res%d+0x%x' % (u64(blob, 9), u64(blob, 17))
+            st['ib'] = (u64(blob, 9), u64(blob, 17))
     return True
 
 
-def _print_draw_state(state: Optional[DrawState], compute: bool) -> None:
+def _print_draw_state(state: Optional[DrawState], compute: bool,
+                      resources: Dict[int, ResourceInfo]) -> None:
     """Print the bindings in effect for one draw or dispatch (the indented lines under its row).
 
     `compute` selects the namespace: a dispatch uses the compute root parameters, a draw the
-    graphics ones. Vertex streams and the index buffer are graphics-only state.
+    graphics ones. Vertex streams and the index buffer are graphics-only state. Every resource id
+    that the capture named gets its name appended (`_name_suffix`); descriptor-table bindings stay
+    numeric because the heap is not the resource being read.
     """
     if state is None:
         return
     cbvs = state['compCbv'] if compute else state['gfxCbv']
     tables = state['compTable'] if compute else state['gfxTable']
     if cbvs:
-        print('        CBV: ' + '  '.join('rp%d=res%d+0x%x' % (rp, res, off)
-                                           for rp, (res, off) in sorted(cbvs.items())))
+        print('        CBV: ' + '  '.join(
+            'rp%d=res%d+0x%x%s' % (rp, res, off, _name_suffix(resources, res))
+            for rp, (res, off) in sorted(cbvs.items())))
     if tables:
-        print('        Table: ' + '  '.join('rp%d=heap%d[%d]' % (rp, heap, idx)
-                                            for rp, (heap, idx) in sorted(tables.items())))
+        # the heap name is worth having: `GlobalSamplerHeap` says the table holds samplers, which
+        # is the difference between "a resource I cannot see" and "a sampler table"
+        print('        Table: ' + '  '.join(
+            'rp%d=heap%d[%d]%s' % (rp, heap, idx, _name_suffix(resources, heap))
+            for rp, (heap, idx) in sorted(tables.items())))
     if compute:
         return
     if state['vbs']:
-        print('        VB : ' + '  '.join('res%d+0x%x(sz%d,st%d)' % view
-                                          for _, view in sorted(state['vbs'].items())))
+        print('        VB : ' + '  '.join(
+            'res%d+0x%x(sz%d,st%d)%s' % (view + (_name_suffix(resources, view[0]),))
+            for _, view in sorted(state['vbs'].items())))
     if state['ib']:
-        print('        IB : %s' % state['ib'])
+        ib_res, ib_off = state['ib']
+        print('        IB : res%d+0x%x%s' % (ib_res, ib_off, _name_suffix(resources, ib_res)))
 
 
 def cmd_draws(path: str, max_draws: int = 80) -> None:
@@ -1665,10 +1834,12 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
     is still bound, not only what changed since the previous draw (see `DrawState`). Dispatches
     report the compute root bindings, draws the graphics ones plus the vertex streams and the index
     buffer. Root descriptor tables are reported as `heap<id>[index]`; resolving them to resources is
-    ROADMAP 3.2.
+    ROADMAP 3.2. Bound resources are annotated with the name the capture gave them, when it has one
+    (`[SceneUniformBuffer]`, see `parse_resource_table`).
     """
     _info, stream, _how = load_stream(path)
     names = load_chunk_names()
+    resources = parse_resource_table(stream, names)
     stack: List[str] = []
     states: Dict[int, DrawState] = {}
     n_draw = 0
@@ -1697,10 +1868,10 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
                          nm.replace('List_', '')))
                 if nm == 'List_ExecuteIndirect':
                     # it can be a graphics or a compute call, so both namespaces are reported
-                    _print_draw_state(st, compute=True)
-                    _print_draw_state(st, compute=False)
+                    _print_draw_state(st, compute=True, resources=resources)
+                    _print_draw_state(st, compute=False, resources=resources)
                 else:
-                    _print_draw_state(st, compute=nm in COMPUTE_CHUNKS)
+                    _print_draw_state(st, compute=nm in COMPUTE_CHUNKS, resources=resources)
         elif _apply_state_chunk(nm, blob, states):
             pass                       # a tracked setter: it changes the state, it prints nothing
     print('total draws/dispatches: %d' % n_draw)
@@ -1928,6 +2099,8 @@ def main() -> None:
         cmd_sections(path)
     elif cmd == 'blocks':
         cmd_blocks(path)
+    elif cmd == 'resources':
+        cmd_resources(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
     elif cmd == 'strings':
         cmd_strings(path, _arg(argv, 3, 6), _arg(argv, 4, 200))
     elif cmd == 'names':

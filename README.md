@@ -118,6 +118,7 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | Show me the pass/primitive tree | `markers` |
 | Which draw is the one I care about? | `markers`, then `chunks <limit> List_Draw` |
 | What pipeline state, constant buffers and vertex streams does draw N use? | `draws` |
+| What is `res342`, and which buffers/textures exist at all? | `resources`, `resources <limit> <nameFilter>` |
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>` |
 | Is the parse trustworthy? | `verify` |
 | Which shaders are in this capture and what GI uniforms do they read? | `dxbc`, `sig` |
@@ -218,6 +219,8 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `List_SetGraphicsRootDescriptorTable` | `u64 cmdList, u32 rootParam, u64 heapId, u32 descriptorIndex` — a `D3D12_GPU_DESCRIPTOR_HANDLE` is a `PortableHandle`, not a pointer |
 | `List_SetComputeRoot{Signature,ConstantBufferView,DescriptorTable}` | the same layouts as the `Graphics` ones above; only the root-parameter namespace differs (checked against both captures by `verify`) |
 | `List_Reset` | 64 bytes: the list's creation parameters (IID, node mask, type, baked id), then the **command-list id at +40** and the **initial PSO at +48** — the id at +40 is the one every other `List_*` chunk carries at +0 |
+| `Device_Create{Committed,Placed,Reserved}Resource` | the `D3D12_RESOURCE_DESC` follows the leading args (committed: heap props 20 B + heap flags 4 B; placed: heap id 8 B + heap offset 8 B; reserved: none), and every one of them ends `IID(16), u64 resourceId, u64 gpuAddress` — so the **id is at `length - 16`** and a buffer's base VA at `length - 8`. 117/145, 109/118/137 and 93 bytes in the captures tested |
+| `SetName` | `u64 objectId, u32 length, utf-8 name` — RenderDoc names every object, not only resources, which is what makes heaps and queues identifiable |
 | `InitialContents` | `u64 resourceId` + resource description, then the data — only the id and the first header bytes are decoded (`chunk <N>`); reading the contents is the replay driver's job |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
 
@@ -254,6 +257,7 @@ register u32, ...`), with the string table after the array. This is how per-inst
 | `sections` | `<rdc>` | file size, rdc version, progVersion, thumbnail, driver name/id; every section (type, flags, version, compressed/uncompressed size, name); then the decompressed size of section 0 vs expected, and the method used |
 | `verify` | `<rdc>` | walks the chunk stream and checks what would make a parse untrustworthy: frames claiming bytes the stream does not hold, and payload lengths that disagree with the layout the decoder expects (see §3.4). Also reports the alignment padding totals — non-zero padding is legal (stale buffer bytes) so it is a note, not a failure. Exit code 0/1, so it can gate a script |
 | `blocks` | `<rdc>` | per section: name, flags, first 16 bytes hex — enough to identify compression (`28b52ffd` = Zstd) |
+| `resources` | `<rdc> [limit=200] [nameFilter]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 
 ### 4.2 Stream text mining
@@ -318,6 +322,20 @@ prints the state that is *in effect* — everything still bound, not only what c
 descriptor table (the heap resource and descriptor index — resolving it to resources is ROADMAP §3.2);
 `res<id>+0x<off>(sz,st)` is a vertex stream (resource, byte offset, size, stride). A `res0+0x0(sz0,st0)` entry
 is a **NULL vertex buffer** — a useful signature in itself.
+
+Every resource the capture named carries that name in `[...]`, truncated to 24 characters, and descriptor
+tables carry their heap's name — `GlobalSamplerHeap` says the table holds samplers, which is the difference
+between "a resource I cannot see" and "a sampler table":
+
+```
+#270    GridInject:NotLinkedList 2300     x=8 y=5 z=2 Dispatch
+        CBV: rp2=res1907+0x174b00[Resource Allocator Under]  rp3=res1907+0x120000[Resource Allocator Under]
+        Table: rp0=heap298[138458][GlobalResourceHeap]  rp1=heap299[0][GlobalSamplerHeap]
+```
+
+UE sub-allocates its buffers inside page buffers, so a binding into a `Resource Allocator Underlying Buffer`
+or a `Fast Allocator Page` is a *sub-allocation*: the page has a name, the logical buffer inside it does not
+(§8). Use `resources` (§4.9) to turn any id into a kind/size/name.
 
 D3D12 bindings belong to the command list, so this is the real state and not a heuristic: they survive
 `SetPipelineState` and every draw, and only change when something rebinds them. Two events clear the root
@@ -400,6 +418,35 @@ cannot be written only warns once on stderr, and nothing else changes.
 
 The unit tests point `RDC_CACHE_DIR` at a scratch directory, so they never touch the real cache (§4.6).
 
+### 4.9 Resources
+
+`resources` builds an id → description table from the resource-creation chunks and the `SetName` chunks, and
+`draws` uses it to annotate every binding (§4.5):
+
+```powershell
+python rdc_analysis.py resources 'capture.rdc' 20      # first 20 rows
+python rdc_analysis.py resources 'capture.rdc' 0 lut   # every row whose name contains "lut"
+```
+
+```
+resources: 241 ids (211 with a descriptor, 234 named)
+res271      buffer    2097168 B                              m_MeshletBuf
+res2233     texture2d 256x64x1 mips=1 fmt=R8G8B8A8_TYPELESS  SkyAtmosphere.TransmittanceLut
+res298      unknown   -                                      GlobalResourceHeap
+total resources: 241 (shown 2)
+```
+
+* `kind` and the size come from the `D3D12_RESOURCE_DESC` in `Device_CreateCommittedResource` /
+  `CreatePlacedResource` / `CreateReservedResource` (offsets in §3.4): a buffer reports its byte size, a
+  texture its dimensions, array size, mip count and DXGI format.
+* The names come from `SetName`, which RenderDoc emits for every D3D12 object — heaps, queues, fences and PSOs
+  included. Those have no descriptor, so they show `-` and `kind=unknown`; they are in the table because
+  `draws` prints their ids (`heap298[279377]`).
+* DXGI format names are parsed out of RenderDoc's own copy of the enum (`common/dds_readwrite.cpp`); without
+  the source tree they print as numbers, like chunk names (§1.1).
+* `limit` counts rows (`0` = no limit, as in `chunks`) and `nameFilter` is a case-insensitive substring of the
+  name, so `0 lut` means "every row with `lut` in the name".
+
 ---
 
 ## 5. Worked examples
@@ -467,6 +514,11 @@ the decoders rely on.
   replay API (see ROADMAP).
 * `Device_CreatePipelineState` embeds the DXBC/DXIL containers of the shaders it references, which is why
   `parse_dxil_containers()` finds shaders at offsets *inside* those chunks.
+* Resource **names come from `SetName`**, not from the creation call, and the creation call is what carries the
+  descriptor (a buffer's `Width` is its byte size; a texture's dimensions, format and mips describe it). UE
+  sub-allocates buffers inside page buffers (`Resource Allocator Underlying Buffer`, `Fast Allocator Page`), so
+  `res<id>+0x<offset>` can point *into* a page: the page is what the capture names, and the logical buffer
+  inside it is not in the D3D12 stream at all.
 * Every array in a payload is preceded by a `u64` element count (`SERIALISE_ELEMENT_ARRAY`, `serialiser.h`).
   That is why `List_IASetVertexBuffers` views start at `+24`, and why
   `List_SetGraphicsRoot32BitConstants` is `28 + 4n` with the values at `+24` — the count is part of the
@@ -565,18 +617,16 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
 * **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be
   mapped to a uniform name offline. This is the main reason for the replay driver in `ROADMAP.md`.
 * **Root descriptor tables are not resolved.** `draws` reports a table binding as `heap<id>[index]` — the heap
-  resource and the descriptor index — because turning that pair into resources needs descriptor-heap parsing
-  (ROADMAP §3.2). Root CBVs need no such step.
+  resource, its name and the descriptor index — because turning that pair into resources needs descriptor-heap
+  parsing (ROADMAP §3.2). Root CBVs need no such step.
+* **A binding into an allocator page names the page, not the buffer inside it.** UE sub-allocates, so
+  `rp1=res1907+0x93300[Resource Allocator Under]` is as specific as the D3D12 stream gets: the logical buffer's
+  name lives in UE's own bookkeeping (§3.5). Resources reached through *descriptor tables* are the other half of
+  this problem, and those become nameable once the heaps are parsed (ROADMAP §3.2).
 * **No texture decoding.** `GetTextureData`-style format decoding (BC/ASTC/float, mips, slices) is not
   implemented; only raw bytes can be dumped.
 * **No shader disassembly.** `dump-shaders` extracts containers; disassembling the `ILDN`/`ILDB` bytecode needs
   an external tool.
-* **Decompression is single-threaded and cannot be parallelised.** A section is one continuous LZ4 stream cut
-  into 1 MB pages with matches that reach across page boundaries (§3.2), so blocks cannot be decoded
-  independently: a block-parallel decoder built this way produced 625,911,281 bytes for the PC capture where
-  the section declares 630,790,592 — a silently truncated stream, caught only by the cache's length check.
-  The first command on a capture therefore pays the full cost (~3.6 s for the 61 MB PC capture, ~3.2 s for the
-  34 MB Android one); every later command is served from the stream cache in ~0.27 s (§4.8).
 
 ## 9. See also
 

@@ -22,7 +22,7 @@ import sys
 import tempfile
 import types
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Sequence, Tuple
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -77,6 +77,46 @@ class TempDirCase(unittest.TestCase):
     def capture_path(self, chunks: Sequence[bytes], name: str = 'capture.rdc',
                      **kw: Any) -> str:
         return self.path(name, F.capture(chunks, **kw))
+
+
+class CmdCase(TempDirCase):
+    """Base class for tests that need chunk *names*: points the tool at a fake `renderdoc-src`.
+
+    Shared by both test modules (the command tests import it from here), so the fake enum tree is
+    built once per test class and chunk ids are always looked up by name.
+    """
+
+    #: populated in `setUpClass` for every test in the class.
+    _src_dir: ClassVar[str]
+    src_root: ClassVar[str]
+    names: ClassVar[Dict[int, str]]
+    ids: ClassVar[Dict[str, int]]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._src_dir = tempfile.mkdtemp(prefix='rdc_src_')
+        cls.src_root, cls.names = F.make_fake_src(cls._src_dir)
+        cls.ids = F.invert(cls.names)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls._src_dir, ignore_errors=True)
+
+    def setUp(self) -> None:
+        super().setUp()
+        names = mock.patch.object(R, 'load_chunk_names',
+                                  lambda src_root=None, driver='D3D12': dict(self.names))
+        src = mock.patch.object(R, 'RENDERDOC_SRC', self.src_root)
+        names.start()
+        src.start()
+        self.addCleanup(names.stop)
+        self.addCleanup(src.stop)
+
+    def ch(self, name: str, payload: bytes = b'', **kw: Any) -> bytes:
+        return F.chunk(self.ids[name], payload, **kw)
+
+    def cap(self, *chunks: bytes, **kw: Any) -> str:
+        return self.path('capture.rdc', F.capture(chunks, **kw))
 
 
 # =========================================================================== endian readers
@@ -805,6 +845,125 @@ class TestStreamCaching(CacheCase):
         self.assertEqual(buf.getvalue().count('warning: cannot write the stream cache'), 1)
 
 
+# =========================================================================== resource table
+class TestParseResourceTable(CmdCase):
+    """`parse_resource_table`: the descriptor from the creation chunks, the names from `SetName`."""
+
+    def table(self, *chunks: bytes) -> Dict[int, R.ResourceInfo]:
+        path = self.cap(*chunks)
+        _info, stream, _how = R.load_stream(path)
+        return R.parse_resource_table(stream, self.names)
+
+    def test_buffer_from_a_committed_resource(self):
+        table = self.table(self.ch('Device_CreateCommittedResource',
+                                   F.pl_committed_resource(271, F.pl_resource_desc(1, 2097168))))
+        self.assertEqual(table[271]['kind'], 'buffer')
+        self.assertEqual(table[271]['size'], 2097168)
+        self.assertEqual(table[271]['gpuAddress'], 0)
+
+    def test_texture_from_a_placed_resource(self):
+        desc = F.pl_resource_desc(3, 256, 64, 6, mips=8, fmt=10, alignment=4096)
+        table = self.table(self.ch('Device_CreatePlacedResource',
+                                   F.pl_placed_resource(2233, desc, heap=298, heap_offset=0x1000)))
+        self.assertEqual(table[2233]['kind'], 'texture2d')
+        self.assertEqual((table[2233]['width'], table[2233]['height']), (256, 64))
+        self.assertEqual(table[2233]['depth'], 6)          # depth doubles as array size
+        self.assertEqual(table[2233]['mips'], 8)
+        self.assertEqual(table[2233]['format'], 10)
+        self.assertEqual(table[2233]['size'], 0)           # textures have no byte size
+
+    def test_reserved_resource(self):
+        table = self.table(self.ch('Device_CreateReservedResource',
+                                   F.pl_reserved_resource(9, F.pl_resource_desc(4, 64, 64, 64))))
+        self.assertEqual(table[9]['kind'], 'texture3d')
+
+    def test_the_id_is_the_second_to_last_field(self):
+        # committed(117), placed(109) and reserved(93) payloads all end with id | gpuAddress, so the
+        # id is always at len-16 whatever the optional clear value does to the rest of the tail
+        # (the real captures carry 117/145 and 109/118/137)
+        desc = F.pl_resource_desc(1, 16)
+        cases = [('Device_CreateCommittedResource', F.pl_committed_resource(4242, desc), 117, 24),
+                 ('Device_CreatePlacedResource', F.pl_placed_resource(4242, desc), 109, 16),
+                 ('Device_CreateReservedResource', F.pl_reserved_resource(4242, desc), 93, 0)]
+        for name, blob, length, desc_off in cases:
+            with self.subTest(chunk=name):
+                self.assertEqual(len(blob), length)
+                self.assertEqual(R.RESOURCE_CHUNKS[name], desc_off)
+                self.assertIsNotNone(R._parse_resource(blob, desc_off))
+                self.assertEqual(self.table(self.ch(name, blob))[4242]['size'], 16)
+
+    def test_gpu_address_is_the_last_field(self):
+        table = self.table(self.ch('Device_CreateCommittedResource',
+                                   F.pl_committed_resource(7, F.pl_resource_desc(1, 64),
+                                                           gpu_address=0x7FF6A000)))
+        self.assertEqual(table[7]['gpuAddress'], 0x7FF6A000)
+
+    def test_a_name_after_the_creation(self):
+        chunks = [self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(271, F.pl_resource_desc(1, 4096))),
+                  self.ch('SetName', F.pl_set_name(271, 'SkyAtmosphere.SkyViewLut'))]
+        self.assertEqual(self.table(*chunks)[271]['name'], 'SkyAtmosphere.SkyViewLut')
+
+    def test_a_name_before_the_creation(self):
+        # the table is order-independent: names are merged in after the whole walk
+        chunks = [self.ch('SetName', F.pl_set_name(271, 'SceneUniformBuffer')),
+                  self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(271, F.pl_resource_desc(1, 4096)))]
+        table = self.table(*chunks)
+        self.assertEqual(table[271]['name'], 'SceneUniformBuffer')
+        self.assertEqual(table[271]['kind'], 'buffer')
+
+    def test_an_id_that_is_only_named(self):
+        # heaps, queues and fences have no descriptor: kind 'unknown', no size
+        table = self.table(self.ch('SetName', F.pl_set_name(298, 'GlobalResourceHeap')))
+        self.assertEqual(table[298]['kind'], 'unknown')
+        self.assertEqual(table[298]['name'], 'GlobalResourceHeap')
+        self.assertEqual(table[298]['size'], 0)
+
+    def test_a_name_with_a_length_past_the_payload_is_ignored(self):
+        blob = F.u64b(5) + F.u32b(999) + b'short'
+        table = self.table(self.ch('SetName', blob))
+        self.assertEqual(table, {})
+
+    def test_a_name_payload_that_is_too_short_is_ignored(self):
+        self.assertEqual(self.table(self.ch('SetName', F.u64b(5) + b'\x01\x00')), {})
+
+    def test_an_invalid_dimension_is_not_a_resource(self):
+        # dimension 0 (unknown) and 9 are not D3D10_RESOURCE_DIMENSION values: skip, do not guess
+        for dim in (0, 9):
+            with self.subTest(dim=dim):
+                table = self.table(self.ch('Device_CreateCommittedResource',
+                                           F.pl_committed_resource(3, F.pl_resource_desc(dim, 64))))
+                self.assertEqual(table, {})
+
+    def test_a_payload_too_short_for_a_descriptor_is_skipped(self):
+        blob = F.pl_committed_resource(3, F.pl_resource_desc(1, 64))[:90]
+        self.assertEqual(self.table(self.ch('Device_CreateCommittedResource', blob)), {})
+
+    def test_an_empty_stream_is_an_empty_table(self):
+        self.assertEqual(self.table(), {})
+
+
+class TestLoadFormatNames(TempDirCase):
+    def test_parses_the_dxgi_format_enum(self):
+        _root, _names = F.make_fake_src(self.tmp)
+        formats = R.load_format_names(self.tmp)
+        self.assertEqual(formats[28], 'R8G8B8A8_UNORM')       # the prefix is stripped
+        self.assertEqual(formats[0], 'UNKNOWN')
+        self.assertEqual(formats[90], 'BC4_UNORM')
+
+    def test_missing_source_returns_no_names(self):
+        self.assertEqual(R.load_format_names(os.path.join(self.tmp, 'nope')), {})
+
+    def test_a_plain_enum_is_parsed_like_an_enum_class(self):
+        # `parse_chunk_enum` handles both spellings (the chunk enums are enum class, DXGI_FORMAT
+        # in RenderDoc is a plain enum)
+        text = 'enum DXGI_FORMAT\n{\n  DXGI_FORMAT_UNKNOWN = 0,\n  DXGI_FORMAT_BC7_UNORM = 98,\n};\n'
+        self.assertEqual(R.parse_chunk_enum(text, 'DXGI_FORMAT'),
+                         {0: 'DXGI_FORMAT_UNKNOWN', 98: 'DXGI_FORMAT_BC7_UNORM'})
+        self.assertEqual(R.parse_chunk_enum(text, 'NoSuchEnum'), {})
+
+
 # =========================================================================== misc helpers
 class TestAlignUp(unittest.TestCase):
     def test_default_alignment_is_64(self):
@@ -889,9 +1048,14 @@ class TestParseChunkEnum(unittest.TestCase):
         self.assertEqual(R.parse_chunk_enum(ENUM_TEXT, 'NoSuchEnum'), {})
         self.assertEqual(R.parse_chunk_enum('', 'SystemChunk'), {})
 
-    def test_plain_enum_without_class_does_not_match(self):
+    def test_a_plain_enum_is_parsed_too(self):
+        # `DXGI_FORMAT` is a plain `enum` in RenderDoc (common/dds_readwrite.cpp), so the pattern
+        # accepts both spellings -- with or without an explicit underlying type
         text = 'enum SystemChunk : uint32_t\n{\n  A = 1,\n};\n'
-        self.assertEqual(R.parse_chunk_enum(text, 'SystemChunk'), {})
+        self.assertEqual(R.parse_chunk_enum(text, 'SystemChunk'), {1: 'A'})
+        text = 'enum DXGI_FORMAT\n{\n  DXGI_FORMAT_UNKNOWN = 0,\n  DXGI_FORMAT_BC7_UNORM = 98,\n};\n'
+        self.assertEqual(R.parse_chunk_enum(text, 'DXGI_FORMAT'),
+                         {0: 'DXGI_FORMAT_UNKNOWN', 98: 'DXGI_FORMAT_BC7_UNORM'})
 
     def test_only_the_named_enum_is_parsed(self):
         text = ('enum class A : uint32_t\n{\n  X = 1,\n};\n'

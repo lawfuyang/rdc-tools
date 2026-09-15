@@ -15,12 +15,10 @@ from __future__ import annotations
 import contextlib
 import io
 import os
-import shutil
 import struct
 import sys
-import tempfile
 import unittest
-from typing import Any, Callable, ClassVar, Dict
+from typing import Any, Callable
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,43 +29,11 @@ for _p in (HERE, ROOT):
 
 import rdc_analysis as R          # noqa: E402
 import rdc_fixtures as F          # noqa: E402
-from test_rdc_analysis import TempDirCase, capture_text, capture_all   # noqa: E402
+from test_rdc_analysis import CmdCase as _CmdCase, capture_text, capture_all   # noqa: E402
 
 
-class CmdCase(TempDirCase):
-    """Base class that points the tool at a fake RenderDoc source tree."""
-
-    #: populated in `setUpClass` for every test in the class.
-    _src_dir: ClassVar[str]
-    src_root: ClassVar[str]
-    names: ClassVar[Dict[int, str]]
-    ids: ClassVar[Dict[str, int]]
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls._src_dir = tempfile.mkdtemp(prefix='rdc_src_')
-        cls.src_root, cls.names = F.make_fake_src(cls._src_dir)
-        cls.ids = F.invert(cls.names)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        shutil.rmtree(cls._src_dir, ignore_errors=True)
-
-    def setUp(self) -> None:
-        super().setUp()
-        names = mock.patch.object(R, 'load_chunk_names',
-                                  lambda src_root=None, driver='D3D12': dict(self.names))
-        src = mock.patch.object(R, 'RENDERDOC_SRC', self.src_root)
-        names.start()
-        src.start()
-        self.addCleanup(names.stop)
-        self.addCleanup(src.stop)
-
-    def ch(self, name: str, payload: bytes = b'', **kw: Any) -> bytes:
-        return F.chunk(self.ids[name], payload, **kw)
-
-    def cap(self, *chunks: bytes, **kw: Any) -> str:
-        return self.path('capture.rdc', F.capture(chunks, **kw))
+class CmdCase(_CmdCase):
+    """`CmdCase` (fake source tree) plus the output helpers the command tests use."""
 
     def out(self, fn: Callable[..., object], *args: Any, **kwargs: Any) -> str:
         return capture_text(fn, *args, **kwargs)
@@ -224,6 +190,82 @@ class TestCmdCache(CmdCase):
                 out = self.out(R.main)
         exit_mock.assert_called_once_with(0)
         self.assertIn('cache dir :', out)
+
+
+class TestCmdResources(CmdCase):
+    def test_lists_a_buffer_and_a_texture_with_their_names(self):
+        chunks = [self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(271, F.pl_resource_desc(1, 2097168))),
+                  self.ch('Device_CreatePlacedResource',
+                          F.pl_placed_resource(2233, F.pl_resource_desc(3, 256, 64, mips=8, fmt=10))),
+                  self.ch('SetName', F.pl_set_name(271, 'm_MeshletBuf')),
+                  self.ch('SetName', F.pl_set_name(2233, 'SkyAtmosphere.SkyViewLut'))]
+        out = self.out(R.cmd_resources, self.cap(*chunks))
+        self.assertIn('resources: 2 ids (2 with a descriptor, 2 named)', out)
+        buffer_row = self.line_with(out, 'm_MeshletBuf')
+        self.assertIn('res271', buffer_row)
+        self.assertIn('buffer', buffer_row)
+        self.assertIn('2097168 B', buffer_row)
+        texture_row = self.line_with(out, 'SkyViewLut')
+        self.assertIn('256x64x1', texture_row)
+        self.assertIn('mips=8', texture_row)
+        self.assertIn('R16G16B16A16_FLOAT', texture_row)     # from the fake DXGI_FORMAT enum
+
+    def test_an_unnamed_resource_shows_a_dash(self):
+        path = self.cap(self.ch('Device_CreateCommittedResource',
+                                F.pl_committed_resource(1, F.pl_resource_desc(1, 64))))
+        self.assertTrue(self.line_with(self.out(R.cmd_resources, path), 'res1').rstrip().endswith('-'))
+
+    def test_an_id_that_is_only_named_has_no_descriptor(self):
+        path = self.cap(self.ch('SetName', F.pl_set_name(298, 'GlobalResourceHeap')))
+        out = self.out(R.cmd_resources, path)
+        self.assertIn('resources: 1 ids (0 with a descriptor, 1 named)', out)
+        self.assertIn('unknown', self.line_with(out, 'GlobalResourceHeap'))
+
+    def test_name_filter(self):
+        chunks = [self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(1, F.pl_resource_desc(1, 64))),
+                  self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(2, F.pl_resource_desc(1, 64))),
+                  self.ch('SetName', F.pl_set_name(1, 'SkyAtmosphere.SkyViewLut')),
+                  self.ch('SetName', F.pl_set_name(2, 'm_MeshletBuf'))]
+        out = self.out(R.cmd_resources, self.cap(*chunks), 200, 'sky')
+        self.assertIn('SkyViewLut', out)
+        self.assertNotIn('MeshletBuf', out)
+        self.assertIn('total resources: 2 (shown 1)', out)
+
+    def test_limit_caps_the_rows_but_not_the_count(self):
+        chunks = [self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(i, F.pl_resource_desc(1, 64))) for i in range(1, 6)]
+        out = self.out(R.cmd_resources, self.cap(*chunks), 2)
+        self.assertIn('total resources: 5 (shown 2)', out)
+        rows = [l for l in out.splitlines() if l.startswith('res') and 'resources:' not in l]
+        self.assertEqual(len(rows), 2)
+
+    def test_a_limit_of_zero_means_no_limit(self):
+        # `resources <rdc> 0 <filter>` is the "find every row matching" idiom
+        chunks = []
+        for i in range(1, 6):
+            chunks.append(self.ch('Device_CreateCommittedResource',
+                                  F.pl_committed_resource(i, F.pl_resource_desc(1, 64))))
+            chunks.append(self.ch('SetName', F.pl_set_name(i, 'Buffer%d' % i)))
+        out = self.out(R.cmd_resources, self.cap(*chunks), 0, 'buffer')
+        self.assertIn('total resources: 5 (shown 5)', out)
+
+    def test_missing_format_names_fall_back_to_numbers(self):
+        path = self.cap(self.ch('Device_CreatePlacedResource',
+                                F.pl_placed_resource(3, F.pl_resource_desc(3, 64, 64, fmt=10))))
+        with mock.patch.object(R, 'load_format_names', lambda src_root=None: {}):
+            out = self.out(R.cmd_resources, path)
+        self.assertIn('fmt=10', out)
+        self.assertIn('note: DXGI format names need the RenderDoc source', out)
+
+    def test_main_dispatches_resources(self):
+        path = self.cap(self.ch('SetName', F.pl_set_name(1, 'SceneUniformBuffer')))
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'resources', path, '4', 'uniform']):
+            out = self.out(R.main)
+        self.assertIn('SceneUniformBuffer', out)
+        self.assertIn('total resources: 1 (shown 1)', out)
 
 
 class TestLoadStream(CmdCase):
@@ -849,6 +891,42 @@ class TestCmdDraws(CmdCase):
         self.assertNotIn('VB : ', out)
         self.assertNotIn('IB : ', out)
 
+    def test_bindings_are_annotated_with_the_resource_names(self):
+        chunks = [self.ch('Device_CreateCommittedResource',
+                          F.pl_committed_resource(1907, F.pl_resource_desc(1, 4194304))),
+                  self.ch('SetName', F.pl_set_name(1907, 'SceneUniformBuffer')),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x120000)),
+                  self.ch('List_IASetVertexBuffers', F.pl_vertex_buffers(7, 0, [(1907, 0x100, 64, 12)])),
+                  self.ch('List_IASetIndexBuffer', F.pl_index_buffer(7, 1907, 0x200, 16, 57)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('CBV: rp10=res1907+0x120000[SceneUniformBuffer]', out)
+        self.assertIn('res1907+0x100(sz64,st12)[SceneUniformBuffer]', out)
+        self.assertIn('IB : res1907+0x200[SceneUniformBuffer]', out)
+
+    def test_an_unnamed_resource_gets_no_brackets(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('CBV: rp10=res1907+0x10', out)
+        self.assertNotIn('res1907+0x10[', out)
+
+    def test_long_names_are_truncated(self):
+        chunks = [self.ch('SetName', F.pl_set_name(1907, 'A' * 40)),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('[%s]' % ('A' * 24), out)
+        self.assertNotIn('A' * 25, out)
+
+    def test_descriptor_tables_are_annotated_with_the_heap_name(self):
+        # `GlobalSamplerHeap` says the table holds samplers, which is worth knowing
+        chunks = [self.ch('SetName', F.pl_set_name(299, 'GlobalSamplerHeap')),
+                  self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 1, 299, 0)),
+                  self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('Table: rp1=heap299[0][GlobalSamplerHeap]', out)
+
     def test_a_truncated_state_chunk_invents_no_bindings(self):
         chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.u64b(7) + F.u32b(1)),
                   self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
@@ -1267,7 +1345,7 @@ class TestRealCapture(unittest.TestCase):
 
     def test_commands_run_without_crashing(self):
         for cmd in (R.cmd_sections, R.cmd_summary, R.cmd_markers, R.cmd_chunks, R.cmd_draws,
-                    R.cmd_dxbc, R.cmd_sig, R.cmd_rootconst):
+                    R.cmd_resources, R.cmd_dxbc, R.cmd_sig, R.cmd_rootconst):
             with self.subTest(cmd=cmd.__name__):
                 self.assertTrue(capture_text(cmd, self.path).strip())
 

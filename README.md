@@ -216,6 +216,8 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `List_SetGraphicsRoot{ShaderResource,UnorderedAccess}View` | `u64 cmdList, u32 rootParam, u64 resId, u64 offset` |
 | `List_SetGraphicsRoot32BitConstants` | `u64 cmdList, u32 rootParam, u32 numValues, u64 arrayCount, u32 values[n], u32 destOffset` (so `length == 28 + 4n`) |
 | `List_SetGraphicsRootDescriptorTable` | `u64 cmdList, u32 rootParam, u64 heapId, u32 descriptorIndex` — a `D3D12_GPU_DESCRIPTOR_HANDLE` is a `PortableHandle`, not a pointer |
+| `List_SetComputeRoot{Signature,ConstantBufferView,DescriptorTable}` | the same layouts as the `Graphics` ones above; only the root-parameter namespace differs (checked against both captures by `verify`) |
+| `List_Reset` | 64 bytes: the list's creation parameters (IID, node mask, type, baked id), then the **command-list id at +40** and the **initial PSO at +48** — the id at +40 is the one every other `List_*` chunk carries at +0 |
 | `InitialContents` | `u64 resourceId` + resource description, then the data — only the id and the first header bytes are decoded (`chunk <N>`); reading the contents is the replay driver's job |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
 
@@ -299,21 +301,31 @@ so a two-character name is still not shown by those.
 
 #### `draws` — the per-draw table
 
-Maintains running state while walking the stream: marker stack (`PushMarker`/`PopMarker`), pipeline state
-(`List_SetPipelineState`), vertex streams (`List_IASetVertexBuffers`), index buffer, and the list of root
-constant-buffer bindings. On every draw/dispatch it prints:
+Maintains the state of each **command list** while walking the stream: marker stack (`PushMarker`/`PopMarker`),
+pipeline state (`List_SetPipelineState`), root signature and root bindings (graphics and compute, CBVs and
+descriptor tables), vertex streams (`List_IASetVertexBuffers`) and the index buffer. On every draw/dispatch it
+prints the state that is *in effect* — everything still bound, not only what changed since the previous draw:
 
 ```
 #452    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
         CBV: rp10=res1907+0x120000  rp11=res342+0x3b000  rp6=res342+0x3b000  rp7=res342+0x8d200
+        Table: rp0=heap298[279377]
         VB : res315+0x3f7400(sz6708,st12)  res315+0x3f5900(sz2236,st4)  res315+0x300(sz16,st0)
         IB : res315+0x3f2b00
 ```
 
-`rp<n>=res<id>+0x<offset>` is a root-parameter CBV binding; `res<id>+0x<off>(sz,st)` is a vertex stream
-(resource, byte offset, size, stride). A `res0+0x0(sz0,st0)` entry is a **NULL vertex buffer** — a useful
-signature in itself. State lists reset when the PSO changes and after each draw, so the printed CBVs are the
-ones bound *for that draw* (see §8: inherited bindings are not reported).
+`rp<n>=res<id>+0x<offset>` is a root-parameter CBV binding; `rp<n>=heap<id>[index]` is a root-parameter
+descriptor table (the heap resource and descriptor index — resolving it to resources is ROADMAP §3.2);
+`res<id>+0x<off>(sz,st)` is a vertex stream (resource, byte offset, size, stride). A `res0+0x0(sz0,st0)` entry
+is a **NULL vertex buffer** — a useful signature in itself.
+
+D3D12 bindings belong to the command list, so this is the real state and not a heuristic: they survive
+`SetPipelineState` and every draw, and only change when something rebinds them. Two events clear the root
+bindings — `Reset()` (a fresh list, which may start with an initial PSO) and a root signature that actually
+*differs* from the current one ("if a root signature is changed, all previous root arguments become stale";
+setting the same one again keeps them). State is tracked per command list, and a null index buffer clears the
+binding. Dispatches report the compute root bindings, draws the graphics ones plus IA state; the two namespaces
+are separate. At most 16 vertex views per `IASetVertexBuffers` chunk are tracked.
 
 ### 4.6 Tests
 
@@ -438,6 +450,11 @@ the decoders rely on.
   read as data. `verify` reports the padding totals and lists non-zero runs — both captures tested have all-zero
   padding, so this is a hazard rather than an observed problem.
 * `ResourceId` is a `u64`; `0` means null.
+* D3D12 bindings are **command-list state**, and the stream is read the same way D3D12 defines it:
+  `SetPipelineState` and every draw leave them alone, `Reset()` clears them (and can set an initial PSO), and a
+  root signature that *differs* from the current one makes all previous root arguments stale while re-setting
+  the same signature keeps them. Graphics and compute root parameters are separate namespaces. `draws` reports
+  the state in effect at each call on the strength of this (§4.5).
 * `D3D12BufferLocation` (CBV/SRV/UAV and vertex/index views) serialises as **(resourceId, byteOffset)** — this is
   the VA→resource mapping, obtained for free.
 * `D3D12_GPU_DESCRIPTOR_HANDLE` serialises as a **`PortableHandle` (`u64 heapId, u32 descriptorIndex`)**, not as
@@ -547,8 +564,9 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed.
 * **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be
   mapped to a uniform name offline. This is the main reason for the replay driver in `ROADMAP.md`.
-* **`draws` state tracking is a heuristic.** CBV/VB lists are "bindings since the previous draw", reset on PSO
-  change; a draw that inherits state from earlier in the frame will show fewer bindings.
+* **Root descriptor tables are not resolved.** `draws` reports a table binding as `heap<id>[index]` — the heap
+  resource and the descriptor index — because turning that pair into resources needs descriptor-heap parsing
+  (ROADMAP §3.2). Root CBVs need no such step.
 * **No texture decoding.** `GetTextureData`-style format decoding (BC/ASTC/float, mips, slices) is not
   implemented; only raw bytes can be dumped.
 * **No shader disassembly.** `dump-shaders` extracts containers; disassembling the `ILDN`/`ILDB` bytecode needs

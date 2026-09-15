@@ -710,21 +710,151 @@ class TestCmdDraws(CmdCase):
         self.assertIn('IB : res80641+0x3f2b0000', out)
         self.assertIn('total draws/dispatches: 1', out)
 
-    def test_state_is_cleared_after_each_draw(self):
+    def test_state_persists_across_draws(self):
+        # D3D12 bindings belong to the command list: a draw that binds nothing still has them
         chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
                   self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),
                   self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
         out = self.out(R.cmd_draws, self.cap(*chunks))
-        self.assertEqual(out.count('CBV: '), 1)
+        self.assertEqual(out.count('CBV: '), 2)
         self.assertIn('total draws/dispatches: 2', out)
 
-    def test_pso_change_resets_the_bindings(self):
+    def test_a_binding_made_three_draws_earlier_is_still_reported(self):
+        # the regression the roadmap asked for: inheritance, not "what changed since the last draw"
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10))]
+        chunks += [self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))
+                   for _ in range(3)]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertEqual(out.count('CBV: rp10=res1907+0x10'), 3)
+
+    def test_pso_change_keeps_the_bindings(self):
+        # SetPipelineState only changes the PSO: root arguments and IA bindings are list state
         chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
                   self.ch('List_SetPipelineState', F.pl_pso(7, 99)),
                   self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
         out = self.out(R.cmd_draws, self.cap(*chunks))
-        self.assertNotIn('CBV: ', out)
+        self.assertIn('CBV: rp10=res1907+0x10', out)
         self.assertIn(' 99 ', self.line_with(out, 'DrawIndexedInstanced'))
+
+    def test_a_changed_root_signature_clears_the_root_bindings(self):
+        chunks = [self.ch('List_SetGraphicsRootSignature', F.pl_root_signature(7, 5)),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_SetGraphicsRootSignature', F.pl_root_signature(7, 6)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertNotIn('CBV: ', out)
+
+    def test_setting_the_same_root_signature_again_keeps_the_bindings(self):
+        # "if the root signature is redundantly set to the same one, existing root signature
+        # bindings do not become stale" -- D3D12 command-list semantics
+        chunks = [self.ch('List_SetGraphicsRootSignature', F.pl_root_signature(7, 5)),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_SetGraphicsRootSignature', F.pl_root_signature(7, 5)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('CBV: rp10=res1907+0x10', out)
+
+    def test_reset_clears_the_list_and_uses_its_initial_pso(self):
+        chunks = [self.ch('List_SetPipelineState', F.pl_pso(7, 99)),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_Reset', F.pl_reset(7, initial_pso=77)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertNotIn('CBV: ', out)
+        self.assertIn(' 77 ', self.line_with(out, 'DrawIndexedInstanced'))
+
+    def test_reset_leaves_another_command_list_alone(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_Reset', F.pl_reset(8)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('CBV: rp10=res1907+0x10', out)
+
+    def test_a_reset_with_an_unknown_layout_clears_everything(self):
+        # documents the fallback: an unrecognised Reset cannot be attributed to one list, so
+        # nothing stale is allowed to survive it (and `verify` flags the odd payload length)
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_Reset', b'\x00' * 16),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertNotIn('CBV: ', out)
+
+    def test_state_is_tracked_per_command_list(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(8, 11, 342, 0x20)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(8, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        cbv_lines = [l.strip() for l in out.splitlines() if l.strip().startswith('CBV:')]
+        self.assertEqual(cbv_lines, ['CBV: rp10=res1907+0x10', 'CBV: rp11=res342+0x20'])
+
+    def test_vertex_buffer_slots_are_independent(self):
+        # IASetVertexBuffers only touches [startSlot, startSlot + numViews): the rest keep theirs
+        chunks = [self.ch('List_IASetVertexBuffers', F.pl_vertex_buffers(7, 0, [(315, 0x1000, 64, 12)])),
+                  self.ch('List_IASetVertexBuffers', F.pl_vertex_buffers(7, 2, [(316, 0x2000, 32, 8)])),
+                  self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        line = self.line_with(out, 'VB : ')
+        self.assertIn('res315+0x1000(sz64,st12)', line)
+        self.assertIn('res316+0x2000(sz32,st8)', line)
+        self.assertLess(line.index('res315'), line.index('res316'))     # printed in slot order
+
+    def test_null_index_buffer_clears_the_binding(self):
+        chunks = [self.ch('List_IASetIndexBuffer', F.pl_index_buffer(7, 80641, 0x1000, 16, 57)),
+                  self.ch('List_IASetIndexBuffer', F.pl_index_buffer(7, 0, 0, 0, 0, present=False)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertNotIn('IB : ', out)
+
+    def test_rebinding_a_root_parameter_replaces_it(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 342, 0x20)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('CBV: rp10=res342+0x20', out)
+        self.assertNotIn('res1907', out)
+
+    def test_descriptor_tables_are_reported(self):
+        chunks = [self.ch('List_SetGraphicsRootDescriptorTable', F.pl_root_table(7, 4, 298, 138458)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('Table: rp4=heap298[138458]', out)
+
+    def test_dispatch_reports_compute_bindings_and_not_graphics_ones(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 1, 1907, 0x10)),
+                  self.ch('List_SetComputeRootConstantBufferView', F.pl_root_view(7, 2, 342, 0x20)),
+                  self.ch('List_IASetVertexBuffers', F.pl_vertex_buffers(7, 0, [(315, 0, 4, 4)])),
+                  self.ch('List_Dispatch', F.pl_dispatch(7, 8, 4, 1)),
+                  self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        lines = out.splitlines()
+        dispatch = lines.index(self.line_with(out, 'Dispatch'))
+        self.assertEqual(lines[dispatch + 1].strip(), 'CBV: rp2=res342+0x20')
+        draw = lines.index(self.line_with(out, 'DrawInstanced'))
+        self.assertEqual(lines[draw + 1].strip(), 'CBV: rp1=res1907+0x10')
+        self.assertIn('VB : ', lines[draw + 2])          # IA state is graphics-only
+
+    def test_execute_indirect_reports_both_namespaces(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 1, 1907, 0x10)),
+                  self.ch('List_SetComputeRootConstantBufferView', F.pl_root_view(7, 2, 342, 0x20)),
+                  self.ch('List_ExecuteIndirect', F.u64b(7) + F.u32b(1) + F.u32b(2) + F.u32b(3))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('CBV: rp2=res342+0x20', out)
+        self.assertIn('CBV: rp1=res1907+0x10', out)
+
+    def test_a_draw_with_no_state_at_all_reports_nothing(self):
+        chunks = [self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertNotIn('CBV: ', out)
+        self.assertNotIn('VB : ', out)
+        self.assertNotIn('IB : ', out)
+
+    def test_a_truncated_state_chunk_invents_no_bindings(self):
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.u64b(7) + F.u32b(1)),
+                  self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertNotIn('CBV: ', out)
+        self.assertIn('total draws/dispatches: 1', out)
 
     def test_max_draws_caps_the_rows_but_not_the_count(self):
         chunks = [self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 3, 1, 0, 0)) for _ in range(3)]

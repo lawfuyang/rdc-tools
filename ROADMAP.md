@@ -256,8 +256,6 @@ captures tested but is not guaranteed).
 * **Golden output files for the decoders** — snapshot `summary` / `draws` / `dxbc` output per capture and
   diff it on every run, so a decoder change shows up as a reviewable diff instead of a silent drift. (~2 h)
 * **Memory-mapped stream access** — avoid holding ~650 MB in RAM for the largest captures. (~4 h)
-* **`draws` state fidelity** — track state per PSO properly (and root-signature-aware), so inherited bindings
-  are reported instead of omitted. (~4 h) — this is §6.4, and closes the matching README §8 bullet.
 * **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
   (~1 h)
 
@@ -277,13 +275,11 @@ never silent ones).
 | 6.1 | Chunk names need `renderdoc-src` | §4 bundled chunk-name table | P1 | ~2 h |
 | 6.2 | Only section 0 is decompressed | §3.5 other `.rdc` sections | P1 | ~4 h |
 | 6.3 | No name resolution for root parameters | §3.1 (+ §1 replay) | P1 | ~4 h, or free with replay |
-| 6.4 | `draws` state tracking is a heuristic | §5 `draws` state fidelity | P1 | ~4 h |
-| 6.5 | No texture decoding | §3.4 (+ §1 replay) | P1 | 2–3 d |
-| 6.6 | No shader disassembly | §3.6 | P2 | ~1 d |
+| 6.4 | No texture decoding | §3.4 (+ §1 replay) | P1 | 2–3 d |
+| 6.5 | No shader disassembly | §3.6 | P2 | ~1 d |
 
-**Order:** 6.1 is the last cheap environment dependency; 6.2 unblocks the extra sections; 6.4 is the biggest
-offline output-quality win. 6.3, 6.5 and 6.6 are what replay (§1) answers directly, so attempt them offline
-only if replay is still blocked.
+**Order:** 6.1 is the last cheap environment dependency and 6.2 unblocks the extra sections; 6.3, 6.4 and 6.5
+are what replay (§1) answers directly, so attempt them offline only if replay is still blocked.
 
 ---
 
@@ -296,18 +292,16 @@ only if replay is still blocked.
   command can dump any of them; section 0 behaviour unchanged.
 * **6.3** (§3.1 + §1): every `rpN` in `draws` carries a name (from `RDEF`/reflection) or is explicitly
   marked unnamed; the wrong conclusion recorded in README §9 can no longer be reached from the output alone.
-* **6.4** (§5): a draw that inherits bindings from earlier in the frame reports them; add a regression test
-  built from a synthetic stream with a CBV bound 3 draws earlier.
-* **6.5** (§3.4): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
-* **6.6** (§3.6): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
+* **6.4** (§3.4): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
+* **6.5** (§3.6): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
 
 ---
 
 ## 7. Suggested order
 
-1. **README §8 fixes** (§6) — 6.1 is a cheap environment win, 6.2 and 6.4 improve offline output.
+1. **README §8 fixes** (§6) — 6.1 is a cheap environment win, 6.2 improves offline output.
 2. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data, and
-   is the cheap route through §6.3, §6.5 and §6.6.
+   is the cheap route through §6.3, §6.4 and §6.5.
 3. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
 4. **Root signature / descriptor decode** (§3.1, §3.2) and **resource table** (§3.3) — make the offline output
    self-explanatory (skip §3.1 if replay landed first).

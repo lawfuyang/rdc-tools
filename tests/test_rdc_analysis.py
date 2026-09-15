@@ -1242,9 +1242,11 @@ class TestCheckStream(unittest.TestCase):
         self.assertEqual(len(notes), 1)
 
     def test_expected_lengths_cover_the_fixed_layout_chunks(self):
-        for name in ('List_SetPipelineState', 'List_DrawIndexedInstanced', 'List_DrawInstanced',
-                     'List_Dispatch', 'List_SetGraphicsRootSignature',
-                     'List_SetGraphicsRootConstantBufferView', 'List_IASetIndexBuffer'):
+        for name in ('List_SetPipelineState', 'List_Reset', 'List_DrawIndexedInstanced',
+                     'List_DrawInstanced', 'List_Dispatch', 'List_SetGraphicsRootSignature',
+                     'List_SetGraphicsRootConstantBufferView', 'List_IASetIndexBuffer',
+                     'List_SetComputeRootSignature', 'List_SetComputeRootDescriptorTable',
+                     'List_SetComputeRootConstantBufferView'):
             with self.subTest(name=name):
                 self.assertIn(name, R.EXPECTED_LENGTHS)
 
@@ -1425,6 +1427,29 @@ class TestDecodeChunk(unittest.TestCase):
     def test_root_signature(self):
         self.assertEqual(R.decode_chunk('List_SetGraphicsRootSignature', F.pl_root_signature(7, 42)),
                          ['cmdList=7 rootSig=42'])
+
+    def test_compute_root_bindings_use_the_graphics_layouts(self):
+        # the compute setters serialise the same fields as the graphics ones, so they decode the
+        # same way -- which is also what lets `draws` track both namespaces with one code path
+        self.assertEqual(R.decode_chunk('List_SetComputeRootConstantBufferView',
+                                        F.pl_root_view(7, 2, 342, 0x20)),
+                         ['cmdList=7 rootParam=2 res=342+0x20'])
+        self.assertEqual(R.decode_chunk('List_SetComputeRootDescriptorTable',
+                                        F.pl_root_table(7, 4, 298, 138458)),
+                         ['cmdList=7 rootParam=4 heap=298 index=138458'])
+        self.assertEqual(R.decode_chunk('List_SetComputeRootSignature', F.pl_root_signature(7, 5)),
+                         ['cmdList=7 rootSig=5'])
+
+    def test_reset_reports_the_list_and_its_initial_pso(self):
+        # 64-byte payload: the command-list id sits at +40, the initial PSO at +48 (the id at +40 is
+        # the one every other List_* chunk carries at +0 -- measured on both captures in this repo)
+        blob = F.pl_reset(7, initial_pso=77)
+        self.assertEqual(len(blob), 64)
+        self.assertEqual(R.decode_chunk('List_Reset', blob), ['cmdList=7 initialPso=77'])
+        self.assertEqual(R.decode_chunk('List_Reset', F.pl_reset(7)), ['cmdList=7 initialPso=0'])
+
+    def test_reset_truncated(self):
+        self.assertEqual(R.decode_chunk('List_Reset', F.pl_reset(7)[:55]), [])
 
     def test_vertex_buffers(self):
         blob = F.pl_vertex_buffers(7, 1, [(315, 0x3F7400, 6708, 12), (0, 0, 0, 0)])

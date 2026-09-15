@@ -53,8 +53,11 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 - `rdc_analysis.py` stays a single file — do not split it into a package or add a shim module.
 - Keep the documented public names (`parse_container`, `iter_chunks`, `decode_chunk`, `load_chunk_names`,
-  `load_stream`, `cache_dir`, `cache_lookup`, `cache_store`, `cmd_*`, `RENDERDOC_SRC`, `MARKER_CHUNKS`,
-  `CHUNK_*`, ...) — tests, docs and scripts reference them.
+  `load_stream`, `cache_dir`, `cache_lookup`, `cache_store`, `DrawState`, `cmd_*`, `RENDERDOC_SRC`,
+  `MARKER_CHUNKS`, `CHUNK_*`, ...) — tests, docs and scripts reference them.
+- `draws` reports the D3D12 command-list state in effect at each call (see `DrawState`): bindings survive
+  `SetPipelineState` and draws, `Reset()` clears them, and only a *changed* root signature invalidates root
+  arguments. Do not reintroduce a per-draw or per-PSO reset, and keep the state keyed per command list.
 - CLI parsing stays hand-rolled: `main()` prints the module docstring for a missing/unknown command and lets
   `IndexError`/`ValueError` escape for bad arguments. Do not replace it with `argparse`. Commands that take no
   capture path (`selftest`, `cache`) are dispatched before the `len(argv) < 3` check.

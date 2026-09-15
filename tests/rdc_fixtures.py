@@ -232,6 +232,17 @@ def pl_root_signature(cmdlist: int, rootsig: int) -> bytes:
     return u64b(cmdlist) + u64b(rootsig)
 
 
+def pl_reset(cmdlist: int, initial_pso: int = 0) -> bytes:
+    """`List_Reset`: 64 bytes, with the command-list id at +40 and the initial PSO at +48.
+
+    The first 40 bytes are the list's creation parameters (IID, node mask, type, baked list id),
+    none of which the tool needs. The id at +40 is the one the other `List_*` chunks carry at +0 --
+    measured on both captures in this repo (170/170 setter chunks matched in the PC capture), and
+    pinned by `verify` through `EXPECTED_LENGTHS`.
+    """
+    return b'\x00' * 40 + u64b(cmdlist) + u64b(initial_pso) + u64b(0)
+
+
 def pl_vertex_buffers(cmdlist: int, start_slot: int,
                       views: Sequence[VertexView]) -> bytes:
     """cmdList | startSlot | numViews | arrayCount(u64) | per view: resId, offset, size, stride."""
@@ -384,6 +395,10 @@ enum class D3D12Chunk : uint32_t
   List_DrawIndexedInstanced,
   List_Dispatch,
   List_ExecuteIndirect,
+  List_Reset,
+  List_SetComputeRootSignature,
+  List_SetComputeRootDescriptorTable,
+  List_SetComputeRootConstantBufferView,
 };
 '''
 

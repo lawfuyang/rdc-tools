@@ -128,6 +128,27 @@ class CacheEntry(TypedDict):
     blocks: int
 
 
+class DrawState(TypedDict):
+    """The D3D12 command-list state `draws` reports at each draw.
+
+    Bindings belong to the *command list*, not to the PSO and not to one draw: they survive
+    `SetPipelineState` and every draw, and only change when something rebinds them. Two events
+    invalidate the root bindings: `Reset()` (a fresh list) and a root signature that actually
+    differs from the current one -- "if a root signature is changed on a command list, all previous
+    root arguments become stale", which is what RenderDoc's own replay implements
+    (`d3d12_command_list_wrap.cpp`). Graphics and compute root parameters are separate namespaces.
+    """
+    pso: Optional[int]
+    gfxSig: Optional[int]
+    compSig: Optional[int]
+    gfxCbv: Dict[int, Tuple[int, int]]
+    compCbv: Dict[int, Tuple[int, int]]
+    gfxTable: Dict[int, Tuple[int, int]]
+    compTable: Dict[int, Tuple[int, int]]
+    vbs: Dict[int, Tuple[int, int, int, int]]
+    ib: Optional[str]
+
+
 #: One part of a DXBC/DXIL container: `(fourcc, offset, length)`. `offset` is absolute, past the
 #: part's own fourcc/size header; `length` is its data length.
 DxbcPart = Tuple[str, int, int]
@@ -1135,11 +1156,23 @@ _SRC_WARNED = False
 DRAW_CHUNKS = ('List_DrawIndexedInstanced', 'List_DrawInstanced', 'List_Dispatch',
                'List_ExecuteIndirect')
 
+#: The draw chunks that are always compute. The rest of `DRAW_CHUNKS` are graphics, and an
+#: `ExecuteIndirect` can be either, so `draws` reports both namespaces for it.
+COMPUTE_CHUNKS = ('List_Dispatch',)
+
+#: Command-list chunks that change the state `cmd_draws` reports (see `_apply_state_chunk`).
+STATE_SETTERS = ('List_SetPipelineState', 'List_SetGraphicsRootSignature',
+                 'List_SetGraphicsRootConstantBufferView', 'List_SetGraphicsRootDescriptorTable',
+                 'List_SetComputeRootSignature', 'List_SetComputeRootConstantBufferView',
+                 'List_SetComputeRootDescriptorTable', 'List_IASetVertexBuffers',
+                 'List_IASetIndexBuffer')
+
 #: Payload lengths the decoders expect for the chunks with a fixed layout, used as a checksum by
 #: `verify` (README 3.4: "chunk length is a checksum for your decoder"). Chunks carrying arrays or
 #: variable-length data are deliberately absent.
 EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
     'List_SetPipelineState': (16,),
+    'List_Reset': (64,),                   # +40 = cmdList id, +48 = initial PSO
     'List_DrawIndexedInstanced': (28,),
     'List_DrawInstanced': (24,),
     'List_Dispatch': (20,),
@@ -1148,6 +1181,9 @@ EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
     'List_SetGraphicsRootConstantBufferView': (28,),
     'List_SetGraphicsRootShaderResourceView': (28,),
     'List_SetGraphicsRootUnorderedAccessView': (28,),
+    'List_SetComputeRootSignature': (16,),
+    'List_SetComputeRootDescriptorTable': (24,),
+    'List_SetComputeRootConstantBufferView': (28,),
     'List_IASetIndexBuffer': (9, 33),      # 9 = null view, 33 = present flag + view
 }
 
@@ -1402,20 +1438,27 @@ def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
                                                       u32(blob, 16)))
         elif name in ('List_SetGraphicsRootConstantBufferView',
                       'List_SetGraphicsRootShaderResourceView',
-                      'List_SetGraphicsRootUnorderedAccessView') and len(blob) >= 28:
+                      'List_SetGraphicsRootUnorderedAccessView',
+                      'List_SetComputeRootConstantBufferView') and len(blob) >= 28:
             # [u64 cmdList][u32 rootParam][u64 resourceId][u64 byteOffset] -- D3D12BufferLocation
             # serialises as Id + Offset (d3d12_serialise.cpp), so this is the same pair `draws` uses.
             out.append('cmdList=%d rootParam=%d res=%d+0x%x'
                        % (u64(blob, 0), u32(blob, 8), u64(blob, 12), u64(blob, 20)))
-        elif name == 'List_SetGraphicsRootDescriptorTable' and len(blob) >= 24:
+        elif name in ('List_SetGraphicsRootDescriptorTable',
+                      'List_SetComputeRootDescriptorTable') and len(blob) >= 24:
             # [u64 cmdList][u32 rootParam][PortableHandle: u64 heapId, u32 descriptorIndex]:
             # a D3D12_GPU_DESCRIPTOR_HANDLE is serialised as (heap resource, index) rather than as
             # a raw pointer (d3d12_serialise.cpp DoSerialise + PortableHandle in d3d12_manager.h),
             # so the payload is 24 bytes and there is no pointer to print
             out.append('cmdList=%d rootParam=%d heap=%d index=%d'
                        % (u64(blob, 0), u32(blob, 8), u64(blob, 12), u32(blob, 20)))
-        elif name == 'List_SetGraphicsRootSignature' and len(blob) >= 16:
+        elif name in ('List_SetGraphicsRootSignature',
+                      'List_SetComputeRootSignature') and len(blob) >= 16:
             out.append('cmdList=%d rootSig=%d' % (u64(blob, 0), u64(blob, 8)))
+        elif name == 'List_Reset' and len(blob) >= 56:
+            # 64-byte payload; the command-list id at +40 is the one the other List_* chunks carry
+            # at +0 (see `_apply_state_chunk`), and +48 is the optional initial PSO
+            out.append('cmdList=%d initialPso=%d' % (u64(blob, 40), u64(blob, 48)))
         elif name == 'List_IASetVertexBuffers' and len(blob) >= 24:
             # [u64 cmdList][u32 startSlot][u32 numViews][u64 arrayCount] then 24 bytes per view:
             # [u64 resourceId][u64 VA][u32 sizeInBytes][u32 strideInBytes]
@@ -1518,15 +1561,116 @@ def cmd_verify(path: str) -> int:
     return 1 if problems else 0
 
 
+def _draw_state() -> DrawState:
+    """A fresh command-list state: nothing bound, no PSO, no root signature."""
+    return DrawState(pso=None, gfxSig=None, compSig=None, gfxCbv={}, compCbv={}, gfxTable={},
+                     compTable={}, vbs={}, ib=None)
+
+
+def _apply_state_chunk(name: str, blob: bytes, states: Dict[int, DrawState]) -> bool:
+    """Apply one state-changing `List_*` chunk; True when `name` is one of the tracked setters.
+
+    Every command-list payload starts with the `u64` resource id of its command list, so the state
+    is tracked *per command list*: two lists recorded in one capture cannot leak into each other.
+    `List_Reset` is the exception -- its 64-byte payload carries that same id at +40 and the
+    optional initial PSO at +48 (measured on both captures in this repo: +40 matches the id the
+    other `List_*` chunks carry for all 170 setter chunks of the PC capture).
+    """
+    if name == 'List_Reset':
+        # Reset() is what clears a command list in D3D12 -- not SetPipelineState, not the draws
+        if len(blob) >= 56:
+            fresh = _draw_state()
+            fresh['pso'] = u64(blob, 48) or None
+            states[u64(blob, 40)] = fresh
+        else:
+            # an unknown Reset layout: assume it is the only list, so nothing stale can survive
+            states.clear()
+        return True
+    if name not in STATE_SETTERS or len(blob) < 8:
+        return False
+    st = states.setdefault(u64(blob, 0), _draw_state())
+    if name == 'List_SetPipelineState' and len(blob) >= 16:
+        st['pso'] = u64(blob, 8)
+    elif name in ('List_SetGraphicsRootSignature',
+                  'List_SetComputeRootSignature') and len(blob) >= 16:
+        sig = u64(blob, 8)
+        if name == 'List_SetGraphicsRootSignature':
+            # a *changed* signature makes every root argument stale; setting the same one again
+            # keeps them (D3D12 command-list semantics, and what RenderDoc's replay implements)
+            if st['gfxSig'] != sig:
+                st['gfxSig'], st['gfxCbv'], st['gfxTable'] = sig, {}, {}
+        elif st['compSig'] != sig:
+            st['compSig'], st['compCbv'], st['compTable'] = sig, {}, {}
+    elif name in ('List_SetGraphicsRootConstantBufferView',
+                  'List_SetComputeRootConstantBufferView') and len(blob) >= 28:
+        # [u64 cmdList][u32 rootParam][u64 resourceId][u64 byteOffset] for both pipelines
+        target = st['gfxCbv'] if name == 'List_SetGraphicsRootConstantBufferView' else st['compCbv']
+        target[u32(blob, 8)] = (u64(blob, 12), u64(blob, 20))
+    elif name in ('List_SetGraphicsRootDescriptorTable',
+                  'List_SetComputeRootDescriptorTable') and len(blob) >= 24:
+        # [u64 cmdList][u32 rootParam][PortableHandle: u64 heapId, u32 descriptorIndex]
+        tables = (st['gfxTable'] if name == 'List_SetGraphicsRootDescriptorTable'
+                  else st['compTable'])
+        tables[u32(blob, 8)] = (u64(blob, 12), u32(blob, 20))
+    elif name == 'List_IASetVertexBuffers' and len(blob) >= 24:
+        # [u64 cmdList][u32 startSlot][u32 numViews][u64 arrayCount] then 24 bytes per view; the
+        # slots outside [startSlot, startSlot + numViews) keep whatever they had bound
+        start, count = u32(blob, 8), u32(blob, 12)
+        for i in range(min(count, 16)):
+            o = 24 + i * 24
+            if o + 24 > len(blob):
+                break
+            st['vbs'][start + i] = (u64(blob, o), u64(blob, o + 8), u32(blob, o + 16),
+                                    u32(blob, o + 20))
+    elif name == 'List_IASetIndexBuffer' and len(blob) >= 9:
+        # the view goes through SERIALISE_ELEMENT_OPT: [u8 present] then (resourceId, byteOffset).
+        # A null view (9-byte payload) *clears* the binding -- leaving the previous one in place
+        # would report an index buffer the draw does not have.
+        if not blob[8]:
+            st['ib'] = None
+        elif len(blob) >= 33:
+            st['ib'] = 'res%d+0x%x' % (u64(blob, 9), u64(blob, 17))
+    return True
+
+
+def _print_draw_state(state: Optional[DrawState], compute: bool) -> None:
+    """Print the bindings in effect for one draw or dispatch (the indented lines under its row).
+
+    `compute` selects the namespace: a dispatch uses the compute root parameters, a draw the
+    graphics ones. Vertex streams and the index buffer are graphics-only state.
+    """
+    if state is None:
+        return
+    cbvs = state['compCbv'] if compute else state['gfxCbv']
+    tables = state['compTable'] if compute else state['gfxTable']
+    if cbvs:
+        print('        CBV: ' + '  '.join('rp%d=res%d+0x%x' % (rp, res, off)
+                                           for rp, (res, off) in sorted(cbvs.items())))
+    if tables:
+        print('        Table: ' + '  '.join('rp%d=heap%d[%d]' % (rp, heap, idx)
+                                            for rp, (heap, idx) in sorted(tables.items())))
+    if compute:
+        return
+    if state['vbs']:
+        print('        VB : ' + '  '.join('res%d+0x%x(sz%d,st%d)' % view
+                                          for _, view in sorted(state['vbs'].items())))
+    if state['ib']:
+        print('        IB : %s' % state['ib'])
+
+
 def cmd_draws(path: str, max_draws: int = 80) -> None:
-    """Per-draw table: marker path, PSO, constant buffers (resourceId+offset), vertex streams, args."""
+    """Per-draw table: marker path, PSO, constant buffers (resourceId+offset), vertex streams, args.
+
+    The state printed for a draw is the state of its *command list* at that point -- everything that
+    is still bound, not only what changed since the previous draw (see `DrawState`). Dispatches
+    report the compute root bindings, draws the graphics ones plus the vertex streams and the index
+    buffer. Root descriptor tables are reported as `heap<id>[index]`; resolving them to resources is
+    ROADMAP 3.2.
+    """
     _info, stream, _how = load_stream(path)
     names = load_chunk_names()
     stack: List[str] = []
-    pso: Optional[int] = None
-    vbs: List[Tuple[int, int, int, int]] = []
-    ib: Optional[str] = None
-    cbvs: List[Tuple[int, int, int]] = []
+    states: Dict[int, DrawState] = {}
     n_draw = 0
     print('%-7s %-24s %-8s %-9s %s' % ('chunk', 'pass / primitive', 'pso', 'args', 'state'))
     for idx, ch in enumerate(iter_chunks(stream), 1):
@@ -1538,20 +1682,6 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
         elif nm == 'PopMarker':
             if stack:
                 stack.pop()
-        elif nm == 'List_SetPipelineState' and len(blob) >= 16:
-            pso = u64(blob, 8)
-            vbs, ib, cbvs = [], None, []
-        elif nm == 'List_IASetVertexBuffers' and len(blob) >= 24:
-            n = u32(blob, 12)
-            vbs = [(u64(blob, 24 + i * 24), u64(blob, 32 + i * 24), u32(blob, 40 + i * 24),
-                    u32(blob, 44 + i * 24))
-                   for i in range(min(n, 16)) if 24 + i * 24 + 24 <= len(blob)]
-        elif nm == 'List_IASetIndexBuffer' and len(blob) >= 33 and blob[8]:
-            # the view is serialised through SERIALISE_ELEMENT_OPT: [u8 present] then
-            # (resourceId, byteOffset) - see decode_chunk for the full layout
-            ib = 'res%d+0x%x' % (u64(blob, 9), u64(blob, 17))
-        elif nm == 'List_SetGraphicsRootConstantBufferView' and len(blob) >= 28:
-            cbvs.append((u32(blob, 8), u64(blob, 12), u64(blob, 20)))
         elif nm in DRAW_CHUNKS:
             n_draw += 1
             if n_draw <= max_draws:
@@ -1561,15 +1691,18 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
                     args = 'verts=%d inst=%d' % (u32(blob, 8), u32(blob, 12))
                 else:
                     args = 'x=%d y=%d z=%d' % (u32(blob, 8), u32(blob, 12), u32(blob, 16))
+                st = states.get(u64(blob, 0)) if len(blob) >= 8 else None
                 print('#%-6d %-24s %-8s %-9s %s'
-                      % (idx, ' / '.join(stack)[-24:], pso, args, nm.replace('List_', '')))
-                if cbvs:
-                    print('        CBV: ' + '  '.join('rp%d=res%d+0x%x' % c for c in cbvs))
-                if vbs:
-                    print('        VB : ' + '  '.join('res%d+0x%x(sz%d,st%d)' % v for v in vbs))
-                if ib:
-                    print('        IB : %s' % ib)
-            vbs, ib, cbvs = [], None, []
+                      % (idx, ' / '.join(stack)[-24:], st['pso'] if st else None, args,
+                         nm.replace('List_', '')))
+                if nm == 'List_ExecuteIndirect':
+                    # it can be a graphics or a compute call, so both namespaces are reported
+                    _print_draw_state(st, compute=True)
+                    _print_draw_state(st, compute=False)
+                else:
+                    _print_draw_state(st, compute=nm in COMPUTE_CHUNKS)
+        elif _apply_state_chunk(nm, blob, states):
+            pass                       # a tracked setter: it changes the state, it prints nothing
     print('total draws/dispatches: %d' % n_draw)
 
 

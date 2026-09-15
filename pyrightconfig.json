@@ -1,0 +1,10 @@
+{
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.8",
+  "include": ["rdc_analysis.py", "tests"],
+  "exclude": ["renderdoc-src", "typings", "**/__pycache__"],
+  "stubPath": "typings",
+  "extraPaths": ["."],
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning"
+}

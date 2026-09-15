@@ -12,8 +12,11 @@ The fixture builders deliberately do **not** import the module under test except
 `parse_chunk_enum`/`load_chunk_names`, which are used to build the fake `renderdoc-src` tree, so a
 bug in a decoder cannot silently reshape the data the tests feed it.
 """
+from __future__ import annotations
+
 import os
 import struct
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import rdc_analysis as R
 
@@ -28,36 +31,38 @@ SECTION_FRAMECAPTURE = 1  # SectionType::FrameCapture
 FLAG_LZ4 = 0x2
 
 
-def u16b(v):
+def u16b(v: int) -> bytes:
     return struct.pack('<H', v)
 
 
-def u32b(v):
+def u32b(v: int) -> bytes:
     return struct.pack('<I', v)
 
 
-def u64b(v):
+def u64b(v: int) -> bytes:
     return struct.pack('<Q', v)
 
 
-def f32b(*vals):
+def f32b(*vals: float) -> bytes:
     return struct.pack('<%df' % len(vals), *vals)
 
 
-def fbits(*vals):
+def fbits(*vals: float) -> List[int]:
     """float32 values as their raw u32 bit patterns (what root constants carry)."""
     return [struct.unpack('<I', struct.pack('<f', v))[0] for v in vals]
 
 
 # --------------------------------------------------------------------------- SDChunk stream
-def pad_to(data, align=ALIGN, pad_byte=0xCC):
+def pad_to(data: bytes, align: int = ALIGN, pad_byte: int = 0xCC) -> bytes:
     """Pad to a multiple of `align` the way the serialiser does (padding is *not* zeroed)."""
     rem = len(data) % align
     return data if rem == 0 else data + bytes([pad_byte]) * (align - rem)
 
 
-def chunk(cid, payload=b'', callstack=None, threadid=None, duration=None, timestamp=None,
-          extra_flags=0, size64=False, align=True, pad_byte=0xCC):
+def chunk(cid: int, payload: bytes = b'', callstack: Optional[Sequence[int]] = None,
+          threadid: Optional[int] = None, duration: Optional[int] = None,
+          timestamp: Optional[int] = None, extra_flags: int = 0, size64: bool = False,
+          align: bool = True, pad_byte: int = 0xCC) -> bytes:
     """One SDChunk. Flags are derived from the fields exactly as the writer does."""
     c = cid & 0xFFFF
     meta = b''
@@ -83,7 +88,7 @@ def chunk(cid, payload=b'', callstack=None, threadid=None, duration=None, timest
     return pad_to(out, pad_byte=pad_byte) if align else out
 
 
-def stream(*chunks, terminator=False, tail=b''):
+def stream(*chunks: bytes, terminator: bool = False, tail: bytes = b'') -> bytes:
     out = b''.join(chunks)
     if terminator:
         out += u32b(0)
@@ -91,8 +96,9 @@ def stream(*chunks, terminator=False, tail=b''):
 
 
 # --------------------------------------------------------------------------- container
-def section(name, data, sec_type=SECTION_FRAMECAPTURE, flags=0, version=1,
-            comp_len=None, uncomp_len=None, name_len=None, name_bytes=None):
+def section(name: str, data: bytes, sec_type: int = SECTION_FRAMECAPTURE, flags: int = 0,
+            version: int = 1, comp_len: Optional[int] = None, uncomp_len: Optional[int] = None,
+            name_len: Optional[int] = None, name_bytes: Optional[bytes] = None) -> bytes:
     """BinarySectionHeader(40) + name (NUL terminated) + data."""
     name_b = name.encode('ascii') + b'\x00' if name_bytes is None else name_bytes
     nlen = len(name_b) if name_len is None else name_len
@@ -103,10 +109,12 @@ def section(name, data, sec_type=SECTION_FRAMECAPTURE, flags=0, version=1,
     return hdr + name_b + data
 
 
-def rdc(sections, magic=b'RDOC', version=0x10E, prog='1.46', thumb=b'\xff\xd8THUMB\xff\xd9',
-        driver_id=4, driver_name='D3D12', time_base=123456, time_freq=1000000.0,
-        thumb_w=64, thumb_h=64, thumb_len=None, header_length=None, header_pad=0,
-        end=b'\x01\x00\x00\x00'):
+def rdc(sections: Sequence[bytes], magic: bytes = b'RDOC', version: int = 0x10E,
+        prog: str = '1.46', thumb: bytes = b'\xff\xd8THUMB\xff\xd9', driver_id: int = 4,
+        driver_name: str = 'D3D12', time_base: int = 123456, time_freq: float = 1000000.0,
+        thumb_w: int = 64, thumb_h: int = 64, thumb_len: Optional[int] = None,
+        header_length: Optional[int] = None, header_pad: int = 0,
+        end: bytes = b'\x01\x00\x00\x00') -> bytes:
     """FileHeader(32) | thumbnail | CaptureMetaData | CaptureTimeBase | sections | end marker."""
     name_b = driver_name.encode('ascii') + b'\x00'
     meta = b'\x00' * 8 + u32b(driver_id) + bytes([len(name_b)]) + name_b
@@ -121,7 +129,7 @@ def rdc(sections, magic=b'RDOC', version=0x10E, prog='1.46', thumb=b'\xff\xd8THU
 
 
 # --------------------------------------------------------------------------- LZ4
-def lz4_literal_block(data):
+def lz4_literal_block(data: bytes) -> bytes:
     """One raw LZ4 block holding `data` as a single literal-only sequence.
 
     A literal-only sequence is only legal as the *last* sequence of a block, so each block produced
@@ -141,7 +149,7 @@ def lz4_literal_block(data):
     return head + data
 
 
-def lz4_container(data, block_count=1):
+def lz4_container(data: bytes, block_count: int = 1) -> bytes:
     """A `flags & 0x2` section body: [u32 compressedBlockLength][raw LZ4 block] repeated."""
     if not data:
         return b''
@@ -154,7 +162,8 @@ def lz4_container(data, block_count=1):
 
 
 # --------------------------------------------------------------------------- captures
-def capture(chunks, lz4=False, block_count=1, name='FrameCapture', **kw):
+def capture(chunks: Sequence[bytes], lz4: bool = False, block_count: int = 1,
+            name: str = 'FrameCapture', **kw: Any) -> bytes:
     """A whole .rdc file with one frame-capture section holding `chunks`."""
     data = b''.join(chunks)
     if lz4:
@@ -164,50 +173,57 @@ def capture(chunks, lz4=False, block_count=1, name='FrameCapture', **kw):
     return rdc([sec], **kw)
 
 
-def write_bytes(path, data):
+def write_bytes(path: str, data: bytes) -> str:
     with open(path, 'wb') as f:
         f.write(data)
     return path
 
 
-def write_capture(path, chunks, **kw):
+def write_capture(path: str, chunks: Sequence[bytes], **kw: Any) -> str:
     return write_bytes(path, capture(chunks, **kw))
 
 
 # --------------------------------------------------------------------------- D3D12 payloads
 # Layouts follow README section 3.4 ("Payload decoding").
-def pl_pso(cmdlist, pso):
+#: One vertex-buffer view as the payload builder wants it: (resourceId, offset, size, stride).
+VertexView = Tuple[int, int, int, int]
+
+
+def pl_pso(cmdlist: int, pso: int) -> bytes:
     return u64b(cmdlist) + u64b(pso)
 
 
-def pl_draw_indexed(cmdlist, index_count, instance_count, start_index, base_vertex, start_instance):
+def pl_draw_indexed(cmdlist: int, index_count: int, instance_count: int, start_index: int,
+                    base_vertex: int, start_instance: int) -> bytes:
     return (u64b(cmdlist) + u32b(index_count) + u32b(instance_count) + u32b(start_index)
             + u32b(base_vertex) + u32b(start_instance))
 
 
-def pl_draw_instanced(cmdlist, vertex_count, instance_count, start_vertex, start_instance):
+def pl_draw_instanced(cmdlist: int, vertex_count: int, instance_count: int, start_vertex: int,
+                      start_instance: int) -> bytes:
     return (u64b(cmdlist) + u32b(vertex_count) + u32b(instance_count) + u32b(start_vertex)
             + u32b(start_instance))
 
 
-def pl_dispatch(cmdlist, x, y, z):
+def pl_dispatch(cmdlist: int, x: int, y: int, z: int) -> bytes:
     return u64b(cmdlist) + u32b(x) + u32b(y) + u32b(z)
 
 
-def pl_root_view(cmdlist, root_param, resid, offset):
+def pl_root_view(cmdlist: int, root_param: int, resid: int, offset: int) -> bytes:
     """CBV/SRV/UAV: cmdList | RootParameterIndex | D3D12BufferLocation(resId, offset)."""
     return u64b(cmdlist) + u32b(root_param) + u64b(resid) + u64b(offset)
 
 
-def pl_root_table(cmdlist, root_param, gpu_handle):
+def pl_root_table(cmdlist: int, root_param: int, gpu_handle: int) -> bytes:
     return u64b(cmdlist) + u32b(root_param) + u64b(gpu_handle)
 
 
-def pl_root_signature(cmdlist, rootsig):
+def pl_root_signature(cmdlist: int, rootsig: int) -> bytes:
     return u64b(cmdlist) + u64b(rootsig)
 
 
-def pl_vertex_buffers(cmdlist, start_slot, views):
+def pl_vertex_buffers(cmdlist: int, start_slot: int,
+                      views: Sequence[VertexView]) -> bytes:
     """cmdList | startSlot | numViews | arrayCount(u64) | per view: resId, offset, size, stride."""
     out = u64b(cmdlist) + u32b(start_slot) + u32b(len(views)) + u64b(len(views))
     for resid, offset, size, stride in views:
@@ -215,26 +231,28 @@ def pl_vertex_buffers(cmdlist, start_slot, views):
     return out
 
 
-def pl_index_buffer(cmdlist, resid, offset, size, fmt):
+def pl_index_buffer(cmdlist: int, resid: int, offset: int, size: int, fmt: int) -> bytes:
     return u64b(cmdlist) + u64b(resid) + u64b(offset) + u32b(size) + u32b(fmt)
 
 
-def pl_32bit_constants(cmdlist, root_param, values, dest_offset=0):
+def pl_32bit_constants(cmdlist: int, root_param: int, values: Sequence[int],
+                       dest_offset: int = 0) -> bytes:
     """cmdList | rootParam | numValues | values[n] | destOffset  (length == 20 + 4n)."""
     out = u64b(cmdlist) + u32b(root_param) + u32b(len(values))
     out += b''.join(u32b(v & 0xFFFFFFFF) for v in values)
     return out + u32b(dest_offset)
 
 
-def pl_32bit_constant(cmdlist, root_param, value, dest_offset=0):
+def pl_32bit_constant(cmdlist: int, root_param: int, value: int, dest_offset: int = 0) -> bytes:
     return u64b(cmdlist) + u32b(root_param) + u32b(value & 0xFFFFFFFF) + u32b(dest_offset)
 
 
-def pl_create_pso(pso_id, tail=b'\xAB\xCD' * 16):
+def pl_create_pso(pso_id: int, tail: bytes = b'\xAB\xCD' * 16) -> bytes:
     return u64b(pso_id) + tail
 
 
-def pl_initial_contents(resid, data, hdr_filler=48, total_len=None, filler_byte=0x00):
+def pl_initial_contents(resid: int, data: bytes, hdr_filler: int = 48,
+                        total_len: Optional[int] = None, filler_byte: int = 0x00) -> bytes:
     """[u64 resourceId][header filler][data]; cmd_initial scans header sizes 8..200 step 4."""
     blob = u64b(resid) + bytes([filler_byte]) * hdr_filler + data
     if total_len is not None and len(blob) < total_len:
@@ -246,7 +264,15 @@ SINGLEPROBE_SIG = f32b(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.
 
 
 # --------------------------------------------------------------------------- DXBC / DXIL
-def dxbc(parts, version=0x40, hash_=None, size=None, part_count=None, offsets=None):
+#: One `(fourcc, data)` pair for the `dxbc` builder.
+DxbcPartSpec = Tuple[str, bytes]
+#: One `(name, semanticIndex, register)` entry for the `signature` builder.
+SignatureEntrySpec = Tuple[str, int, int]
+
+
+def dxbc(parts: Sequence[DxbcPartSpec], version: int = 0x40, hash_: Optional[bytes] = None,
+         size: Optional[int] = None, part_count: Optional[int] = None,
+         offsets: Optional[Sequence[int]] = None) -> bytes:
     """'DXBC' | hash(16) | version | size | partCount | partOffsets[] then the parts."""
     n = len(parts) if part_count is None else part_count
     head_len = 32 + 4 * len(parts)
@@ -262,8 +288,9 @@ def dxbc(parts, version=0x40, hash_=None, size=None, part_count=None, offsets=No
     return hdr + blobs
 
 
-def signature(entries, count_override=None, declared_strtab=None, elem_stride=24,
-              with_strtab=True):
+def signature(entries: Sequence[SignatureEntrySpec], count_override: Optional[int] = None,
+              declared_strtab: Optional[int] = None, elem_stride: int = 24,
+              with_strtab: bool = True) -> bytes:
     """ISG1/OSG1: u32 count, u32 strtab offset, count x 24B elements, then the string table."""
     count = len(entries) if count_override is None else count_override
     elems, names = b'', b''
@@ -275,15 +302,15 @@ def signature(entries, count_override=None, declared_strtab=None, elem_stride=24
     return u32b(count) + u32b(declared) + elems + (names if with_strtab else b'')
 
 
-def isg1_inputs():
+def isg1_inputs() -> bytes:
     return signature([('POSITION', 0, 0), ('TEXCOORD0', 0, 1), ('TEXCOORD6', 0, 2)])
 
 
-def osg1_targets():
+def osg1_targets() -> bytes:
     return signature([('SV_Target', 0, 0), ('SV_Target', 1, 1)])
 
 
-def osg1_position():
+def osg1_position() -> bytes:
     return signature([('SV_Position', 0, 0), ('TEXCOORD0', 0, 1)])
 
 
@@ -357,7 +384,7 @@ enum class D3D11Chunk : uint32_t
 '''
 
 
-def make_fake_src(root):
+def make_fake_src(root: str) -> Tuple[str, Dict[int, str]]:
     """Write a minimal but faithful `renderdoc-src` tree and return (root, names)."""
     core = os.path.join(root, 'renderdoc', 'core')
     d12 = os.path.join(root, 'renderdoc', 'driver', 'd3d12')
@@ -370,6 +397,6 @@ def make_fake_src(root):
     return root, R.load_chunk_names(root, 'D3D12')
 
 
-def invert(names):
+def invert(names: Dict[int, str]) -> Dict[str, int]:
     """{id: name} -> {name: id}."""
     return {v: k for k, v in names.items()}

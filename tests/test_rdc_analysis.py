@@ -10,6 +10,8 @@ Payload layouts used by the fixtures follow README section 3.4; where a decoder 
 differently from another consumer of the same chunk, the test pins the behaviour actually
 implemented and says so in a comment.
 """
+from __future__ import annotations
+
 import contextlib
 import io
 import os
@@ -19,6 +21,7 @@ import sys
 import tempfile
 import types
 import unittest
+from typing import Any, Callable, Dict, List, Optional, Sequence
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +34,7 @@ import rdc_analysis as R          # noqa: E402
 import rdc_fixtures as F          # noqa: E402
 
 
-def capture_text(func, *args, **kwargs):
+def capture_text(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
     """Run `func` and return everything it printed on stdout."""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -39,7 +42,7 @@ def capture_text(func, *args, **kwargs):
     return buf.getvalue()
 
 
-def capture_all(func, *args, **kwargs):
+def capture_all(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
     """Run `func` and return everything it printed on stdout *and* stderr.
 
     unittest's TextTestRunner writes its report to stderr, so the selftest command needs this.
@@ -51,17 +54,21 @@ def capture_all(func, *args, **kwargs):
 
 
 class TempDirCase(unittest.TestCase):
-    def setUp(self):
+    #: scratch directory created in `setUp` and removed by a cleanup hook.
+    tmp: str
+
+    def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp(prefix='rdc_unit_')
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def path(self, name, data=None):
+    def path(self, name: str, data: Optional[bytes] = None) -> str:
         p = os.path.join(self.tmp, name)
         if data is not None:
             F.write_bytes(p, data)
         return p
 
-    def capture_path(self, chunks, name='capture.rdc', **kw):
+    def capture_path(self, chunks: Sequence[bytes], name: str = 'capture.rdc',
+                     **kw: Any) -> str:
         return self.path(name, F.capture(chunks, **kw))
 
 
@@ -106,7 +113,7 @@ class TestEndianReaders(unittest.TestCase):
 
 # =========================================================================== container
 class TestParseContainer(TempDirCase):
-    def build(self, **kw):
+    def build(self, **kw: Any) -> bytes:
         sections = kw.pop('sections', [F.section('FrameCapture', b'HELLO')])
         return F.rdc(sections, **kw)
 
@@ -251,7 +258,10 @@ class TestLz4Block(unittest.TestCase):
 
 
 class TestDecompressLz4(unittest.TestCase):
-    def setUp(self):
+    #: sample payload shared by every test in this class.
+    payload: bytes
+
+    def setUp(self) -> None:
         self.payload = bytes(range(256)) * 2
 
     def test_single_block_roundtrip(self):
@@ -297,22 +307,24 @@ class TestDecompressLz4(unittest.TestCase):
 class TestDecompressZstd(unittest.TestCase):
     """`zstandard` is optional; a stub module exercises all three magic branches."""
 
-    def fake_module(self, recorder):
+    def fake_module(self, recorder: List[bytes]) -> types.ModuleType:
         mod = types.ModuleType('zstandard')
 
         class _Reader:
-            def __init__(self, body):
+            def __init__(self, body: bytes) -> None:
                 self.body = body
 
-            def read(self):
+            def read(self) -> bytes:
                 recorder.append(self.body)
                 return self.body
 
         class ZstdDecompressor:
-            def stream_reader(self, body):
+            def stream_reader(self, body: bytes) -> _Reader:
                 return _Reader(body)
 
-        mod.ZstdDecompressor = ZstdDecompressor
+        # setattr (not attribute assignment): a bare ModuleType has no declared attribute, and the
+        # stub has to look like the real `zstandard` module to `decompress_zstd`.
+        setattr(mod, 'ZstdDecompressor', ZstdDecompressor)
         return mod
 
     def test_magic_at_offset_zero(self):
@@ -364,18 +376,18 @@ class TestGetStream(TempDirCase):
         mod = types.ModuleType('zstandard')
 
         class _Reader:
-            def __init__(self, b):
+            def __init__(self, b: bytes) -> None:
                 self.b = b
 
-            def read(self):
+            def read(self) -> bytes:
                 return self.b
 
         class _Decompressor:
-            def stream_reader(self, b):
+            def stream_reader(self, b: bytes) -> _Reader:
                 seen.append(b)
                 return _Reader(b)
 
-        mod.ZstdDecompressor = _Decompressor
+        setattr(mod, 'ZstdDecompressor', _Decompressor)
         with mock.patch.dict(sys.modules, {'zstandard': mod}):
             stream, how = R.get_stream(R.parse_container(self.path('z.rdc', data)))
         self.assertEqual(how, 'zstd')
@@ -490,7 +502,11 @@ class TestParseChunkEnum(unittest.TestCase):
 
 
 class TestLoadChunkNames(TempDirCase):
-    def setUp(self):
+    #: root of the fake `renderdoc-src` tree and the {id: name} map parsed from it.
+    src: str
+    names: Dict[int, str]
+
+    def setUp(self) -> None:
         super().setUp()
         self.src, self.names = F.make_fake_src(os.path.join(self.tmp, 'renderdoc-src'))
 
@@ -549,12 +565,17 @@ class TestLoadChunkNames(TempDirCase):
 
 
 class TestFindRenderdocSrc(unittest.TestCase):
-    def setUp(self):
+    #: tool folder plus the two `renderdoc-src` locations the search order tries.
+    here: str
+    tool_candidate: str
+    parent_candidate: str
+
+    def setUp(self) -> None:
         self.here = os.path.dirname(os.path.abspath(R.__file__))
         self.tool_candidate = os.path.join(self.here, 'renderdoc-src')
         self.parent_candidate = os.path.join(os.path.dirname(self.here), 'renderdoc-src')
 
-    def core_of(self, root):
+    def core_of(self, root: str) -> str:
         return os.path.join(root, 'renderdoc', 'core', 'core.h')
 
     def test_env_var_wins(self):
@@ -698,7 +719,7 @@ class TestIterChunks(unittest.TestCase):
 
 
 class TestChunkPayloadAndStrings(unittest.TestCase):
-    def make(self, payload, **kw):
+    def make(self, payload: bytes, **kw: Any) -> tuple[bytes, R.ChunkInfo]:
         data = F.stream(F.chunk(1000, payload, **kw))
         return data, list(R.iter_chunks(data))[0]
 
@@ -873,7 +894,8 @@ class TestDecodeChunk(unittest.TestCase):
         self.assertEqual(R.decode_chunk(None, b'\x00' * 64), [])
 
     def test_decode_error_is_reported_not_raised(self):
-        out = R.decode_chunk('List_SetPipelineState', 'x' * 16)   # str, not bytes
+        # deliberately the wrong type: decode_chunk must catch broadly and report, never raise
+        out = R.decode_chunk('List_SetPipelineState', 'x' * 16)  # type: ignore[arg-type]
         self.assertEqual(len(out), 1)
         self.assertTrue(out[0].startswith('decode error: '), out)
 

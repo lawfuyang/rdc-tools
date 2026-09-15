@@ -10,6 +10,8 @@ Run directly, via unittest, or through the tool itself:
     python -m unittest tests.test_rdc_commands
     python rdc_analysis.py selftest -k Draws
 """
+from __future__ import annotations
+
 import contextlib
 import io
 import os
@@ -18,6 +20,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from typing import Any, Callable, ClassVar, Dict
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,17 +37,23 @@ from test_rdc_analysis import TempDirCase, capture_text, capture_all   # noqa: E
 class CmdCase(TempDirCase):
     """Base class that points the tool at a fake RenderDoc source tree."""
 
+    #: populated in `setUpClass` for every test in the class.
+    _src_dir: ClassVar[str]
+    src_root: ClassVar[str]
+    names: ClassVar[Dict[int, str]]
+    ids: ClassVar[Dict[str, int]]
+
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         cls._src_dir = tempfile.mkdtemp(prefix='rdc_src_')
         cls.src_root, cls.names = F.make_fake_src(cls._src_dir)
         cls.ids = F.invert(cls.names)
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         shutil.rmtree(cls._src_dir, ignore_errors=True)
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         names = mock.patch.object(R, 'load_chunk_names',
                                   lambda src_root=None, driver='D3D12': dict(self.names))
@@ -54,16 +63,16 @@ class CmdCase(TempDirCase):
         self.addCleanup(names.stop)
         self.addCleanup(src.stop)
 
-    def ch(self, name, payload=b'', **kw):
+    def ch(self, name: str, payload: bytes = b'', **kw: Any) -> bytes:
         return F.chunk(self.ids[name], payload, **kw)
 
-    def cap(self, *chunks, **kw):
+    def cap(self, *chunks: bytes, **kw: Any) -> str:
         return self.path('capture.rdc', F.capture(chunks, **kw))
 
-    def out(self, fn, *args, **kwargs):
+    def out(self, fn: Callable[..., object], *args: Any, **kwargs: Any) -> str:
         return capture_text(fn, *args, **kwargs)
 
-    def line_with(self, text, needle):
+    def line_with(self, text: str, needle: str) -> str:
         for line in text.splitlines():
             if needle in line:
                 return line
@@ -991,10 +1000,14 @@ class TestSelfTestCommand(CmdCase):
 class TestRealCapture(unittest.TestCase):
     """End-to-end smoke test on a real capture, if one is pointed at via $RDC_TEST_CAPTURE."""
 
+    #: set by `setUp` (a real `.rdc` path, or None when the test is skipped).
+    path: str
+
     def setUp(self):
-        self.path = os.environ.get('RDC_TEST_CAPTURE')
-        if not self.path or not os.path.isfile(self.path):
+        found = os.environ.get('RDC_TEST_CAPTURE')
+        if not found or not os.path.isfile(found):
             self.skipTest('set RDC_TEST_CAPTURE to a real .rdc file to run this')
+        self.path = found
 
     def test_container_and_stream(self):
         info, stream, how = R.load_stream(self.path)

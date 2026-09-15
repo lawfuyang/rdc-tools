@@ -19,10 +19,12 @@ uniforms do they read.* It is used from the command line and from scripts; every
 
 ```
 rdc-tools/
-  rdc_analysis.py     the tool (single file, ~1000 lines)
+  rdc_analysis.py     the tool (single file, ~1300 lines)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
   tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
+  pyrightconfig.json  type-checker config: typeCheckingMode "standard", target Python 3.8
+  typings/            stub for the optional zstandard dependency
 ```
 
 ---
@@ -331,6 +333,19 @@ Two integration tests are skipped unless a real capture is pointed at them
 (`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'`); a third class parses the real `renderdoc-src` enums and
 is skipped when the tree is absent. Tests that pin behaviour which looks wrong are marked
 `CHARACTERIZATION` in the source, so a deliberate fix does not read as a regression.
+
+### 4.7 Type checking
+
+The tool and its tests are kept clean under **Pylance/Pyright "Standard"** mode: `pyrightconfig.json` pins
+`typeCheckingMode` (and `pythonVersion` 3.8), `typings/zstandard.pyi` stubs the optional dependency, and the
+whole codebase is annotated — `TypedDict`s describe the dicts the parsers return, and no `Any` is left in
+`rdc_analysis.py`. To check it:
+
+```powershell
+npx --yes pyright@latest        # expect: 0 errors, 0 warnings
+```
+
+The coding rules that keep it that way are in `AGENTS.md`.
 
 ---
 

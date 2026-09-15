@@ -53,12 +53,17 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 - `rdc_analysis.py` stays a single file — do not split it into a package or add a shim module.
 - Keep the documented public names (`parse_container`, `iter_chunks`, `decode_chunk`, `load_chunk_names`,
-  `load_format_names`, `parse_resource_table`, `parse_descriptor_heaps`, `load_stream`, `cache_dir`,
-  `cache_lookup`, `cache_store`, `DrawState`, `ResourceInfo`, `DescriptorInfo`, `cmd_*`, `RENDERDOC_SRC`,
-  `MARKER_CHUNKS`, `CHUNK_*`, ...) — tests, docs and scripts reference them.
+  `load_format_names`, `parse_resource_table`, `parse_descriptor_heaps`, `parse_root_signatures`, `parse_rdef`,
+  `shader_bind_names`, `load_stream`, `cache_dir`, `cache_lookup`, `cache_store`, `DrawState`, `ResourceInfo`,
+  `DescriptorInfo`, `RootSignature`, `RootParam`, `cmd_*`, `RENDERDOC_SRC`, `MARKER_CHUNKS`, `CHUNK_*`, ...) —
+  tests, docs and scripts reference them.
 - Descriptor resolution stays honest: only slots the capture actually wrote are recorded, a write or copy
   replaces what the slot held, and anything unknown is reported as the heap — never guessed at. See
   `parse_descriptor_heaps` and README §4.10/§8.
+- Root parameters stay honest the same way: `draws` annotates `rpN` with what the *signature* says (type,
+  register, space, visibility, §3.4) and appends a name only when the capture's `RDEF` reflection offers one
+  that every stage agrees on. Never invent a name, and never drop the annotation back to a bare index — an
+  index alone is what produced the wrong conclusion in README §9.
 - `draws` reports the D3D12 command-list state in effect at each call (see `DrawState`): bindings survive
   `SetPipelineState` and draws, `Reset()` clears them, and only a *changed* root signature invalidates root
   arguments. Do not reintroduce a per-draw or per-PSO reset, and keep the state keyed per command list.

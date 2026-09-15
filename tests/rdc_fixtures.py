@@ -375,6 +375,81 @@ def pl_create_pso(pso_id: int, tail: bytes = b'\xAB\xCD' * 16) -> bytes:
     return u64b(pso_id) + tail
 
 
+# --------------------------------------------------------------------------- root signatures
+#: `D3D12_ROOT_PARAMETER_TYPE` / `D3D12_DESCRIPTOR_RANGE_TYPE` by the words the tool uses.
+PARAM_KIND_CODES = {'table': 0, '32bit': 1, 'cbv': 2, 'srv': 3, 'uav': 4}
+RANGE_KIND_CODES = {'srv': 0, 'uav': 1, 'cbv': 2, 'sampler': 3}
+
+#: One descriptor range: `(kind, baseRegister, count, space, offsetInTable)`.
+RootRangeSpec = Tuple[str, int, int, int, int]
+#: One root parameter: `(kind, visibility, register, space, count, ranges)`.
+RootParamSpec = Tuple[str, int, int, int, int, Sequence[RootRangeSpec]]
+
+
+def root_signature(params: Sequence[RootParamSpec], version: int = 2, flags: int = 0,
+                   samplers: int = 0) -> bytes:
+    """The `RTS0` part's data: a serialised D3D12 root signature (`DecodeRootSig` layout).
+
+    Header(24) | param array (12 bytes each) | each parameter's out-of-line data. Every offset is
+    from the start of this buffer, and a 1.0 signature's descriptor ranges are 20 bytes instead of
+    24 -- the difference the tool has to get right to walk them.
+    """
+    array_len = 24 + 12 * len(params)
+    bodies: List[Tuple[int, bytes]] = []
+    data = b''
+    for kind, _vis, reg, space, count, ranges in params:
+        if kind == 'table':
+            ranges_off = array_len + len(data) + 8
+            body = u32b(len(ranges)) + u32b(ranges_off)
+            for rkind, base, rcount, rspace, roffset in ranges:
+                body += (u32b(RANGE_KIND_CODES[rkind]) + u32b(rcount) + u32b(base) + u32b(rspace)
+                         + (u32b(0) if version >= 2 else b'') + u32b(roffset))
+        elif kind == '32bit':
+            body = u32b(reg) + u32b(space) + u32b(count)
+        else:
+            body = u32b(reg) + u32b(space) + (u32b(0) if version >= 2 else b'')
+        bodies.append((array_len + len(data), body))
+        data += body
+    head = u32b(version) + u32b(len(params)) + u32b(24) + u32b(samplers) + u32b(0) + u32b(flags)
+    array = b''.join(u32b(PARAM_KIND_CODES[param[0]]) + u32b(param[1]) + u32b(off)
+                     for param, (off, _body) in zip(params, bodies))
+    return head + array + data
+
+
+def pl_create_root_sig(resid: int, sig: bytes, node_mask: int = 0, gap: int = 16) -> bytes:
+    """`Device_CreateRootSignature`: the blob is a DXBC container with one `RTS0` part.
+
+    The fields around the container are the serialiser's own framing, so the tool finds it by its
+    `DXBC` magic and checks it against the length at +4 -- hence `gap`, which lets a test move the
+    container without breaking anything. The id is the last 8 bytes.
+    """
+    container = dxbc([('RTS0', sig)])
+    return (u32b(node_mask) + u64b(len(container)) + b'\x00' * gap + container
+            + u64b(len(container)) + b'\x00' * 16 + u64b(resid))
+
+
+def rdef(binds: Sequence[Tuple[str, str, int, int]], target_version: int = 0x501,
+         stage: int = 0x4353) -> bytes:
+    """An `RDEF` part: `(name, kind, register, space)` per binding (`dxbc_container.cpp` layout).
+
+    Header(24: cbuffers, resources, targetVersion, targetShaderStage, flags, creatorOffset) then one
+    40-byte entry per binding plus its name string. `bindPoint` carries the register, which is what
+    makes a root parameter's `(kind, register, space)` matchable.
+    """
+    kinds = {'cbv': 0, 'srv': 2, 'uav': 4, 'sampler': 3}
+    stride = 40 if target_version >= 0x501 else 32
+    header_len = 32                                  # cbuffers, resources, version, stage, flags...
+    strings, entries = b'', b''
+    for name, kind, reg, space in binds:
+        name_off = header_len + stride * len(binds) + len(strings)
+        strings += name.encode('utf-8') + b'\x00'
+        entries += (u32b(name_off) + u32b(kinds[kind]) + u32b(0) * 3 + u32b(reg) + u32b(1)
+                    + u32b(0) + (u32b(space) + u32b(0) if stride == 40 else b''))
+    head = (u32b(0) + u32b(0) + u32b(len(binds)) + u32b(header_len) + u16b(target_version)
+            + u16b(stage) + u32b(0) + u32b(0) + b'\x00' * 4)
+    return head + entries + strings
+
+
 SINGLEPROBE_SIG = f32b(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
 
 
@@ -495,6 +570,7 @@ enum class D3D12Chunk : uint32_t
   Device_CreatePlacedResource2,
   CreateAS,
   Device_CreateDescriptorHeap,
+  Device_CreateRootSignature,
   Device_CreateConstantBufferView,
   Device_CreateShaderResourceView,
   Device_CreateUnorderedAccessView,

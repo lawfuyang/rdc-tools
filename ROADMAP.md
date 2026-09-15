@@ -10,7 +10,7 @@ Current state for reference: the tool parses the `.rdc` container, decompresses 
 (LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (README §4.8), walks the
 SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads and the resource table
 (id → kind/size/name, README §4.9), extracts DXBC/DXIL containers with their GI-related reflection strings,
-and can check its own parse (`verify`). 26 commands, see
+and can check its own parse (`verify`). 27 commands, see
 `README.md`. Since 2026-09-15 it also has a
 hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright "Standard"
 (`npx --yes pyright@latest`); `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite
@@ -164,28 +164,13 @@ and DXIL compilation to a PSO — `dxc` is available with the UE install.
 
 ## 3. P1 — Offline parser gaps
 
-### 3.1 Root signature decode + `rpN` → uniform name mapping
-**What.** Finish parsing the `RTS0` part (parameter types, registers, spaces, visibility, descriptor ranges) and
-combine it with the shader reflection's constant-block bind points to name every root parameter.
-**Why.** `draws` names the *resource* now (`rp7=res342+0x8d200[Resource Allocator Underlying Buffer]`, §3.2),
-but not the *root parameter*: `rp7` is still just an index, and assuming what it holds is what caused a wrong
-conclusion.
-**How.** `RTS0` layout is already decoded in the investigation notes:
-`u32 version=2 | u32 numRootParameters | u32 rootParametersOffset | u32 numStaticSamplers | u32 staticSamplersOffset | u32 flags`,
-params at `header+0x18`, ranges at `header+0xc0`; determine the per-parameter stride empirically (candidate
-12/16/20 bytes — validate that the range region starts exactly where the parameter array ends), then map
-`(register, space)` against the `RDEF` bindings harvested from the DXIL containers.
-**Note.** Names are *not* in the root signature; they come from the reflection, so this item and 3.2 belong
-together — and replay (item 1) answers it directly.
-**Effort.** ~half a day, or free once replay works.
-
-### 3.2 Texture dumping (format decoders)
+### 3.1 Texture dumping (format decoders)
 **What.** Decode BC1–7, ASTC, and float formats; write PNG/EXR; select mip/slice.
 **Why.** "Which lightmap/VLM brick is actually bound?" is a recurring question; today only raw bytes are
 dumpable.
 **Effort.** ~2–3 days (or delegate entirely to replay's `GetTextureData`/`SaveTexture` — recommended).
 
-### 3.3 Other `.rdc` sections
+### 3.2 Other `.rdc` sections
 **What.** Decompress and index the non-zero sections (init data / resource records) rather than only section 0.
 **Why.** Large captures can keep resource payloads outside the frame-capture stream; today they are invisible.
 **Note (2026-09-15).** Sections 1–2 (`d3d12core`, `d3d12sdklayers`, ~6 MB and ~9 MB uncompressed) are *not*
@@ -193,23 +178,23 @@ readable with the current decoder — the zstd path fails on them — so whateve
 records, and maybe descriptor contents) is unreachable today.
 **Effort.** ~half a day.
 
-### 3.4 Shader disassembly
+### 3.3 Shader disassembly
 **What.** Disassemble `ILDN`/`ILDB` bytecode to text, or shell out to `dxc`/`dxil-spirv`.
 **Why.** `dxbc` shows which uniforms a shader reads, but not the code path that consumes them.
 **Effort.** ~1 day if shelling out; much more if implemented in Python.
 
-### 3.5 Per-instance mesh data offline
+### 3.4 Per-instance mesh data offline
 **What.** Reconstruct post-VS per-instance data from the instance vertex streams.
 **Why.** This is the "what instance SH did the VS actually emit" question; replay's `GetPostVSData` answers it,
 offline it needs the vertex-factory layout.
 **Effort.** ~2 days; replay is the better route.
 
-### 3.6 Full pipeline state reconstruction
+### 3.5 Full pipeline state reconstruction
 **What.** Track blend/rasterizer/depth-stencil/render-target state per draw so `draws` can print the complete
 state, not just PSO/CBVs/streams.
 **Effort.** ~1 day.
 
-### 3.7 True EID mapping
+### 3.6 True EID mapping
 **What.** Map chunk indices to real RenderDoc EIDs (the current assumption "chunk index ≈ EID" holds in the
 captures tested but is not guaranteed).
 **Why.** So output can be cross-referenced with the GUI and the replay API.
@@ -263,10 +248,10 @@ never silent ones).
 | # | README §8 bullet | Plan | Priority | Effort |
 |---|---|---|---|---|
 | 6.1 | Chunk names need `renderdoc-src` | §4 bundled chunk-name table | P1 | ~2 h |
-| 6.2 | Only section 0 is decompressed | §3.3 other `.rdc` sections | P1 | ~4 h |
-| 6.3 | No name resolution for root parameters | §3.1 (+ §1 replay) | P1 | ~4 h, or free with replay |
-| 6.4 | No texture decoding | §3.2 (+ §1 replay) | P1 | 2–3 d |
-| 6.5 | No shader disassembly | §3.4 | P2 | ~1 d |
+| 6.2 | Only section 0 is decompressed | §3.2 other `.rdc` sections | P1 | ~4 h |
+| 6.3 | No name resolution for root parameters | §1 replay (the offline decode landed: `rpN` is typed and registered now) | P2 | free with replay |
+| 6.4 | No texture decoding | §3.1 (+ §1 replay) | P1 | 2–3 d |
+| 6.5 | No shader disassembly | §3.3 | P2 | ~1 d |
 
 **Order:** 6.1 is the last cheap environment dependency and 6.2 unblocks the extra sections; 6.3, 6.4 and 6.5
 are what replay (§1) answers directly, so attempt them offline only if replay is still blocked.
@@ -278,12 +263,14 @@ are what replay (§1) answers directly, so attempt them offline only if replay i
 * **6.1** (§4 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
   newer than the tree; the table is generated by a checked-in script and carries its RenderDoc version; the
   §1.1 warning becomes "using bundled names for RenderDoc X".
-* **6.2** (§3.3): `sections` reports every section's decompressed size and first bytes; a `section <name>`
+* **6.2** (§3.2): `sections` reports every section's decompressed size and first bytes; a `section <name>`
   command can dump any of them; section 0 behaviour unchanged.
-* **6.3** (§3.1 + §1): every `rpN` in `draws` carries a name (from `RDEF`/reflection) or is explicitly
-  marked unnamed; the wrong conclusion recorded in README §9 can no longer be reached from the output alone.
-* **6.4** (§3.2): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
-* **6.5** (§3.4): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
+* **6.3** (§1): every `rpN` in `draws` carries a name from the shader reflection. The offline half landed —
+  `draws` prints what each parameter *is* (type, register, space, visibility) and the wrong conclusion recorded
+  in README §9 can no longer be reached from the output alone — but a *name* needs replay, because these
+  captures strip the reflection (README §8).
+* **6.4** (§3.1): `texture <resId> <out.png>` writes a decoded image for at least BC1–7 + float formats.
+* **6.5** (§3.3): `disasm <rdc> <index>` prints readable DXIL/DXBC text via an external `dxc`.
 
 ---
 
@@ -293,7 +280,5 @@ are what replay (§1) answers directly, so attempt them offline only if replay i
 2. **Replay driver** (§1) — unblocks `rpN` naming, typed CB values, decoded textures, per-instance data, and
    is the cheap route through §6.3, §6.4 and §6.5.
 3. **Diff two captures** (§4) — the fastest path to mobile-vs-PC and before-vs-after answers.
-4. **Root signature decode** (§3.1) — name the root parameters (skip it if replay landed first; the resource
-   table landed as §3.3 and the descriptor heaps as §3.2).
-5. **Bundled chunk names** (§4, = §6.1) — remove the last environment dependency.
-6. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.
+4. **Bundled chunk names** (§4, = §6.1) — remove the last environment dependency.
+5. **D3D12 harness** (§2) — only when a shader must be run with inputs the capture does not contain.

@@ -19,7 +19,7 @@ uniforms do they read.* It is used from the command line and from scripts; every
 
 ```
 rdc-tools/
-  rdc_analysis.py     the tool (single file, ~1800 lines)
+  rdc_analysis.py     the tool (single file, ~2600 lines)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
   tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
@@ -223,6 +223,7 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `Device_Create{Committed,Placed,Reserved}Resource` | the `D3D12_RESOURCE_DESC` follows the leading args (committed: heap props 20 B + heap flags 4 B; placed: heap id 8 B + heap offset 8 B; reserved: none), and every one of them ends `IID(16), u64 resourceId, u64 gpuAddress` — so the **id is at `length - 16`** and a buffer's base VA at `length - 8`. 117/145, 109/118/137 and 93 bytes in the captures tested |
 | `Device_Create…Resource1/2/3` | the same, with a `D3D12_RESOURCE_DESC1` (whose **first 48 bytes are the same struct**) and a castable-format list after it — 149 bytes for `…CommittedResource3` in a capture, and one offset covers them all |
 | `CreateAS` | `u64 buffer, u64 offset, u32 type, u64 byteSize, u64 asId` (36 bytes) — an acceleration structure is a **sub-range of a buffer**, and the type is `TOP_LEVEL = 0` / `BOTTOM_LEVEL = 1` |
+| `Device_CreateRootSignature` | the serialiser's framing around a one-part DXBC container holding `RTS0` (found by its magic, cross-checked against the length at `+4`); the **id is the last 8 bytes** — see §8 for the signature's own layout |
 | `SetName` | `u64 objectId, u32 length, utf-8 name` — RenderDoc names every object, not only resources, which is what makes heaps and queues identifiable |
 | `Device_CreateDescriptorHeap` | `D3D12_DESCRIPTOR_HEAP_DESC` (type, count) + IID + the heap id at `length - 16` + the original GPU base — 56 bytes |
 | `Device_Create{ConstantBuffer,ShaderResource,UnorderedAccess,RenderTarget,DepthStencil}View` | the descriptor first — the **resource id is at +16** — and the destination `PortableHandle` last (`u64 heapId` at `length - 12`, `u32 index` at `length - 4`). 68 bytes for an SRV, 80 for a UAV in the captures |
@@ -242,11 +243,11 @@ parts (`fourcc, offset, length`). Part meanings:
 
 | Part | Content |
 |---|---|
-| `RDEF` | resource bindings (cbuffers, textures, samplers, bind points) |
+| `RDEF` | resource bindings (cbuffers, textures, samplers, bind points) — **absent from every capture tested here**, see §8 |
 | `RDAT` | reflection blob — cbuffer variable names, source file names, type info (the tool harvests strings from it) |
 | `ISG1` / `OSG1` | input / output signatures (`parse_signature()` decodes them) |
 | `ILDN` / `ILDB` | shader bytecode |
-| `RTS0` | **root signature** (D3D12 serialised form; the tool currently only inspects it, see ROADMAP) |
+| `RTS0` | **root signature** — decoded by `_parse_root_signature()` (§3.4, §8); `rootsig` prints it and `draws` annotates every `rpN` with it (§4.10) |
 
 `sig` decodes `ISG1`/`OSG1`: `u32 count`, then `count` × 24-byte elements (`nameOffset u32, semanticIndex u32,
 register u32, ...`), with the string table after the array. This is how per-instance vertex streams show up
@@ -308,6 +309,7 @@ so a two-character name is still not shown by those.
 | `chunk` | `<rdc> <index>` | full inspector: id/name/flags/length, payload offset **and header size**, decoded fields via `decode_chunk`, 160-byte hex dump, and the payload's strings |
 | `draws` | `<rdc> [maxDraws=80]` | per-draw table (see below) |
 | `rootconst` | `<rdc> [maxChunks=8]` | `SetGraphicsRoot32BitConstant(s)` payloads decoded to root param index, value count, dest offset, and float values |
+| `rootsig` | `<rdc> [maxSigs=40]` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter with its type, register, space and descriptor ranges |
 | `dump-chunk` | `<rdc> <index> <outfile>` | writes the chunk payload to a file |
 
 #### `draws` — the per-draw table
@@ -318,12 +320,21 @@ descriptor tables), vertex streams (`List_IASetVertexBuffers`) and the index buf
 prints the state that is *in effect* — everything still bound, not only what changed since the previous draw:
 
 ```
-#452    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
-        CBV: rp10=res1907+0x120000  rp11=res342+0x3b000  rp6=res342+0x3b000  rp7=res342+0x8d200
-        Table: rp0=heap298[279377]
-        VB : res315+0x3f7400(sz6708,st12)  res315+0x3f5900(sz2236,st4)  res315+0x300(sz16,st0)
-        IB : res315+0x3f2b00
+#1098   WorldGridMaterial Sphere 60964    x=314 y=0 z=1 ExecuteIndirect
+        CBV: rp2(cbv b0 s0)=res1907+0x184e00[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[279360][GlobalResourceHeap]
+        CBV: rp1(vs cbv b0 s0)=res1907+0x93300[Resource Allocator Under]  rp2(vs cbv b1 s0)=res1907+0x19c000[Resource Allocator Under]
+        Table: rp0(vs table t0 n64 s0)=heap298[279373][GlobalResourceHeap]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res60868+0x0(sz65536,st0)[InstanceCulling.Instance]
+        IB : res315+0x3f2b00[Resource Allocator Under]
 ```
+
+`rp<n>(...)` carries **what the root signature says that parameter is** (§3.4, `rootsig`): `cbv b0 s0` is a root
+descriptor at register b0 space 0, `table t0 n64 s0` is a descriptor table whose range starts at t0 with 64
+descriptors, `32bit b0 s0 n4` is four root constants, and a leading `vs`/`ps` is the parameter's visibility. A
+parameter whose `RDEF` reflection survived carries its name too (`rp2(cbv b1 s2) [SceneCB]`); none of the
+captures here do (§8). This matters most where an index alone is ambiguous: the `ExecuteIndirect` above reports
+*both* namespaces, and `rp2` is a compute CBV at b0 in one and a vertex CBV at b1 in the other.
 
 `rp<n>=res<id>+0x<offset>` is a root-parameter CBV binding; `rp<n>=heap<id>[index]` is a root-parameter
 descriptor table — the heap and the slot it points at, plus what the capture wrote into that slot
@@ -337,8 +348,8 @@ between "a resource I cannot see" and "a sampler table":
 
 ```
 #270    GridInject:NotLinkedList 2300     x=8 y=5 z=2 Dispatch
-        CBV: rp2=res1907+0x174b00[Resource Allocator Under]  rp3=res1907+0x120000[Resource Allocator Under]
-        Table: rp0=heap298[279425] -> srv res384[Resource Allocator Under]  rp1=heap299[0][GlobalSamplerHeap]
+        CBV: rp2(cbv b0 s0)=res1907+0x174b00[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[279425] -> srv res384[Resource Allocator Under]
 ```
 
 UE sub-allocates its buffers inside page buffers, so a binding into a `Resource Allocator Underlying Buffer`
@@ -555,11 +566,26 @@ the decoders rely on.
 * `D3D12_GPU_DESCRIPTOR_HANDLE` serialises as a **`PortableHandle` (`u64 heapId, u32 descriptorIndex`)**, not as
   a pointer (`d3d12_manager.h`), which is why `List_SetGraphicsRootDescriptorTable` payloads are 24 bytes.
   Verified on both captures, and it is what `verify` caught: the decoder assumed 20.
-* The serialised D3D12 root signature (`RTS0` part) is
-  `u32 version=2 | u32 numRootParameters | u32 rootParametersOffset | u32 numStaticSamplers | u32 staticSamplersOffset | u32 flags`,
-  followed by the parameters and descriptor ranges — and it contains **no parameter names**. Names live in the
-  shader reflection (`RDAT`), so mapping `rpN` → uniform name needs reflection *and* the root signature, or the
-  replay API (see ROADMAP).
+* The serialised D3D12 root signature (`RTS0` part) is a 24-byte header
+  (`u32 version | u32 numRootParameters | u32 paramDataOffset | u32 numStaticSamplers | u32
+  staticSamplerOffset | u32 flags`) followed by a **12-byte** parameter array
+  (`u32 type | u32 visibility | u32 dataOffset`) whose data is *out of line*, addressed by `dataOffset` from the
+  start of the part: `D3D12_ROOT_CONSTANTS` (register, space, count), `D3D12_ROOT_DESCRIPTOR1` (register,
+  space, flags — no flags in 1.0) or a table (`u32 numRanges | u32 rangesOffset`) of
+  `D3D12_DESCRIPTOR_RANGE1`s (24 bytes: type, count, base, space, flags, tableOffset — **20 for a 1.0
+  signature**, which has no flags word, so the version decides the stride). Version 1 = 1.0, 2 = 1.1, 3 = 1.2.
+  `parse_root_signatures()` decodes it, `rootsig` prints it, and `draws` annotates every `rpN` with it.
+* `Device_CreateRootSignature`'s payload is the serialiser's own framing around a one-part DXBC container
+  holding that `RTS0`. The tool locates the container by its `DXBC` magic rather than at a fixed offset and
+  cross-checks it against the length field at `+4` (they agree in all three captures), and the signature's id
+  is the **last 8 bytes** of the payload — not `length - 16` like a resource creation, because nothing follows
+  it.
+* **The root signature has no parameter names, and neither do these captures.** Names could only come from
+  shader reflection, and every capture tested is DXIL with it stripped — the shader parts are
+  `SFI0 ISG1 OSG1 PSV0 STAT HASH DXIL` with **no `RDEF` and no `RDAT`**. `parse_rdef()` reads an `RDEF` when a
+  capture has one (the layout is in `dxbc_container.cpp`; `bindPoint` is the register, which is what makes it
+  matchable), but offline there is nothing to name a parameter with, so the tool prints what it *knows* —
+  type, register, space — instead of guessing. The replay driver (ROADMAP §1) is the way to get real names.
 * `Device_CreatePipelineState` embeds the DXBC/DXIL containers of the shaders it references, which is why
   `parse_dxil_containers()` finds shaders at offsets *inside* those chunks.
 * Resource **names come from `SetName`**, not from the creation call, and the creation call is what carries the
@@ -666,8 +692,12 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
   produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
   works — only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed.
-* **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be
-  mapped to a uniform name offline. This is the main reason for the replay driver in `ROADMAP.md`.
+* **No name resolution for root parameters.** The serialised root signature carries no names, and neither do
+  these captures' shaders: every one is DXIL with the reflection stripped (`RDEF` and `RDAT` are both absent),
+  so there is nothing offline to map `rpN` to a uniform name with. What `draws` does instead is say what each
+  parameter *is* — `rp2(cbv b1 s0)`, `rp0(table t0 n64 s0, u0 n16 s0)`, `rp3(32bit b0 s0 n4)` — so an index can
+  no longer be mistaken for something it is not (§4.10, §8). A name appears when a capture does carry an
+  `RDEF`. Real names need the replay driver in `ROADMAP.md`.
 * **A descriptor-table binding resolves only as far as the capture goes.** The stream holds the descriptor
   *writes and copies of the captured frame*, not the contents of the heap, and UE fills its million-slot global
   heap at startup: on the Android capture every table binding therefore still shows the heap name, while the PC

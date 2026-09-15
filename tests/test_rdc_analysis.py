@@ -1074,6 +1074,283 @@ class TestParseDescriptorHeaps(CmdCase):
         self.assertEqual(self.heaps(), {})
 
 
+class TestParseRootSignature(unittest.TestCase):
+    """`_parse_root_signature`: the `RTS0` layout (`DecodeRootSig`, d3d12_rootsig.cpp).
+
+    Header(24) | param array (12 bytes each) | out-of-line data per parameter, all offsets from the
+    start of the part. Nothing here names anything: the decode says what each `rpN` *is*.
+    """
+
+    def parse(self, sig: bytes) -> Optional[R.RootSignature]:
+        return R._parse_root_signature(sig)
+
+    def param(self, sig: Optional[R.RootSignature], i: int) -> R.RootParam:
+        assert sig is not None
+        return sig['params'][i]
+
+    def test_a_root_descriptor(self):
+        sig = self.parse(F.root_signature([('cbv', 5, 1, 2, 0, [])]))
+        assert sig is not None
+        self.assertEqual((sig['version'], sig['dwords'], sig['flags'], sig['samplers']),
+                         ('1.1', 2, 0, 0))                 # a root descriptor costs 2 dwords
+        self.assertEqual(self.param(sig, 0), {'kind': 'cbv', 'visibility': 'ps', 'register': 1,
+                                             'space': 2, 'count': 0, 'ranges': []})
+
+    def test_root_constants(self):
+        sig = self.parse(F.root_signature([('32bit', 0, 3, 1, 4, [])]))
+        self.assertEqual(self.param(sig, 0)['count'], 4)
+        self.assertEqual(self.param(sig, 0)['register'], 3)
+        assert sig is not None
+        self.assertEqual(sig['dwords'], 4)                 # root constants cost their count
+
+    def test_a_descriptor_table_and_its_ranges(self):
+        sig = self.parse(F.root_signature([('table', 0, 0, 0, 0, [('srv', 0, 18, 0, 2),
+                                                                 ('uav', 0, 7, 0, 2)])]))
+        self.assertEqual(self.param(sig, 0)['ranges'],
+                         [{'kind': 'srv', 'base': 0, 'count': 18, 'space': 0, 'offset': 2},
+                          {'kind': 'uav', 'base': 0, 'count': 7, 'space': 0, 'offset': 2}])
+        assert sig is not None
+        self.assertEqual(sig['dwords'], 1)                 # a table costs 1 dword
+
+    def test_a_version_1_0_signature_has_20_byte_ranges(self):
+        # the one place the version matters: a 1.1 range carries a flags word, so walking a 1.0
+        # signature with a 24-byte stride would read the second range out of the first one's tail
+        sig = self.parse(F.root_signature([('table', 0, 0, 0, 0, [('srv', 4, 2, 1, 0),
+                                                                 ('cbv', 8, 1, 3, 9)])], version=1))
+        assert sig is not None
+        self.assertEqual(sig['version'], '1.0')
+        self.assertEqual([(r['kind'], r['base'], r['count'], r['space'], r['offset'])
+                          for r in self.param(sig, 0)['ranges']],
+                         [('srv', 4, 2, 1, 0), ('cbv', 8, 1, 3, 9)])
+
+    def test_a_1_2_signature_and_static_samplers(self):
+        sig = self.parse(F.root_signature([('cbv', 0, 0, 0, 0, [])], version=3, flags=0x332,
+                                         samplers=6))
+        assert sig is not None
+        self.assertEqual(sig['version'], '1.2')
+        self.assertEqual(sig['flags'], 0x332)
+        self.assertEqual(sig['samplers'], 6)
+
+    def test_an_unbounded_range_count_survives(self):
+        sig = self.parse(F.root_signature([('table', 0, 0, 0, 0, [('srv', 0, 0xffffffff, 0, 0)])]))
+        self.assertEqual(self.param(sig, 0)['ranges'][0]['count'], 0xffffffff)
+
+    def test_several_parameters_keep_their_own_data(self):
+        sig = self.parse(F.root_signature([('table', 0, 0, 0, 0, [('uav', 0, 16, 0, 0)]),
+                                           ('cbv', 0, 0, 0, 0, []),
+                                           ('32bit', 0, 2, 0, 4, [])]))
+        assert sig is not None
+        self.assertEqual([p['kind'] for p in sig['params']], ['table', 'cbv', '32bit'])
+        self.assertEqual(self.param(sig, 2)['count'], 4)
+        self.assertEqual(sig['dwords'], 1 + 2 + 4)
+
+    def test_an_unknown_visibility_reads_as_all(self):
+        sig = self.parse(F.root_signature([('cbv', 9, 0, 0, 0, [])]))
+        self.assertEqual(self.param(sig, 0)['visibility'], 'all')
+
+    def test_bad_input_is_none_not_garbage(self):
+        cases = {
+            'empty': b'',
+            'header only': F.root_signature([])[:20],
+            'unknown version': F.root_signature([], version=9),
+            'param array past the end': (F.u32b(2) + F.u32b(4) + F.u32b(24) + F.u32b(0) + F.u32b(0)
+                                        + F.u32b(0) + b'\x00' * 12),
+            'param data past the end': (F.u32b(2) + F.u32b(1) + F.u32b(24) + F.u32b(0) + F.u32b(0)
+                                        + F.u32b(0) + F.u32b(2) + F.u32b(0) + F.u32b(0x1000)),
+            'unknown param kind': F.root_signature([('cbv', 0, 0, 0, 0, [])])[:24]
+                                  + F.u32b(9) + F.u32b(0) + F.u32b(36),
+            'ranges past the end': (F.u32b(2) + F.u32b(1) + F.u32b(24) + F.u32b(0) + F.u32b(0)
+                                    + F.u32b(0) + F.u32b(0) + F.u32b(0) + F.u32b(36) + F.u32b(4)
+                                    + F.u32b(0x1000)),
+        }
+        for label, data in cases.items():
+            with self.subTest(label=label):
+                self.assertIsNone(self.parse(data))
+
+    def test_an_unknown_range_kind_is_rejected(self):
+        sig = F.root_signature([('table', 0, 0, 0, 0, [('srv', 0, 1, 0, 0)])])
+        bad = sig[:-24] + F.u32b(9) + sig[-20:]          # the first range's type word
+        self.assertIsNone(self.parse(bad))
+
+
+class RootSigCase(CmdCase):
+    """A capture with root signature chunks, plus the parse of its `Device_CreateRootSignature`s."""
+
+    def sigs(self, *chunks: bytes) -> Dict[int, R.RootSignature]:
+        path = self.cap(*chunks)
+        _info, stream, _how = R.load_stream(path)
+        return R.parse_root_signatures(stream, self.names)
+
+    def sig(self, resid: int, params: Sequence[F.RootParamSpec], **kw: object) -> bytes:
+        """A `Device_CreateRootSignature` chunk for `resid`."""
+        return self.ch('Device_CreateRootSignature',
+                       F.pl_create_root_sig(resid, F.root_signature(params, **kw)))  # type: ignore[arg-type]
+
+
+class TestParseRootSignatures(RootSigCase):
+    """`parse_root_signatures`: the blob is found by its magic and keyed by the id at `length - 8`."""
+
+    def test_one_signature_keyed_by_its_id(self):
+        sigs = self.sigs(self.sig(11365, [('cbv', 0, 0, 0, 0, [])]))
+        self.assertEqual(list(sigs), [11365])
+        self.assertEqual(sigs[11365]['params'][0]['kind'], 'cbv')
+
+    def test_the_container_is_found_by_magic_not_by_offset(self):
+        # the fields around the blob are the serialiser's own framing, and the gap is not fixed
+        for gap in (0, 4, 16, 40):
+            with self.subTest(gap=gap):
+                payload = F.pl_create_root_sig(7, F.root_signature([('srv', 0, 3, 0, 0, [])]),
+                                               gap=gap)
+                sigs = self.sigs(self.ch('Device_CreateRootSignature', payload))
+                self.assertEqual(sigs[7]['params'][0]['kind'], 'srv')
+
+    def test_the_length_field_is_cross_checked(self):
+        # the tool trusts the container's own size field, and requires the u64 at +4 to agree
+        payload = bytearray(F.pl_create_root_sig(7, F.root_signature([('cbv', 0, 0, 0, 0, [])])))
+        payload[4] = (payload[4] + 1) % 256
+        self.assertEqual(self.sigs(self.ch('Device_CreateRootSignature', bytes(payload))), {})
+
+    def test_a_container_that_is_not_a_root_signature_is_skipped(self):
+        not_rts0 = F.dxbc([('RDAT', b'\x00' * 16)])
+        two_parts = F.dxbc([('RTS0', F.root_signature([('cbv', 0, 0, 0, 0, [])])), ('STAT', b'x')])
+        sigs = self.sigs(self.ch('Device_CreateRootSignature',
+                                 F.u32b(0) + F.u64b(len(not_rts0)) + not_rts0 + F.u64b(7)),
+                         self.ch('Device_CreateRootSignature',
+                                 F.u32b(0) + F.u64b(len(two_parts)) + two_parts + F.u64b(8)))
+        self.assertEqual(sigs, {})
+
+    def test_a_corrupt_blob_is_skipped_rather_than_guessed_at(self):
+        sigs = self.sigs(self.ch('Device_CreateRootSignature',
+                                 F.pl_create_root_sig(7, b'\x02\x00' * 2)))
+        self.assertEqual(sigs, {})
+
+    def test_several_signatures_are_all_kept(self):
+        sigs = self.sigs(self.sig(417, [('cbv', 0, 0, 1, 0, [])]),
+                         self.sig(429, [('table', 0, 0, 0, 0, [('sampler', 0, 2, 1, 0)])]))
+        self.assertEqual(sorted(sigs), [417, 429])
+        self.assertEqual(sigs[429]['params'][0]['ranges'][0]['kind'], 'sampler')
+
+    def test_no_root_signature_chunks_is_an_empty_table(self):
+        self.assertEqual(self.sigs(self.ch('PushMarker', b'x\x00')), {})
+
+    def test_an_unrelated_chunk_with_a_dxbc_blob_is_ignored(self):
+        sigs = self.sigs(self.ch('Device_CreatePipelineState',
+                                 F.dxbc([('RTS0', F.root_signature([('cbv', 0, 0, 0, 0, [])]))])))
+        self.assertEqual(sigs, {})
+
+
+class TestParseRdef(unittest.TestCase):
+    """`parse_rdef`: the reflection's bindings, the one place a root parameter name can come from."""
+
+    def test_names_kinds_registers_and_spaces(self):
+        binds = R.parse_rdef(F.rdef([('SceneCB', 'cbv', 0, 1), ('Textures', 'srv', 2, 0),
+                                     ('Output', 'uav', 3, 4), ('LinearClamp', 'sampler', 5, 6)]))
+        self.assertEqual([(b['name'], b['kind'], b['register'], b['space']) for b in binds],
+                         [('SceneCB', 'cbv', 0, 1), ('Textures', 'srv', 2, 0),
+                          ('Output', 'uav', 3, 4), ('LinearClamp', 'sampler', 5, 6)])
+        self.assertEqual(binds[0]['count'], 1)
+
+    def test_a_tbuffer_reads_as_an_srv_and_every_uav_flavour_as_a_uav(self):
+        self.assertEqual([b['kind'] for b in R.parse_rdef(F.rdef([('t', 'srv', 0, 0),
+                                                                 ('u', 'uav', 1, 0)]))],
+                         ['srv', 'uav'])
+
+    def test_a_5_0_rdef_has_no_space_or_id_field(self):
+        binds = R.parse_rdef(F.rdef([('SceneCB', 'cbv', 1, 7)], target_version=0x500))
+        self.assertEqual((binds[0]['register'], binds[0]['space']), (1, 0))
+
+    def test_bad_input_is_empty_not_garbage(self):
+        self.assertEqual(R.parse_rdef(b''), [])
+        self.assertEqual(R.parse_rdef(F.rdef([('x', 'cbv', 0, 0)])[:16]), [])
+        huge = bytearray(F.rdef([('x', 'cbv', 0, 0)]))
+        huge[8:12] = F.u32b(99999)
+        self.assertEqual(R.parse_rdef(bytes(huge)), [])
+
+    def test_a_name_offset_past_the_end_is_skipped(self):
+        data = bytearray(F.rdef([('x', 'cbv', 0, 0)]))
+        data[32:36] = F.u32b(0xFFFF)                      # the first entry's nameOffset
+        self.assertEqual(R.parse_rdef(bytes(data)), [])
+
+
+class TestShaderBindNames(RootSigCase):
+    """`shader_bind_names`: `RDEF` parts of the shaders a capture still carries, by stage."""
+
+    def stream_of(self, *chunks: bytes) -> bytes:
+        path = self.cap(*chunks)
+        _info, stream, _how = R.load_stream(path)
+        return stream
+
+    def test_bindings_are_keyed_by_stage_and_slot(self):
+        stream = self.stream_of(self.ch('Device_CreatePipelineState',
+                                        F.dxbc([('RDEF', F.rdef([('SceneCB', 'cbv', 0, 1)]))])))
+        self.assertEqual(R.shader_bind_names(stream), {'cs': {('cbv', 0, 1): 'SceneCB'}})
+
+    def test_a_capture_without_rdef_has_no_names(self):
+        stream = self.stream_of(self.ch('Device_CreatePipelineState', F.dxbc([('STAT', b'x')])))
+        self.assertEqual(R.shader_bind_names(stream), {})
+
+
+class TestRootParamLabel(unittest.TestCase):
+    """`_root_param_label`: what `draws` prints for a root parameter index."""
+
+    def sig(self, *params: F.RootParamSpec) -> R.RootSignature:
+        sig = R._parse_root_signature(F.root_signature(list(params)))
+        assert sig is not None
+        return sig
+
+    def test_without_a_signature_the_index_stands_alone(self):
+        self.assertEqual(R._root_param_label(None, {}, 7), 'rp7')
+
+    def test_an_index_the_signature_does_not_have_stands_alone(self):
+        self.assertEqual(R._root_param_label(self.sig(('cbv', 0, 0, 0, 0, [])), {}, 9), 'rp9')
+
+    def test_a_root_descriptor(self):
+        sig = self.sig(('cbv', 0, 1, 2, 0, []))
+        self.assertEqual(R._root_param_label(sig, {}, 0), 'rp0(cbv b1 s2)')
+
+    def test_root_constants(self):
+        self.assertEqual(R._root_param_label(self.sig(('32bit', 0, 0, 0, 4, [])), {}, 0),
+                         'rp0(32bit b0 s0 n4)')
+
+    def test_a_table_lists_its_ranges(self):
+        sig = self.sig(('table', 0, 0, 0, 0, [('srv', 0, 18, 0, 2), ('uav', 0, 7, 0, 2)]))
+        self.assertEqual(R._root_param_label(sig, {}, 0), 'rp0(table t0 n18 s0, u0 n7 s0)')
+
+    def test_an_unbounded_range_says_so(self):
+        sig = self.sig(('table', 0, 0, 0, 0, [('srv', 0, 0xffffffff, 0, 0)]))
+        self.assertEqual(R._root_param_label(sig, {}, 0), 'rp0(table t0 nunbounded s0)')
+
+    def test_a_restricted_visibility_is_shown(self):
+        self.assertEqual(R._root_param_label(self.sig(('cbv', 1, 0, 0, 0, [])), {}, 0),
+                         'rp0(vs cbv b0 s0)')
+
+    def test_a_name_from_the_reflection_is_appended(self):
+        sig = self.sig(('cbv', 0, 1, 2, 0, []))
+        binds = {'all': {('cbv', 1, 2): 'SceneCB'}}
+        self.assertEqual(R._root_param_label(sig, binds, 0), 'rp0(cbv b1 s2) [SceneCB]')
+
+    def test_a_stage_specific_name_is_used_for_a_restricted_parameter(self):
+        sig = self.sig(('cbv', 5, 0, 0, 0, []))            # pixel-shader visible
+        binds = {'ps': {('cbv', 0, 0): 'PixelCB'}, 'vs': {('cbv', 0, 0): 'VertexCB'}}
+        self.assertEqual(R._root_param_label(sig, binds, 0), 'rp0(ps cbv b0 s0) [PixelCB]')
+
+    def test_stages_that_disagree_leave_the_parameter_unnamed(self):
+        sig = self.sig(('cbv', 0, 0, 0, 0, []))
+        binds = {'ps': {('cbv', 0, 0): 'PixelCB'}, 'vs': {('cbv', 0, 0): 'VertexCB'}}
+        self.assertEqual(R._root_param_label(sig, binds, 0), 'rp0(cbv b0 s0)')
+
+    def test_stages_that_agree_name_it_once(self):
+        sig = self.sig(('cbv', 0, 0, 0, 0, []))
+        binds = {'ps': {('cbv', 0, 0): 'SceneCB'}, 'vs': {('cbv', 0, 0): 'SceneCB'}}
+        self.assertEqual(R._root_param_label(sig, binds, 0), 'rp0(cbv b0 s0) [SceneCB]')
+
+    def test_a_table_is_never_named(self):
+        # a table holds several ranges, so one name would be a lie
+        sig = self.sig(('table', 0, 0, 0, 0, [('srv', 0, 1, 0, 0)]))
+        binds = {'all': {('srv', 0, 0): 'Textures'}}
+        self.assertEqual(R._root_param_label(sig, binds, 0), 'rp0(table t0 n1 s0)')
+
+
 class TestLoadFormatNames(TempDirCase):
     def test_parses_the_dxgi_format_enum(self):
         _root, _names = F.make_fake_src(self.tmp)

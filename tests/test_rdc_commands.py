@@ -18,7 +18,7 @@ import os
 import struct
 import sys
 import unittest
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +44,11 @@ class CmdCase(_CmdCase):
         with contextlib.redirect_stdout(buf):
             code = fn(*args, **kwargs)
         return buf.getvalue(), code
+
+    def sig_chunk(self, resid: int, params: Sequence[F.RootParamSpec], **kw: Any) -> bytes:
+        """A `Device_CreateRootSignature` chunk carrying `params` (`rootsig` / `draws` tests)."""
+        return self.ch('Device_CreateRootSignature',
+                       F.pl_create_root_sig(resid, F.root_signature(params, **kw)))
 
     def line_with(self, text: str, needle: str) -> str:
         for line in text.splitlines():
@@ -330,6 +335,61 @@ class TestCmdResources(CmdCase):
             out = self.out(R.main)
         self.assertIn('SceneUniformBuffer', out)
         self.assertIn('total resources: 1 (shown 1)', out)
+
+
+class TestCmdRootsig(CmdCase):
+    """`rootsig`: the decoded signatures, their flags, and what names the capture can offer."""
+
+    def test_prints_each_signature_and_its_parameters(self):
+        path = self.cap(self.sig_chunk(11365, [('cbv', 0, 0, 0, 0, []),
+                                               ('table', 0, 0, 0, 0, [('srv', 0, 18, 0, 2)])],
+                                        flags=0x400, samplers=6))
+        out = self.out(R.cmd_rootsig, path)
+        self.assertIn('root signatures: 1', out)
+        self.assertIn('res11365', out)
+        self.assertIn('ver=1.1 dwords=3 samplers=6', out)
+        self.assertIn('rp0(cbv b0 s0)', out)
+        self.assertIn('rp1(table t0 n18 s0)', out)
+
+    def test_flags_are_named(self):
+        out = self.out(R.cmd_rootsig, self.cap(self.sig_chunk(1, [('cbv', 0, 0, 0, 0, [])],
+                                                              flags=0x332)))
+        self.assertIn('[deny-vs deny-gs deny-ps deny-as deny-ms]', out)
+
+    def test_no_flags_reads_as_none(self):
+        out = self.out(R.cmd_rootsig, self.cap(self.sig_chunk(1, [('cbv', 0, 0, 0, 0, [])])))
+        self.assertIn('flags=0x0 [none]', out)
+
+    def test_a_capture_without_reflection_says_so(self):
+        # every capture in this repo is DXIL with RDEF stripped, so this is the normal case
+        out = self.out(R.cmd_rootsig, self.cap(self.sig_chunk(1, [('cbv', 0, 0, 0, 0, [])])))
+        self.assertIn('no RDEF reflection in this capture: parameters are typed, not named', out)
+
+    def test_reflection_names_a_parameter_when_a_shader_carries_an_rdef(self):
+        path = self.cap(self.sig_chunk(1, [('cbv', 0, 1, 2, 0, []), ('table', 0, 0, 0, 0,
+                                                                     [('srv', 0, 4, 0, 0)])]),
+                        self.ch('Device_CreatePipelineState',
+                                F.dxbc([('RDEF', F.rdef([('SceneCB', 'cbv', 1, 2),
+                                                          ('Textures', 'srv', 0, 0)]))])))
+        out = self.out(R.cmd_rootsig, path)
+        self.assertIn('rp0(cbv b1 s2) [SceneCB]', out)
+        self.assertIn('rp1(table t0 n4 s0)', out)          # a table is never given one name
+        self.assertNotIn('no RDEF reflection', out)
+
+    def test_the_limit_prints_a_remainder(self):
+        path = self.cap(self.sig_chunk(1, [('cbv', 0, 0, 0, 0, [])]),
+                        self.sig_chunk(2, [('cbv', 0, 0, 0, 0, [])]),
+                        self.sig_chunk(3, [('cbv', 0, 0, 0, 0, [])]))
+        out = self.out(R.cmd_rootsig, path, 2)
+        self.assertIn('root signatures: 3', out)
+        self.assertIn('... 1 more', out)
+        self.assertNotIn('res3', out)
+
+    def test_main_dispatches_rootsig(self):
+        path = self.cap(self.sig_chunk(1, [('cbv', 0, 0, 0, 0, [])]))
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'rootsig', path]):
+            out = self.out(R.main)
+        self.assertIn('root signatures: 1', out)
 
 
 class TestLoadStream(CmdCase):
@@ -815,6 +875,27 @@ class TestCmdDraws(CmdCase):
         self.assertIn('VB : res315+0x3f7400(sz6708,st12)  res0+0x0(sz0,st0)', out)
         self.assertIn('IB : res80641+0x3f2b0000', out)
         self.assertIn('total draws/dispatches: 1', out)
+
+    def test_root_parameters_are_annotated_when_the_capture_has_the_signature(self):
+        # ROADMAP 3.1: `rpN` on its own says nothing about what the parameter holds, and assuming it
+        # is what produced the wrong conclusion recorded in README 9
+        chunks = [
+            self.sig_chunk(4200, [('table', 0, 0, 0, 0, [('uav', 0, 16, 0, 0)]),
+                                  ('cbv', 0, 0, 0, 0, [])]),
+            self.ch('List_SetComputeRootSignature', F.pl_root_signature(7, 4200)),
+            self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 0, 298, 5)),
+            self.ch('List_SetComputeRootConstantBufferView', F.pl_root_view(7, 1, 1907, 0x120000)),
+            self.ch('List_Dispatch', F.pl_dispatch(7, 8, 8, 1)),
+        ]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('Table: rp0(table u0 n16 s0)=heap298[5]', out)
+        self.assertIn('CBV: rp1(cbv b0 s0)=res1907+0x120000', out)
+
+    def test_a_root_parameter_without_a_signature_keeps_the_bare_index(self):
+        # the same draw in a capture that never shows the signature: an index, not a guess
+        chunks = [self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x10)),
+                  self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0))]
+        self.assertIn('CBV: rp10=res1907+0x10', self.out(R.cmd_draws, self.cap(*chunks)))
 
     def test_state_persists_across_draws(self):
         # D3D12 bindings belong to the command list: a draw that binds nothing still has them

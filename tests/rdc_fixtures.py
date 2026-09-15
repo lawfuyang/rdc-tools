@@ -231,14 +231,28 @@ def pl_vertex_buffers(cmdlist: int, start_slot: int,
     return out
 
 
-def pl_index_buffer(cmdlist: int, resid: int, offset: int, size: int, fmt: int) -> bytes:
-    return u64b(cmdlist) + u64b(resid) + u64b(offset) + u32b(size) + u32b(fmt)
+def pl_index_buffer(cmdlist: int, resid: int, offset: int, size: int, fmt: int,
+                    present: bool = True) -> bytes:
+    """cmdList | present(u8) | resId | offset | size | format.
+
+    The view is serialised through `SERIALISE_ELEMENT_OPT`, so a "present" bool comes first and the
+    payload is 33 bytes (9 when the view is null).
+    """
+    out = u64b(cmdlist) + bytes([1 if present else 0])
+    if present:
+        out += u64b(resid) + u64b(offset) + u32b(size) + u32b(fmt)
+    return out
 
 
 def pl_32bit_constants(cmdlist: int, root_param: int, values: Sequence[int],
-                       dest_offset: int = 0) -> bytes:
-    """cmdList | rootParam | numValues | values[n] | destOffset  (length == 20 + 4n)."""
-    out = u64b(cmdlist) + u32b(root_param) + u32b(len(values))
+                       dest_offset: int = 0, array_count: Optional[int] = None) -> bytes:
+    """cmdList | rootParam | numValues | arrayCount(u64) | values[n] | destOffset.
+
+    `SERIALISE_ELEMENT_ARRAY` writes the element count before the values, so the payload is
+    `28 + 4n` bytes. `array_count` overrides the inline count (for mismatch tests).
+    """
+    count = len(values) if array_count is None else array_count
+    out = u64b(cmdlist) + u32b(root_param) + u32b(len(values)) + u64b(count)
     out += b''.join(u32b(v & 0xFFFFFFFF) for v in values)
     return out + u32b(dest_offset)
 

@@ -741,9 +741,17 @@ class TestChunkPayloadAndStrings(unittest.TestCase):
         self.assertEqual(R.chunk_strings(data, ch, minlen=8), ['abcdefgh'])
         self.assertEqual(R.chunk_strings(data, ch, minlen=6), ['abcdef', 'abcdefgh'])
 
-    def test_minlen_below_6_is_limited_by_the_string_regex(self):
-        # STR_RE only matches runs of 6+ printable bytes, so minlen < 6 cannot find shorter strings
-        data, ch = self.make(b'\x00abcde\x00')
+    def test_minlen_is_honoured_exactly(self):
+        # the scanner builds the run pattern for the requested length, so short strings are found
+        data, ch = self.make(b'\x00abcde\x00abcd\x00abc\x00')
+        self.assertEqual(R.chunk_strings(data, ch, minlen=5), ['abcde'])
+        self.assertEqual(R.chunk_strings(data, ch, minlen=4), ['abcde', 'abcd'])
+        self.assertEqual(R.chunk_strings(data, ch, minlen=3), ['abcde', 'abcd', 'abc'])
+        self.assertEqual(R.chunk_strings(data, ch, minlen=2), ['abcde', 'abcd', 'abc'])
+
+    def test_short_utf16_strings_are_found_too(self):
+        data, ch = self.make(b'\x01\x02' + 'Frm'.encode('utf-16-le') + b'\x01\x02')
+        self.assertIn('Frm', R.chunk_strings(data, ch, minlen=3))
         self.assertEqual(R.chunk_strings(data, ch, minlen=4), [])
 
     def test_strings_are_deduplicated(self):
@@ -763,6 +771,42 @@ class TestChunkPayloadAndStrings(unittest.TestCase):
         data, ch = self.make(b'')
         self.assertEqual(R.chunk_strings(data, ch), [])
 
+
+class TestStringRuns(unittest.TestCase):
+    def test_offsets_and_text(self):
+        # 0-1 pad, 2-8 'Alphaaa', 9-10 pad, 11-16 'Betaxx', 17 pad
+        blob = b'\x00\x00Alphaaa\x00\x00Betaxx\x00'
+        self.assertEqual(list(R.string_runs(blob, 6)),
+                         [(2, 'Alphaaa'), (11, 'Betaxx')])
+
+    def test_offsets_are_absolute_when_a_window_is_given(self):
+        blob = b'\x00\x00Alphaaa\x00\x00Betaxx\x00'
+        self.assertEqual(list(R.string_runs(blob, 6, 11, 17)), [(11, 'Betaxx')])
+        self.assertEqual(list(R.string_runs(blob, 6, 0, 9)), [(2, 'Alphaaa')])
+        # a run that only partially fits the window is not reported
+        self.assertEqual(list(R.string_runs(blob, 6, 11, 16)), [])
+
+    def test_minlen_is_exact(self):
+        blob = b'ab\x00abc\x00abcd\x00'
+        self.assertEqual([s for _, s in R.string_runs(blob, 2)], ['ab', 'abc', 'abcd'])
+        self.assertEqual([s for _, s in R.string_runs(blob, 3)], ['abc', 'abcd'])
+        self.assertEqual([s for _, s in R.string_runs(blob, 5)], [])
+
+    def test_minlen_below_one_is_clamped(self):
+        self.assertEqual([s for _, s in R.string_runs(b'a\x00b\x00', 0)], ['a', 'b'])
+        self.assertEqual([s for _, s in R.string_runs(b'a\x00b\x00', -5)], ['a', 'b'])
+
+    def test_patterns_are_cached_per_length(self):
+        self.assertIs(R._run_pattern(6), R.STR_RE)
+        self.assertIs(R._run_pattern(3), R._run_pattern(3))
+        self.assertIsNot(R._run_pattern(3), R._run_pattern(4))
+
+    def test_no_runs(self):
+        self.assertEqual(list(R.string_runs(b'\x00\x01\x02', 1)), [])
+        self.assertEqual(list(R.string_runs(b'', 1)), [])
+
+    def test_non_ascii_bytes_split_runs(self):
+        self.assertEqual([s for _, s in R.string_runs(b'abc\xffdef\x00', 3)], ['abc', 'def'])
 
 # =========================================================================== payload decoding
 class TestDecodeChunk(unittest.TestCase):
@@ -796,21 +840,20 @@ class TestDecodeChunk(unittest.TestCase):
         self.assertEqual(R.decode_chunk('List_Dispatch', F.pl_dispatch(7, 8, 4, 1)[:19]), [])
 
     def test_root_constant_buffer_view(self):
-        # NOTE: decode_chunk labels the u64 at +12 as "VA"; per d3d12_serialise.cpp the
-        # D3D12BufferLocation payload is (resourceId, offset), so that field is the resource id.
-        # Pinned as implemented (cmd_draws reads the same bytes with the correct labels).
+        # D3D12BufferLocation serialises as (resourceId, byteOffset) - d3d12_serialise.cpp - which is
+        # exactly the pair `draws` prints, so both commands now report the same thing
         blob = F.pl_root_view(7, 10, 1907, 0x120000)
         self.assertEqual(R.decode_chunk('List_SetGraphicsRootConstantBufferView', blob),
-                         ['cmdList=7 rootParam=10 VA=0x773'])
+                         ['cmdList=7 rootParam=10 res=1907+0x120000'])
 
     def test_root_srv_uav_views(self):
         for name in ('List_SetGraphicsRootShaderResourceView', 'List_SetGraphicsRootUnorderedAccessView'):
             with self.subTest(name=name):
                 blob = F.pl_root_view(7, 3, 256, 0x40)
-                self.assertEqual(R.decode_chunk(name, blob), ['cmdList=7 rootParam=3 VA=0x100'])
+                self.assertEqual(R.decode_chunk(name, blob), ['cmdList=7 rootParam=3 res=256+0x40'])
 
     def test_root_view_truncated(self):
-        blob = F.pl_root_view(7, 3, 256, 0x40)[:19]
+        blob = F.pl_root_view(7, 3, 256, 0x40)[:27]      # one byte short of the 28-byte payload
         for name in ('List_SetGraphicsRootConstantBufferView', 'List_SetGraphicsRootShaderResourceView'):
             with self.subTest(name=name):
                 self.assertEqual(R.decode_chunk(name, blob), [])
@@ -853,18 +896,38 @@ class TestDecodeChunk(unittest.TestCase):
     def test_vertex_buffers_truncated_header(self):
         self.assertEqual(R.decode_chunk('List_IASetVertexBuffers', F.pl_vertex_buffers(7, 0, [])[:23]), [])
 
-    def test_index_buffer_reads_resid_size_format(self):
-        # the branch the decoder implements: cmdList | resId | size | format (24 bytes)
-        blob = F.u64b(7) + F.u64b(80641) + F.u32b(12345) + F.u32b(57)
+    def test_index_buffer(self):
+        # [u64 cmdList][u8 present][u64 resId][u64 offset][u32 size][u32 fmt] = 33 bytes; the present
+        # bool comes from SERIALISE_ELEMENT_OPT, so every field is one byte later than the struct alone
+        blob = F.pl_index_buffer(7, 315, 0x3FA60000, 5760, 57)
+        self.assertEqual(len(blob), 33)
         self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', blob),
-                         ['cmdList=7 VA=0x13b01 size=12345 fmt=57'])
+                         ['cmdList=7 res=315+0x3fa60000 size=5760 fmt=57'])
 
-    def test_index_buffer_with_draws_layout_shifts_size_and_format(self):
-        # cmd_draws reads the 32-byte form (cmdList | resId | offset | size | format); decode_chunk
-        # then reports size/format from the two halves of the offset. Pinned as implemented.
-        blob = F.pl_index_buffer(7, 80641, 0x3F2B0000, 12345, 57)
+    def test_index_buffer_without_the_present_flag_is_not_decoded(self):
+        # the 32-byte form (struct without the present bool) is not a valid payload
+        blob = F.u64b(7) + F.u64b(315) + F.u64b(0x3FA60000) + F.u32b(5760) + F.u32b(57)
+        self.assertEqual(len(blob), 32)
+        self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', blob), [])
+        self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', F.pl_index_buffer(7, 1, 2, 3, 4)[:32]), [])
+
+    def test_index_buffer_bytes_from_a_real_capture(self):
+        # raw payload of List_IASetIndexBuffer #1122 in "PC Renderer.rdc" (RenderDoc 1.46, D3D12):
+        # the draw that uses it is `idx=2880`, and size == 2880 * 2 with fmt == R16_UINT, so this
+        # also cross-checks the offsets against the capture rather than against our own fixture
+        blob = bytes.fromhex(
+            '4409000000000000013b010000000000'      # cmdList=2372, present=1, resId=315
+            '0000a63f00000000008016000039000000')   # offset=0x3fa600, size=5760, format=57
+        self.assertEqual(len(blob), 33)
         self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', blob),
-                         ['cmdList=7 VA=0x13b01 size=1059782656 fmt=0'])
+                         ['cmdList=2372 res=315+0x3fa600 size=5760 fmt=57'])
+        self.assertEqual(R.u32(blob, 25), 2880 * 2)          # indexCount * sizeof(R16_UINT)
+
+    def test_null_index_buffer_view(self):
+        blob = F.pl_index_buffer(7, 0, 0, 0, 0, present=False)
+        self.assertEqual(len(blob), 9)
+        self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', blob),
+                         ['cmdList=7 (null index buffer view)'])
 
     def test_index_buffer_truncated(self):
         self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', F.u64b(7) + F.u64b(1) + F.u32b(2)), [])
@@ -999,9 +1062,11 @@ class TestPartStrings(unittest.TestCase):
         self.assertEqual(R.part_strings(blob, 0, len(blob), 8), ['abcdefgh'])
         self.assertEqual(R.part_strings(blob, 0, len(blob), 6), ['abcdef', 'abcdefgh'])
 
-    def test_minlen_below_6_is_limited_by_the_string_regex(self):
-        # STR_RE requires 6+ printable bytes, so minlen=4 cannot return a 5-character string
-        self.assertEqual(R.part_strings(b'abcde\x00', 0, 6, 4), [])
+    def test_minlen_is_honoured_exactly(self):
+        blob = b'abcde\x00abcd\x00abc\x00'
+        self.assertEqual(R.part_strings(blob, 0, len(blob), 5), ['abcde'])
+        self.assertEqual(R.part_strings(blob, 0, len(blob), 4), ['abcde', 'abcd'])
+        self.assertEqual(R.part_strings(blob, 0, len(blob), 3), ['abcde', 'abcd', 'abc'])
 
     def test_window_bounds_are_respected(self):
         blob = b'aaaaaaaa\x00bbbbbbbb\x00'

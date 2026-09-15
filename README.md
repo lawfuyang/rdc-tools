@@ -205,10 +205,10 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `List_DrawInstanced` | `u64 cmdList, u32 vertexCount, u32 instanceCount, u32 startVertex, u32 startInstance` |
 | `List_Dispatch` | `u64 cmdList, u32 x, u32 y, u32 z` |
 | `List_IASetVertexBuffers` | `u64 cmdList, u32 startSlot, u32 numViews, u64 count` then per view 24 B: `u64 resId, u64 offset, u32 size, u32 stride` |
-| `List_IASetIndexBuffer` | `u64 cmdList, u64 resId, u64 offset, u32 size, u32 format` |
+| `List_IASetIndexBuffer` | `u64 cmdList, u8 present, u64 resId, u64 offset, u32 size, u32 format` (33 bytes; `present == 0` means a null view and only the first 9 bytes are written) |
 | `List_SetGraphicsRootConstantBufferView` | `u64 cmdList, u32 rootParam, u64 resId, u64 offset` |
 | `List_SetGraphicsRoot{ShaderResource,UnorderedAccess}View` | `u64 cmdList, u32 rootParam, u64 resId, u64 offset` |
-| `List_SetGraphicsRoot32BitConstants` | `u64 cmdList, u32 rootParam, u32 numValues, u32 values[n], u32 destOffset` (so `length == 20 + 4n`) |
+| `List_SetGraphicsRoot32BitConstants` | `u64 cmdList, u32 rootParam, u32 numValues, u64 arrayCount, u32 values[n], u32 destOffset` (so `length == 28 + 4n`) |
 | `InitialContents` | `u64 resourceId` + resource description, then the data (see §6) |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
 
@@ -245,12 +245,17 @@ register u32, ...`), with the string table after the array. This is how per-inst
 
 ### 4.2 Stream text mining
 
+`minlen` is the exact minimum length of a printable-ASCII run (`string_runs()` builds the pattern per
+request), so short names are found rather than silently dropped. The commands that print marker or shader
+names use their own floor — `markers` / `summary` / `draws` ask for 3+ characters, signature parts for 2–4 —
+so a two-character name is still not shown by those.
+
 | Command | Arguments | Output |
 |---|---|---|
 | `strings` | `<rdc> [minlen=6] [maxlines=200]` | unique ASCII strings ≥ `minlen`, ranked by occurrence count then first offset, with offsets |
 | `names` | `<rdc> [minlen=10]` | strings matching UE/RenderDoc keywords (`Shader`, `BasePass`, `Lightmap`, `Volumetric`, `IndirectLighting`, `HISM`, `Instanced`, `StaticMesh`, `Mobile`, `CachedPoint`, `Policy`, `Permutation`, `SceneColor`, `Primitive`, `View`, `FShader`, `VertexFactory`…), in stream order, max 400 |
 | `grep` | `<rdc> <pattern> [context=200]` | every byte-occurrence of the ASCII pattern, printed with ±context bytes rendered as text (cap 30 hits) |
-| `dump` | `<rdc> <start> <length> [minlen=4]` | every ASCII string inside the byte window (accepts `0x…`), max 500 |
+| `dump` | `<rdc> <start> <length> [minlen=4]` | every ASCII string inside the byte window (decimal offsets only — `hex` takes `0x…`), max 500 |
 | `count` | `<rdc> <pat1> [pat2 …]` | count and first offset for each pattern |
 | `hex` | `<rdc> <start> <length>` | hex + ASCII dump of a window (accepts `0x…`) |
 
@@ -313,8 +318,8 @@ the chosen header and its score are printed so the guess is visible, never silen
 
 ### 4.6 Tests
 
-`tests/` holds a self-contained unittest suite (~280 tests) covering every parser, decoder, command and the
-CLI dispatch. It needs **no capture file, no GPU, no `renderdoc.pyd` and no `renderdoc-src` checkout**: the
+`tests/` holds a self-contained unittest suite covering every parser, decoder, command and the CLI dispatch.
+It needs **no capture file, no GPU, no `renderdoc.pyd` and no `renderdoc-src` checkout**: the
 fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and DXBC containers in memory
 (`tests/rdc_fixtures.py`), and the chunk-name map is stubbed with a fake enum tree.
 
@@ -329,10 +334,12 @@ fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and 
 
 Exit code is 0 when everything passes, 1 on failure, 2 for a bad option.
 
-Two integration tests are skipped unless a real capture is pointed at them
-(`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'`); a third class parses the real `renderdoc-src` enums and
-is skipped when the tree is absent. Tests that pin behaviour which looks wrong are marked
-`CHARACTERIZATION` in the source, so a deliberate fix does not read as a regression.
+The real-capture integration tests are skipped unless a capture is pointed at them
+(`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'` — copies of the two captures used here live in the ignored
+`renderdoc-src/` folder); they take about a minute, because each command re-decompresses the whole stream. A
+third class parses the real `renderdoc-src` enums and is skipped when the tree is absent. Tests that pin
+behaviour which looks wrong are marked `CHARACTERIZATION` in the source, so a deliberate fix does not read as
+a regression.
 
 ### 4.7 Type checking
 
@@ -406,6 +413,17 @@ the decoders rely on.
   replay API (see ROADMAP).
 * `Device_CreatePipelineState` embeds the DXBC/DXIL containers of the shaders it references, which is why
   `parse_dxil_containers()` finds shaders at offsets *inside* those chunks.
+* Every array in a payload is preceded by a `u64` element count (`SERIALISE_ELEMENT_ARRAY`, `serialiser.h`).
+  That is why `List_IASetVertexBuffers` views start at `+24`, and why
+  `List_SetGraphicsRoot32BitConstants` is `28 + 4n` with the values at `+24` — the count is part of the
+  payload, not padding.
+* A *nullable* pointer (`SERIALISE_ELEMENT_OPT` → `SerialiseNullable`) writes a 1-byte `present` flag before
+  the value. `List_IASetIndexBuffer` is the one chunk here that uses it, so its view is 33 bytes with the
+  resource id at `+9`, not `+8` — verified on both captures: `size` comes out as `indexCount * 2` and the
+  resource id matches the vertex-buffer pool the same draw uses.
+* `chunk <N>` and `draws` now read the root CBV/SRV/UAV payload the same way (the 28-byte
+  `(resourceId, byteOffset)` pair from `D3D12BufferLocation`), so the two commands print identical
+  `res<id>+0x<offset>` strings for the same chunk.
 
 ---
 
@@ -482,7 +500,7 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 
 ## 8. Pitfalls and known limitations
 
-Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.12); the plan
+Every bullet below is tracked as a work item with an acceptance gate in `ROADMAP.md` §6 (6.1–6.10); the plan
 is to clear the whole list, so a bullet here is a known defect, not a permanent design decision.
 
 * **Payload offset.** Never assume `+8`; use `chunk_payload()`. Reading metadata as data produces plausible but
@@ -493,18 +511,6 @@ is to clear the whole list, so a bullet here is a known defect, not a permanent 
   produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
   works — only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed.
-* **Strings shorter than 6 characters are invisible.** `STR_RE` only matches runs of 6+ printable bytes, so
-  `chunk_strings` / `part_strings` silently drop anything shorter: marker names under 6 characters print as
-  `?` in `markers` / `summary` / `draws`, and passing a `minlen` below 6 has no effect. `dxbc` and `sig`
-  inherit the same floor.
-* **Two consumers of the same chunk can disagree.** `draws` reads the 28-byte
-  `List_SetGraphicsRootConstantBufferView` payload as `(rootParam, resId, offset)`, while `chunk` /
-  `decode_chunk` read the same bytes as `(rootParam, VA)` — labelling the resource id as a VA. For
-  `List_IASetIndexBuffer`, `draws` uses the 32-byte form while `decode_chunk` reads `size` / `format` 8 bytes
-  earlier. For `List_SetGraphicsRoot32BitConstants`, `rootconst` assumes `length == 20 + 4n`, but
-  `SERIALISE_ELEMENT_ARRAY` writes a `u64` element count before the values (`serialiser.h`), i.e. `28 + 4n` —
-  so its values and dest offset come out 8 bytes early. The tests pin the current offsets and mark them
-  `CHARACTERIZATION`.
 * **`InitialContents` header is heuristic.** The data start is inferred by signature scoring and the chosen
   header is printed; it is validated for buffers in the captures tested but is not a general solution.
 * **No name resolution for root parameters.** The serialised root signature carries no names, so `rpN` cannot be

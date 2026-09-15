@@ -173,6 +173,14 @@ class TestCmdStrings(CmdCase):
         path = self.cap(self.ch('PushMarker', self.payload()))
         self.assertIn('unique ascii strings >= 7: 0', self.out(R.cmd_strings, path, 7))
 
+    def test_minlen_below_6_finds_shorter_strings(self):
+        path = self.cap(self.ch('PushMarker', b'\x00Frm\x00abcde\x00ABCDEF\x00'))
+        out = self.out(R.cmd_strings, path, 3)
+        self.assertIn('unique ascii strings >= 3: 3', out)
+        self.assertIn('Frm', out)
+        self.assertIn('abcde', out)
+        self.assertNotIn('Frm', self.out(R.cmd_strings, path, 4))
+
     def test_stream_size_and_method_are_printed(self):
         path = self.cap(self.ch('PushMarker', self.payload()), lz4=True)
         self.assertIn('[lz4(1 blocks)]', self.out(R.cmd_strings, path))
@@ -529,6 +537,22 @@ class TestCmdChunkDetail(CmdCase):
         self.assertIn('chunk #99 not found', out)
         self.assertIn('chunk #0 not found', self.out(R.cmd_chunk_detail, self.capture(), 0))
 
+    def test_chunk_and_draws_agree_on_root_binding_offsets(self):
+        # the acceptance gate for the decoder disagreements: one payload, one reading
+        path = self.cap(
+            self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x120000)),
+            self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0)))
+        self.assertIn('res=1907+0x120000', self.out(R.cmd_chunk_detail, path, 1))
+        self.assertIn('rp10=res1907+0x120000', self.out(R.cmd_draws, path))
+
+    def test_chunk_and_draws_agree_on_the_index_buffer(self):
+        path = self.cap(
+            self.ch('List_IASetIndexBuffer', F.pl_index_buffer(7, 80641, 0x3F2B0000, 12345, 57)),
+            self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0)))
+        self.assertIn('res=80641+0x3f2b0000 size=12345 fmt=57',
+                      self.out(R.cmd_chunk_detail, path, 1))
+        self.assertIn('IB : res80641+0x3f2b0000', self.out(R.cmd_draws, path))
+
 
 class TestCmdChunks(CmdCase):
     def capture(self):
@@ -633,13 +657,20 @@ class TestCmdDraws(CmdCase):
         out = self.out(R.cmd_draws, self.cap(*chunks))
         self.assertIn('FramePass / BasePass', self.line_with(out, 'DrawInstanced'))
 
-    def test_marker_names_shorter_than_6_characters_are_lost(self):
-        # chunk_strings goes through the 6+ character STR_RE, so short marker names become '?'
+    def test_short_marker_names_are_reported(self):
+        # `draws` asks chunk_strings for 3+ character strings, so a short marker name survives
         chunks = [self.ch('PushMarker', b'Frm\x00'),
                   self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
         out = self.out(R.cmd_draws, self.cap(*chunks))
+        self.assertIn('Frm', self.line_with(out, 'DrawInstanced'))
+
+    def test_marker_names_below_the_3_character_minimum_are_still_dropped(self):
+        # the 3-character floor is now an explicit choice in `draws`, not a side effect of the regex
+        chunks = [self.ch('PushMarker', b'Ab\x00'),
+                  self.ch('List_DrawInstanced', F.pl_draw_instanced(7, 1, 1, 0, 0))]
+        out = self.out(R.cmd_draws, self.cap(*chunks))
         self.assertIn('? ', self.line_with(out, 'DrawInstanced'))
-        self.assertNotIn('Frm', out)
+        self.assertNotIn('Ab', out)
 
     def test_pop_marker_on_empty_stack_is_harmless(self):
         chunks = [self.ch('PopMarker', b''),
@@ -782,10 +813,7 @@ class TestCmdMarkers(CmdCase):
 
 class TestCmdRootconst(CmdCase):
     def test_constants_are_decoded_to_floats(self):
-        # CHARACTERIZATION: this pins the layout cmd_rootconst assumes (length == 20 + 4n, values at
-        # +16). SERIALISE_ELEMENT_ARRAY writes a u64 element count before the values, so the real
-        # payload is 8 bytes longer (28 + 4n) - if that is fixed, these offsets move and this test
-        # has to move with them.
+        # values sit after the inline u64 array count: length == 28 + 4n, values at +24
         values = F.fbits(1.0, 2.0, 3.0)
         chunks = [self.ch('List_SetGraphicsRoot32BitConstants',
                           F.pl_32bit_constants(7, 2, values, 4))]
@@ -804,10 +832,16 @@ class TestCmdRootconst(CmdCase):
         self.assertIn('    rootParam=0 numValues=0 destOffset=0', out)
 
     def test_length_sanity_check_falls_back_to_hex(self):
-        payload = F.pl_32bit_constants(7, 2, F.fbits(1.0)) + b'\x00\x00'   # 20 + 4 + 2 bytes
+        payload = F.pl_32bit_constants(7, 2, F.fbits(1.0)) + b'\x00\x00'   # 28 + 4 + 2 bytes
         out = self.out(R.cmd_rootconst, self.cap(self.ch('List_SetGraphicsRoot32BitConstants', payload)))
         self.assertIn('hex:', out)
         self.assertNotIn('numValues=', out)
+
+    def test_inline_array_count_mismatch_warns(self):
+        payload = F.pl_32bit_constants(7, 2, F.fbits(1.0), 0, array_count=9)
+        out = self.out(R.cmd_rootconst, self.cap(self.ch('List_SetGraphicsRoot32BitConstants', payload)))
+        self.assertIn('warning: inline arrayCount=9 disagrees with numValues=1', out)
+        self.assertIn('rootParam=2 numValues=1 destOffset=0', out)
 
     def test_single_constant_variant_prints_hex(self):
         chunks = [self.ch('List_SetGraphicsRoot32BitConstant', F.pl_32bit_constant(7, 1, 7, 0))]

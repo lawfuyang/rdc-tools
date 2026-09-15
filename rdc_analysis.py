@@ -108,6 +108,46 @@ SignatureElement = Tuple[str, int, int]
 #: Any object `struct.unpack_from` accepts (bytes, bytearray, memoryview).
 Buffer = Union[bytes, bytearray, memoryview]
 
+#: Cached `rb'[\x20-\x7e]{minlen,}'` patterns, keyed by the effective minimum length. `STR_RE` is the
+#: entry for the historical default of 6.
+_RUN_PATTERNS: Dict[int, re.Pattern[bytes]] = {6: STR_RE}
+
+#: The same cache for the text patterns used on UTF-16LE-decoded payloads.
+_WIDE_PATTERNS: Dict[int, re.Pattern[str]] = {}
+
+
+def _run_pattern(minlen: int) -> re.Pattern[bytes]:
+    """Return the cached printable-ASCII run pattern for `minlen` (clamped to >= 1)."""
+    m = max(minlen, 1)
+    pat = _RUN_PATTERNS.get(m)
+    if pat is None:
+        pat = re.compile(rb'[\x20-\x7e]{%d,}' % m)
+        _RUN_PATTERNS[m] = pat
+    return pat
+
+
+def _wide_pattern(minlen: int) -> 're.Pattern[str]':
+    """`_run_pattern` for text, used on UTF-16LE-decoded payloads."""
+    m = max(minlen, 1)
+    pat = _WIDE_PATTERNS.get(m)
+    if pat is None:
+        pat = re.compile(r'[\x20-\x7e]{%d,}' % m)
+        _WIDE_PATTERNS[m] = pat
+    return pat
+
+
+def string_runs(blob: Buffer, minlen: int = 6, start: int = 0,
+                end: Optional[int] = None) -> Iterator[Tuple[int, str]]:
+    """Yield `(offset, text)` for every run of `minlen` or more printable ASCII bytes in `blob`.
+
+    `minlen` is honoured exactly: the old fixed `{6,}` scan silently dropped shorter strings, which is
+    why marker names under 6 characters used to print as `?`. Offsets are absolute within `blob`;
+    `start`/`end` only restrict the window that gets scanned.
+    """
+    stop = len(blob) if end is None else end
+    for m in _run_pattern(minlen).finditer(blob, start, stop):
+        yield m.start(), m.group().decode('ascii', 'replace')
+
 
 def u16(b: Buffer, o: int) -> int:
     """Read a little-endian unsigned 16-bit value at offset `o`."""
@@ -314,29 +354,24 @@ def cmd_strings(path: str, minlen: int = 6, maxlines: int = 200) -> None:
     """Print the unique ASCII strings >= `minlen`, ranked by occurrence then first offset."""
     _info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
-    counts: Dict[bytes, int] = {}
-    order: Dict[bytes, int] = {}
-    for m in STR_RE.finditer(stream):
-        s = m.group()
-        if len(s) < minlen:
-            continue
+    counts: Dict[str, int] = {}
+    order: Dict[str, int] = {}
+    for off, s in string_runs(stream, minlen):
         counts[s] = counts.get(s, 0) + 1
-        order.setdefault(s, m.start())
+        order.setdefault(s, off)
     print('unique ascii strings >= %d: %d' % (minlen, len(counts)))
     ranked = sorted(counts, key=lambda s: (-counts[s], order[s]))
     for s in ranked[:maxlines]:
-        print('%6d  @0x%-9x %s' % (counts[s], order[s], s.decode('ascii', 'replace')[:150]))
+        print('%6d  @0x%-9x %s' % (counts[s], order[s], s[:150]))
 
 
 def cmd_names(path: str, minlen: int = 10) -> None:
     """Strings that look like UE/RenderDoc object or shader names."""
     _info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
-    pat = re.compile(rb'[\x20-\x7e]{%d,}' % minlen)
     seen: Dict[str, int] = {}
-    for m in pat.finditer(stream):
-        s = m.group().decode('ascii', 'replace')
-        seen.setdefault(s, m.start())
+    for off, s in string_runs(stream, minlen):
+        seen.setdefault(s, off)
     interesting = [s for s in seen if re.search(
         r'(Shader|shader|BasePass|Lightmap|LightMap|Volumetric|IndirectLighting|HISM|Instanced|'
         r'StaticMesh|Sphere|Mobile|CachedPoint|NoLightMap|Policy|Permutation|FScreenPass|SceneColor|'
@@ -375,11 +410,8 @@ def cmd_dump(path: str, start: int, length: int, minlen: int = 4) -> None:
     end = min(len(stream), start + length)
     print('stream %d bytes [%s]; window 0x%x..0x%x' % (len(stream), how, start, end))
     n = 0
-    for m in STR_RE.finditer(stream, start, end):
-        s = m.group()
-        if len(s) < minlen:
-            continue
-        print('  @0x%-9x (%3d) %s' % (m.start(), len(s), s.decode('ascii', 'replace')[:180]))
+    for off, s in string_runs(stream, minlen, start, end):
+        print('  @0x%-9x (%3d) %s' % (off, len(s), s[:180]))
         n += 1
         if n > 500:
             print('  ... truncated at 500 strings')
@@ -440,8 +472,7 @@ def parse_dxil_containers(stream: bytes) -> Iterator[DxbcContainer]:
 
 def part_strings(blob: bytes, off: int, ln: int, minlen: int = 4) -> List[str]:
     """Return the ASCII strings (>= `minlen`) inside `blob[off:off+ln]`."""
-    return [m.group().decode('ascii', 'replace') for m in STR_RE.finditer(blob, off, off + ln)
-            if len(m.group()) >= minlen]
+    return [s for _, s in string_runs(blob, minlen, off, off + ln)]
 
 
 class DxbcRow(TypedDict):
@@ -671,11 +702,10 @@ def cmd_report(path: str) -> None:
         print('  %-46s count=%-6d first=0x%x' % (p.decode(), c, first if first >= 0 else 0))
     print('=== shader-ish / policy-ish names (unique) ===')
     seen: Dict[str, int] = {}
-    for m in STR_RE.finditer(stream):
-        s = m.group().decode('ascii', 'replace')
+    for off, s in string_runs(stream):
         if re.search(r'(FShader|ShaderType|BasePass|LightMapPolicy|LightmapPolicy|VertexFactory|'
                      r'Permutation|MaterialShader|TBasePass|GlobalShader)', s):
-            seen.setdefault(s, m.start())
+            seen.setdefault(s, off)
     for s in sorted(seen, key=lambda x: seen[x]):
         print('  @0x%-9x %s' % (seen[s], s[:170]))
     print('(%d unique)' % len(seen))
@@ -843,11 +873,10 @@ def iter_chunks(stream: bytes, limit: int = 0) -> Iterator[ChunkInfo]:
 
 def chunk_strings(stream: bytes, ch: ChunkInfo, minlen: int = 4, limit: int = 6) -> List[str]:
     """Strings inside a payload (ASCII **and** UTF-16LE), de-duplicated and capped at `limit`."""
-    blob = stream[ch['data']:ch['data'] + ch['length']]
-    found = [m.group().decode('ascii', 'replace') for m in STR_RE.finditer(blob)
-             if len(m.group()) >= minlen]
+    blob = chunk_payload(stream, ch)
+    found = [s for _, s in string_runs(blob, minlen)]
     wide = blob.decode('utf-16-le', 'ignore')
-    found += [m.group() for m in re.finditer(r'[\x20-\x7e]{%d,}' % minlen, wide)]
+    found += [m.group() for m in _wide_pattern(minlen).finditer(wide)]
     out: List[str] = []
     for s in found:
         if s not in out:
@@ -880,13 +909,13 @@ def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
         elif name == 'List_Dispatch' and len(blob) >= 20:
             out.append('cmdList=%d x=%d y=%d z=%d' % (u64(blob, 0), u32(blob, 8), u32(blob, 12),
                                                       u32(blob, 16)))
-        elif name == 'List_SetGraphicsRootConstantBufferView' and len(blob) >= 20:
-            out.append('cmdList=%d rootParam=%d VA=0x%x' % (u64(blob, 0), u32(blob, 8),
-                                                            u64(blob, 12)))
-        elif name in ('List_SetGraphicsRootShaderResourceView',
-                      'List_SetGraphicsRootUnorderedAccessView') and len(blob) >= 20:
-            out.append('cmdList=%d rootParam=%d VA=0x%x' % (u64(blob, 0), u32(blob, 8),
-                                                            u64(blob, 12)))
+        elif name in ('List_SetGraphicsRootConstantBufferView',
+                      'List_SetGraphicsRootShaderResourceView',
+                      'List_SetGraphicsRootUnorderedAccessView') and len(blob) >= 28:
+            # [u64 cmdList][u32 rootParam][u64 resourceId][u64 byteOffset] -- D3D12BufferLocation
+            # serialises as Id + Offset (d3d12_serialise.cpp), so this is the same pair `draws` uses.
+            out.append('cmdList=%d rootParam=%d res=%d+0x%x'
+                       % (u64(blob, 0), u32(blob, 8), u64(blob, 12), u64(blob, 20)))
         elif name == 'List_SetGraphicsRootDescriptorTable' and len(blob) >= 16:
             out.append('cmdList=%d rootParam=%d gpuHandle=0x%x' % (u64(blob, 0), u32(blob, 8),
                                                                    u64(blob, 12)))
@@ -904,9 +933,17 @@ def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
                 out.append('    view[%d] res=%d VA=0x%x size=%d stride=%d'
                            % (start_slot + i, u64(blob, o), u64(blob, o + 8), u32(blob, o + 16),
                               u32(blob, o + 20)))
-        elif name == 'List_IASetIndexBuffer' and len(blob) >= 24:
-            out.append('cmdList=%d VA=0x%x size=%d fmt=%d'
-                       % (u64(blob, 0), u64(blob, 8), u32(blob, 16), u32(blob, 20)))
+        elif name == 'List_IASetIndexBuffer' and len(blob) >= 9:
+            # [u64 cmdList][u8 present][u64 resourceId][u64 byteOffset][u32 size][u32 format]
+            # The view goes through SERIALISE_ELEMENT_OPT, which writes a "present" bool first
+            # (serialiser.h), so the whole payload is 33 bytes and every field is one byte later
+            # than the struct alone would suggest. `size` is indexCount * formatWidth.
+            if not blob[8]:
+                out.append('cmdList=%d (null index buffer view)' % u64(blob, 0))
+            elif len(blob) >= 33:
+                out.append('cmdList=%d res=%d+0x%x size=%d fmt=%d'
+                           % (u64(blob, 0), u64(blob, 9), u64(blob, 17), u32(blob, 25),
+                              u32(blob, 29)))
         elif name == 'Device_CreatePipelineState' and len(blob) >= 8:
             out.append('payload %d bytes; tail=%s' % (len(blob), blob[-24:].hex()))
         elif name in ('InitialContents', 'InitialContentsList') and len(blob) >= 32:
@@ -934,8 +971,7 @@ def cmd_chunk_detail(path: str, index: int, hexlen: int = 160) -> None:
             row = blob[o:o + 16]
             print('  %04x  %-47s  %s' % (o, ' '.join('%02x' % c for c in row),
                                          ''.join(chr(c) if 32 <= c < 127 else '.' for c in row)))
-        strs = [m.group().decode('ascii', 'replace') for m in STR_RE.finditer(blob)]
-        strs = [s for s in strs if len(s) >= 4]
+        strs = [s for _, s in string_runs(blob, 4)]
         if strs:
             print('  strings:')
             for s in strs[:40]:
@@ -993,8 +1029,10 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
             vbs = [(u64(blob, 24 + i * 24), u64(blob, 32 + i * 24), u32(blob, 40 + i * 24),
                     u32(blob, 44 + i * 24))
                    for i in range(min(n, 16)) if 24 + i * 24 + 24 <= len(blob)]
-        elif nm == 'List_IASetIndexBuffer' and len(blob) >= 32:
-            ib = 'res%d+0x%x' % (u64(blob, 8), u64(blob, 16))
+        elif nm == 'List_IASetIndexBuffer' and len(blob) >= 33 and blob[8]:
+            # the view is serialised through SERIALISE_ELEMENT_OPT: [u8 present] then
+            # (resourceId, byteOffset) - see decode_chunk for the full layout
+            ib = 'res%d+0x%x' % (u64(blob, 9), u64(blob, 17))
         elif nm == 'List_SetGraphicsRootConstantBufferView' and len(blob) >= 28:
             cbvs.append((u32(blob, 8), u64(blob, 12), u64(blob, 20)))
         elif nm in DRAW_CHUNKS:
@@ -1117,8 +1155,9 @@ def cmd_rootconst(path: str, max_chunks: int = 8) -> None:
 
     Payload layout (d3d12_command_list_wrap.cpp Serialise_SetGraphicsRoot32BitConstants):
       ResourceId pCommandList(u64) | RootParameterIndex(u32) | Num32BitValuesToSet(u32)
-      | values[Num32BitValuesToSet](u32 each) | DestOffsetIn32BitValues(u32)
-    so length == 20 + 4*n, which is used as a sanity check.
+      | arrayCount(u64) | values[Num32BitValuesToSet](u32 each) | DestOffsetIn32BitValues(u32)
+    `SERIALISE_ELEMENT_ARRAY` writes the element count before the values (serialiser.h), so
+    length == 28 + 4*n -- which is used as a sanity check.
     """
     _info, stream, _how = load_stream(path)
     names = load_chunk_names()
@@ -1133,14 +1172,19 @@ def cmd_rootconst(path: str, max_chunks: int = 8) -> None:
             continue
         blob = stream[ch['data']:ch['data'] + ch['length']]
         print('--- chunk #%d @0x%x %s len=%d' % (idx, ch['off'], nm, ch['length']))
-        if nm.endswith('Constants') and ch['length'] >= 20 and (ch['length'] - 20) % 4 == 0:
+        if nm.endswith('Constants') and ch['length'] >= 28 and (ch['length'] - 28) % 4 == 0:
             root_param = u32(blob, 8)
             n = u32(blob, 12)
+            array_count = u64(blob, 16)
             print('    rootParam=%d numValues=%d destOffset=%d'
-                  % (root_param, n, u32(blob, 16 + n * 4) if 16 + n * 4 + 4 <= len(blob) else -1))
-            floats = struct.unpack_from('<%df' % n, blob, 16)
-            for k in range(0, n, 8):
-                print('    +%-3d %s' % (k, ' '.join('%12.5f' % v for v in floats[k:k + 8])))
+                  % (root_param, n, u32(blob, 24 + n * 4) if 24 + n * 4 + 4 <= len(blob) else -1))
+            if array_count != n:
+                print('    warning: inline arrayCount=%d disagrees with numValues=%d'
+                      % (array_count, n))
+            if 24 + n * 4 <= len(blob):
+                floats = struct.unpack_from('<%df' % n, blob, 24)
+                for k in range(0, n, 8):
+                    print('    +%-3d %s' % (k, ' '.join('%12.5f' % v for v in floats[k:k + 8])))
         else:
             print('    hex: %s' % blob[:96].hex())
         shown += 1

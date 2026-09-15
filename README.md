@@ -10,7 +10,7 @@ where a resource id points.* It is used from the command line and from scripts; 
 
 What it deliberately does **not** do is reconstruct frame data that RenderDoc's own replay engine hands over
 directly — uniform values, shader signatures, disassembly, decoded textures. Those are the replay driver's job
-(`ROADMAP.md` §1); this tool stays on the file's structure and the command stream, where it is fast and needs no
+(§9); this tool stays on the file's structure and the command stream, where it is fast and needs no
 device. §8 lists the sharp edges that follow from that.
 
 > ## Vibe coded — use at your own risk
@@ -26,6 +26,8 @@ device. §8 lists the sharp edges that follow from that.
 ```
 rdc-tools/
   rdc_analysis.py     the tool (single file, ~2400 lines)
+  replay_dump.cpp     the replay driver: asks RenderDoc's engine what the file cannot say (§9)
+  build_replay.ps1    builds it against the installed renderdoc.dll (output in .\build\)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
   tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
@@ -129,7 +131,7 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>` |
 | Is the parse trustworthy? | `verify` |
 | Which shaders are in this capture, and where? | `dxbc`, then `dump-shaders` |
-| What does a shader read? (uniform names, signatures) | the replay driver — `ROADMAP.md` §1, not this tool (§8) |
+| What does a shader read? (uniform names, signatures) | the replay driver — §9, not this tool (§8) |
 | Where is this string / name in the stream? | `grep`, `count`, `names`, `strings` |
 | Dump all shaders to disk for disassembly | `dump-shaders <outdir>` |
 | Dump one chunk to disk | `dump-chunk <N> <outfile>` |
@@ -292,7 +294,7 @@ so a two-character name is still not shown by those.
 `float` and `pattern` used to search the raw stream for uniform *values* (the tool's own docs called the
 pattern command "built for locating uniform buffers by a known prefix"). That is a guess at frame data the
 replay engine hands over directly and exactly — `GetCBufferVariableContents` returns the named members and
-their values — so both commands were removed rather than kept as a worse answer (`ROADMAP.md` §1). The
+their values — so both commands were removed rather than kept as a worse answer (§9). The
 structural search commands (`grep`, `count`, `names`, `strings`, `hex`, `dump`) stay: they inspect the *file*,
 which replay does not expose.
 
@@ -301,13 +303,13 @@ which replay does not expose.
 | Command | Arguments | Output |
 |---|---|---|
 | `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §2) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §1) |
 
 ### 4.5 Chunk level
 
 | Command | Arguments | Output |
 |---|---|---|
-| `summary` | `<rdc>` | chunk count, draw/dispatch count, marker count, chunk-type histogram (top 40), and all markers in order with their chunk index (= EID) |
+| `summary` | `<rdc>` | chunk count, draw/dispatch count, marker count, chunk-type histogram (top 40), and all markers in order with their chunk index. **A chunk index is not an event id in general** — the replay driver's `probe` showed the engine numbers only what a command list recorded, and on one capture the two were tens of thousands apart (§9) |
 | `markers` | `<rdc>` | every marker chunk: index, kind, up to 3 strings (handles ASCII and UTF-16LE) |
 | `chunks` | `<rdc> [limit=200] [nameFilter]` | chunk index, offset, **name**, payload length, and a preview of the strings inside — the way to find a chunk by name |
 | `chunk` | `<rdc> <index>` | full inspector: id/name/flags/length, payload offset **and header size**, decoded fields via `decode_chunk`, 160-byte hex dump, and the payload's strings |
@@ -525,7 +527,7 @@ slot was never written during the capture (§8). The layouts are in §3.4; what 
 
 Not possible offline any more: `draws` tells you *which* buffer is bound and at which register
 (`rp7(vs cbv b2 s0)=res342+0x8d200`) but not what is inside it. Reading the contents needs the replay driver
-(`GetCBufferVariableContents`, `ROADMAP.md` §1); the old
+(`GetCBufferVariableContents`, §9); the old
 `initial` command guessed the data offset by scoring a known signature against candidate header sizes, which
 did not survive contact with the captures it was pointed at, so it was removed rather than fixed.
 
@@ -533,7 +535,7 @@ did not survive contact with the captures it was pointed at, so it was removed r
 
 Not offline. The tool used to guess at this — `pattern` hunted for a uniform's known value, `dxbc` scanned
 containers for GI-ish strings, `sig` decoded the vertex signatures — and all three were removed because the
-shader reflection answers it exactly: names, bind points, values, signatures, disassembly (`ROADMAP.md` §1).
+shader reflection answers it exactly: names, bind points, values, signatures, disassembly (§9).
 Offline you can still see *which* shaders the capture embeds and where (`dxbc`) and extract them
 (`dump-shaders`), and `draws` says what each one is bound to.
 
@@ -585,7 +587,7 @@ the decoders rely on.
   `SFI0 ISG1 OSG1 PSV0 STAT HASH DXIL` with **no `RDEF` and no `RDAT`**. `parse_rdef()` reads an `RDEF` when a
   capture has one (the layout is in `dxbc_container.cpp`; `bindPoint` is the register, which is what makes it
   matchable), but offline there is nothing to name a parameter with, so the tool prints what it *knows* —
-  type, register, space — instead of guessing. The replay driver (ROADMAP §1) is the way to get real names.
+  type, register, space — instead of guessing. The replay driver (§9) is the way to get real names.
 * `Device_CreatePipelineState` embeds the DXBC/DXIL containers of the shaders it references, which is why
   `parse_dxil_containers()` finds shaders at offsets *inside* those chunks.
 * Resource **names come from `SetName`**, not from the creation call, and the creation call is what carries the
@@ -687,20 +689,20 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 Most of these bullets are **replay's job, not offline work** — decoded textures, disassembly, the non-frame
 sections, uniform names — and `ROADMAP.md` keeps them out of the offline plan on purpose ("what is deliberately
 not on this list"). The ones that stay offline work items are tracked with an acceptance gate in `ROADMAP.md`
-§5. A bullet here is a known limitation, not a permanent design decision.
+§4. A bullet here is a known limitation, not a permanent design decision.
 
 * **Chunk names need the RenderDoc source tree in the root folder.** The tool expects
   `<root>/rdc-tools/renderdoc-src/` (see §1.1); if it is absent, or if its version is older than the one that
   produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
   works — only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed. Replay reads them for you
-  (`ROADMAP.md` §1), so this is not planned as offline work.
+  (§9), so this is not planned as offline work.
 * **No name resolution for root parameters.** The serialised root signature carries no names, and neither do
   these captures' shaders: every one is DXIL with the reflection stripped (`RDEF` and `RDAT` are both absent),
   so there is nothing offline to map `rpN` to a uniform name with. What `draws` does instead is say what each
   parameter *is* — `rp2(cbv b1 s0)`, `rp0(table t0 n64 s0, u0 n16 s0)`, `rp3(32bit b0 s0 n4)` — so an index can
   no longer be mistaken for something it is not (§4.10, §8). A name appears when a capture does carry an
-  `RDEF`. Real names need the replay driver in `ROADMAP.md`.
+  `RDEF`. Real names need the replay driver (§9).
 * **A descriptor-table binding resolves only as far as the capture goes.** The stream holds the descriptor
   *writes and copies of the captured frame*, not the contents of the heap, and UE fills its million-slot global
   heap at startup: on the Android capture every table binding therefore still shows the heap name, while the PC
@@ -712,16 +714,71 @@ not on this list"). The ones that stay offline work items are tracked with an ac
   logical buffer's
   name lives in UE's own bookkeeping (§3.5). Descriptor-table bindings are the other half of this problem and
   have the same shape: what the capture wrote is resolved (§4.10), what it did not is only the heap.
-* **No texture decoding.** `GetTextureData`-style format decoding (BC/ASTC/float, mips, slices) is not
-  implemented; only raw bytes can be dumped. Replay's `GetTextureData`/`SaveTexture` answers this
-  (`ROADMAP.md` §1), so it is not planned as offline work.
-* **No shader disassembly.** `dump-shaders` extracts containers; disassembling the `ILDN`/`ILDB` bytecode needs
-  an external tool. Replay's `ShaderReflection` carries the disassembly (`ROADMAP.md` §1), so it is not planned
-  as offline work either.
+* **No texture decoding** *offline*. Only raw bytes can be dumped; `replay_dump textures --save` (§9) writes
+  every one of them as a PNG through the engine's own decoder.
+* **No shader disassembly** *offline*. `dump-shaders` extracts containers; `replay_dump shaders <eid> --disasm`
+  (§9) prints the disassembly the engine generates.
+* **Chunk indices are not event ids.** `summary`/`markers`/`draws` number chunks the way the file stores them,
+  which matched the engine's event ids on the two Unreal captures and does not on the hobby-renderer one
+  (`replay_dump probe`, §9). Use the driver's ids when talking to the driver.
 
-## 9. See also
+## 9. The replay driver (`replay_dump`)
 
-* `ROADMAP.md` — features not implemented yet, including the **replay driver** and the **D3D12 harness**.
+Everything the offline tool leaves to RenderDoc — uniform *names*, values, decoded textures,
+disassembly, post-VS geometry, the rendered image — is what `replay_dump.cpp` asks the engine for. It
+is a second tool, built against the installed `renderdoc.dll`, and it exists because the offline
+tool's job is what replay is bad at (the container, the chunk stream, sub-second queries) while this
+one's job is what reading the file cannot answer at all.
+
+```powershell
+.\build_replay.ps1                              # MSVC + the installed DLL; output in .\build\
+.\build\replay_dump.exe shaders 'capture.rdc' 270      # reflection: cbuffers, bindings, signatures
+.\build\replay_dump.exe cb      'capture.rdc' 270 ps 3 # the named values of one cbuffer
+.\build\replay_dump.exe state   'capture.rdc' 270      # bound shaders, outputs, root parameters
+.\build\replay_dump.exe textures 'capture.rdc' --save .\out   # every texture, decoded to PNG
+.\build\replay_dump.exe shaders 'capture.rdc' 270 --disasm    # ... with the disassembly
+```
+
+| Command | Gives |
+|---|---|
+| `info <rdc>` | RenderDoc version, driver, API properties, resource/texture/buffer/chunk counts |
+| `draws <rdc> [max] [filter]` | the action tree (markers and calls) out of the structured file |
+| `state <rdc> <eid>` | bound shaders per stage, render targets, depth target, root signature and every root parameter with its register, space and what is bound |
+| `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, and the disassembly on request |
+| `cb <rdc> <eid> <stage> <slot>` | the **named values** of one constant buffer, structs and arrays expanded |
+| `textures <rdc> [filter] [--save <dir>]` | the texture list; `--save` decodes each one to PNG through `SaveTexture` |
+| `mesh <rdc> <eid> [instance] [max]` | post-VS geometry: what the vertex shader actually emitted |
+| `image <rdc> <eid> <out.bmp>` | the texture display at that event, written as a BMP (no PNG encoder needed) |
+| `counters <rdc>` / `debug <rdc>` | GPU counters / debug messages |
+| `usage <rdc> <resId or name>` | every event that touches a resource |
+| `probe <rdc> [maxEid]` | which event ids the engine actually has — see below |
+
+`--json` works on every command.
+
+**Three things a replay host must do**, and the reason this file has a long comment about them: put
+`REPLAY_PROGRAM_MARKER()` at file scope, call `RENDERDOC_InitialiseReplay()` before opening anything,
+and `RENDERDOC_ShutdownReplay()` on the way out. Without the first two, the engine runs with
+uninitialised global state and dies inside `OpenCapture` with an access violation — no message, no
+log, nothing. The build script also has to make an import library from the DLL's exports (the
+installer ships none) and put a copy of `renderdoc.dll` beside the exe.
+
+**Event ids are the engine's, not the file's.** The offline tool prints *chunk indices* and calls
+them event ids; on the two Unreal captures that happened to be true, and on the hobby-renderer
+capture it is not: `probe` shows the engine's first event with pipeline state at id 842 while the
+structured file's first draw is at chunk 316, because RenderDoc numbers only what a *command list*
+recorded (resource and PSO creation, `SetName` and descriptor writes are in the file but are not
+events). `probe <rdc> <maxEid>` lists the ids that do have state, so an id can be checked rather than
+assumed. `state`/`shaders`/`cb`/`mesh`/`image` all take the engine's ids.
+
+**The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path), and RenderDoc's own
+stringisers for `ResultCode`, `ResourceUsage`, `MessageSeverity` and `GPUCounter` are not exported, so
+this file defines them locally — the numeric value is what those print, which is enough to look the
+value up in the API headers. `$RDC_REPLAY_DEBUG=1` traces each step on stderr, which is how the
+`OpenCapture` crash above was found.
+
+## 10. See also
+
+* `ROADMAP.md` — features not implemented yet: the **D3D12 harness**, and the driver's **engine event ids**.
 * RenderDoc source, expected at `<root>/rdc-tools/renderdoc-src/` (§1.1). The files this tool and its docs rely
   on: `serialise/serialiser.cpp` (chunk framing), `serialise/rdcfile.cpp` (container), `core/core.h` and
   `driver/d3d12/d3d12_common.h` (chunk-name enums), `driver/d3d12/d3d12_command_list_wrap.cpp` (payload

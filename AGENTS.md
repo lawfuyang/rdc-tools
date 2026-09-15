@@ -64,6 +64,14 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   register, space, visibility, §3.4) and appends a name only when the capture's `RDEF` reflection offers one
   that every stage agrees on. Never invent a name, and never drop the annotation back to a bare index — an
   index alone is what produced the wrong conclusion in README §9.
+- The replay driver (`replay_dump.cpp`, README §9) keeps the same rule: it prints what the engine returns and
+  nothing else. It must keep doing the three things a replay host has to do — `REPLAY_PROGRAM_MARKER()` at file
+  scope, `RENDERDOC_InitialiseReplay()` before opening, `RENDERDOC_ShutdownReplay()` on the way out — or it
+  dies inside `OpenCapture` with no diagnostic at all. Its output is unbuffered on purpose, so a crash still
+  leaves the output that was already produced, and `$RDC_REPLAY_DEBUG=1` traces each step on stderr.
+- Never assume an event id is a chunk index: `probe` is the authority (`README.md` §9). The offline tool's
+  chunk numbering matched the engine on the Unreal captures and not on the hobby-renderer one, and a wrong id
+  silently returns an *empty* state rather than failing.
 - `draws` reports the D3D12 command-list state in effect at each call (see `DrawState`): bindings survive
   `SetPipelineState` and draws, `Reset()` clears them, and only a *changed* root signature invalidates root
   arguments. Do not reintroduce a per-draw or per-PSO reset, and keep the state keyed per command list.

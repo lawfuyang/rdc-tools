@@ -770,11 +770,67 @@ recorded (resource and PSO creation, `SetName` and descriptor writes are in the 
 events). `probe <rdc> <maxEid>` lists the ids that do have state, so an id can be checked rather than
 assumed. `state`/`shaders`/`cb`/`mesh`/`image` all take the engine's ids.
 
-**The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path), and RenderDoc's own
+**The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path). RenderDoc's own
 stringisers for `ResultCode`, `ResourceUsage`, `MessageSeverity` and `GPUCounter` are not exported, so
-this file defines them locally — the numeric value is what those print, which is enough to look the
-value up in the API headers. `$RDC_REPLAY_DEBUG=1` traces each step on stderr, which is how the
-`OpenCapture` crash above was found.
+the driver does **not** supply the missing template specialisations: RenderDoc's definitions exist in
+its `stringise.cpp` and are unreachable from this translation unit, which is
+`[ifndr:temp.expl.spec.unreachable.declaration]`, and two definitions that do not match are
+`[basic.def.odr]`. Instead the local helpers print the same numeric text as before, and
+`ResultDetails` is read through its public `internal_msg`/`code` members rather than `Message()`.
+`$RDC_REPLAY_DEBUG=1` traces each step on stderr, which is how the `OpenCapture` crash above was
+found.
+
+**`--json` is valid JSON, and that is checked:** `replay_dump <cmd> <rdc> --json | python -m json.tool`
+(one object per run; arrays of strings, plus one object per row where a row has fields). It used to be
+unparseable — the `capture` path was emitted with a raw backslash, `draws`/`textures` rows and the
+shader stage blocks carried trailing commas, and `cb` put object members inside an array — so a
+consumer that wants to check a change should validate rather than eyeball it. The writer's rule is
+that a separator goes *in front of* every item after the first, never after a last one; the one thing
+it cannot work out on its own is whether a field is the object's last, which is what the `last`
+argument at those call sites is for.
+
+**The build is strict on purpose** (`build_replay.ps1`): `/W4 /permissive- /Zc:__cplusplus
+/Zc:preprocessor /utf-8`, with `/external:W0 /external:anglebrackets` so RenderDoc's own headers stay
+quiet. It builds with zero warnings, and the SAL annotation on the `Fmt` helper makes the compiler
+check every format string against its arguments — a varargs mismatch is undefined behaviour, and it is
+also how the tool would print nonsense. `renderdoccmd.exe` is copied into `build/` along with the DLL:
+the engine spawns `<its own directory>\renderdoccmd.exe crashhandle` for its crash handler, and without
+it every run logs `Failed to create crashhandle server: 2`, waits 400 ms for a server that never
+arrives, and continues with no handler.
+
+**Opening a capture is the expensive part, so batch it.** Standing the replay engine up — its own copy
+of the frame plus a replay device — is ~2 s on the Android capture and ~6 s on the 1.4 GB hobby one,
+while individual commands cost 0.0–1.5 s. A batch file pays the open once:
+
+```powershell
+# each line is a command, in the same syntax minus the executable and the capture
+"probe 120`ninfo`nstate 270`nshaders 270 --json" | Set-Content .\run.txt -Encoding ASCII
+.\build\replay_dump.exe batch 'capture.rdc' .\run.txt
+```
+
+Measured, three runs covering 26 commands: **19.8 s total** (18 commands 4.9 s, the two probes 5.8 s,
+6 on the 1.4 GB capture 9.1 s) where one process per command cost the open 26 times. Each line's output
+is preceded by a `#=== <line>` marker, in both formats, so a stream can be split back into one document
+per command.
+
+Three things to know about running it:
+
+* **One replay at a time.** The engine creates a device per process; two on one GPU at once is what
+  makes a run look stuck, and a replay that is force-killed can leave the driver in a state where the
+  next device creation blocks for minutes. If a run hangs, kill it and run it again — the log says
+  which phase it reached, and its last line is decisive: `failed: ...` means the run stopped there and
+  says why, `done: exit N` means it finished, and neither means it died or was killed mid-run.
+  (`replay_dump` writes that last line itself precisely because a log that just stopped used to be
+  unreadable — a run that failed to open a missing capture looks exactly like one that hung there.)
+* **`probe` runs alone.** It forces non-events on purpose, and a forced non-event keeps the last real
+  event's state, so mixing it with other commands makes *one* of the two answers wrong whichever order
+  they run in. The driver warns when a batch does it.
+* **Progress goes to stderr and to one log file per run**, `<exe name>_<date>_<time>.log.txt` beside the
+  executable — never a shared file, so a run that hung stays readable after the next one starts, and two
+  runs at once cannot write into each other's log (a second run in the same second takes `-2`). It
+  records the working directory, each phase with a timestamp, every batch command with its own time,
+  and why the run stopped. `--log <file>` names one exact file instead, truncated, since it is still
+  that run's log.
 
 ## 10. See also
 

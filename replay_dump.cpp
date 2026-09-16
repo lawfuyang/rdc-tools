@@ -1,11 +1,15 @@
-// replay_dump — headless RenderDoc replay as a data source (ROADMAP §1).
+// replay_dump — headless RenderDoc replay as a data source (README §9).
 //
 // The offline tool (rdc_analysis.py) reads the *file*: the container, the chunk stream, the payload
 // layouts. This tool asks the *engine* instead, which is the only way to get frame data exactly:
 // named uniform values, shader reflection and disassembly, decoded textures, post-VS geometry, the
 // rendered image, GPU counters, debug messages. Everything the offline tool deliberately leaves to
-// replay lives here, and the two agree on event ids -- a draw's EID here is the chunk index the
-// offline tool prints, which was an assumption until this tool confirmed it.
+// replay lives here.
+//
+// Event ids are the *engine's*, not the file's. The offline tool prints chunk indices and used to
+// call them event ids; that held on the two Unreal captures and does not on the hobby-renderer one,
+// because RenderDoc numbers only what a command list recorded. `probe` lists the ids that really
+// have pipeline state, and every command here takes engine ids.
 //
 // It talks to the installed renderdoc.dll through the replay API (renderdoc/api/replay/
 // renderdoc_replay.h), so it needs no build of RenderDoc itself: the DLL is loaded at runtime and the
@@ -20,63 +24,139 @@
 // with an access violation.
 //
 // Build: build_replay.ps1 (MSVC + an import library made from the installed DLL's exports).
+//
+// One deliberate interface gap, because "fix it" is the wrong answer:
+//
+//   RenderDoc's stringisers for `ResultCode`, `ResourceUsage`, `MessageSeverity` and `GPUCounter`
+//   live in its stringise.cpp and are **not exported** by the DLL, while the headers still call them
+//   from inline code (`ResultDetails::Message()` is `ToStr(code)` when there is no detail string).
+//   Supplying those template specialisations here would make it link -- that is how this was found --
+//   but RenderDoc's own definitions exist and are unreachable from this file, which is
+//   [ifndr:temp.expl.spec.unreachable.declaration]: an implicit instantiation occurs while an
+//   unreachable explicit specialisation would have matched. If the two were ever linked into one
+//   image they would also be two definitions that do not match ([basic.def.odr],
+//   [ifndr:basic.def.odr.definition.matches]). So there are no specialisations here at all: the
+//   helpers below print the same numeric text the tool has always printed, and `ResultDetails` is
+//   read through its public `internal_msg`/`code` members instead of through `Message()`.
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 
+#include <sal.h>                                     // _Printf_format_string_
+
+#include <cerrno>
+#include <charconv>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
+#include <type_traits>
 #include <vector>
 
-#include "renderdoc_replay.h"
+// By angle brackets, so /external:anglebrackets keeps the library's own warnings out of this build.
+#include <renderdoc_replay.h>
 
 REPLAY_PROGRAM_MARKER();
 
-// The headers' containers (`rdcstr`, `rdcarray`) allocate through the DLL, and their inline
-// `ResultDetails::Message()` stringises a `ResultCode`. RenderDoc defines that specialisation in its
-// own stringise.cpp and does not export it, so this translation unit supplies one -- the headers only
-// need *a* definition to link, and the numeric code is all a message here uses.
-template <>
-rdcstr DoStringise(const ResultCode &el)
+// --------------------------------------------------------------------------- enum text
+//
+// The enums below have fixed underlying types, so every value of the underlying type is a valid
+// value of the enum and printing one as a number is exact -- no static_cast can be out of range
+// ([dcl.enum], [ub:expr.static.cast.enum.outside.range] applies only to enums without one).
+
+static const char *ResultCodeName(ResultCode code)
 {
-  char buf[32];
-  snprintf(buf, sizeof(buf), "ResultCode(%d)", (int)el);
-  return rdcstr(buf);
+  switch(code)
+  {
+    case ResultCode::Succeeded: return "Succeeded";
+    case ResultCode::UnknownError: return "UnknownError";
+    case ResultCode::InternalError: return "InternalError";
+    case ResultCode::FileNotFound: return "FileNotFound";
+    case ResultCode::InjectionFailed: return "InjectionFailed";
+    case ResultCode::IncompatibleProcess: return "IncompatibleProcess";
+    case ResultCode::NetworkIOFailed: return "NetworkIOFailed";
+    case ResultCode::NetworkRemoteBusy: return "NetworkRemoteBusy";
+    case ResultCode::NetworkVersionMismatch: return "NetworkVersionMismatch";
+    case ResultCode::FileIOFailed: return "FileIOFailed";
+    case ResultCode::FileIncompatibleVersion: return "FileIncompatibleVersion";
+    case ResultCode::FileCorrupted: return "FileCorrupted";
+    case ResultCode::FileUnrecognised: return "FileUnrecognised";
+    case ResultCode::ImageUnsupported: return "ImageUnsupported";
+    case ResultCode::APIUnsupported: return "APIUnsupported";
+    case ResultCode::APIInitFailed: return "APIInitFailed";
+    case ResultCode::APIIncompatibleVersion: return "APIIncompatibleVersion";
+    case ResultCode::APIHardwareUnsupported: return "APIHardwareUnsupported";
+    case ResultCode::APIDataCorrupted: return "APIDataCorrupted";
+    case ResultCode::APIReplayFailed: return "APIReplayFailed";
+    case ResultCode::JDWPFailure: return "JDWPFailure";
+    case ResultCode::AndroidGrantPermissionsFailed: return "AndroidGrantPermissionsFailed";
+    case ResultCode::AndroidABINotFound: return "AndroidABINotFound";
+    case ResultCode::AndroidAPKFolderNotFound: return "AndroidAPKFolderNotFound";
+    case ResultCode::AndroidAPKInstallFailed: return "AndroidAPKInstallFailed";
+    case ResultCode::AndroidAPKVerifyFailed: return "AndroidAPKVerifyFailed";
+    case ResultCode::RemoteServerConnectionLost: return "RemoteServerConnectionLost";
+    case ResultCode::OutOfMemory: return "OutOfMemory";
+  }
+  return NULL;                                       // unnamed: the caller prints the number
 }
 
-// The same applies to every other enum the headers stringise inline. RenderDoc's own names for them
-// live in stringise.cpp, which is not exported, so these print the numeric value -- honest, and for
-// `usage`/`debug` enough to look the value up in RenderDoc's enums.
-template <>
-rdcstr DoStringise(const ResourceUsage &el)
+//: A failed operation as one line. `internal_msg`, when the engine supplied one, is the same text
+//: `ResultDetails::Message()` would return and already names the code, so it is used verbatim; its
+//: storage belongs to the engine and is only valid until `RENDERDOC_ShutdownReplay` (the header says
+//: so), which is why this copies into a `std::string` straight away.
+static std::string ResultText(const ResultDetails &res)
 {
-  char buf[32];
-  snprintf(buf, sizeof(buf), "usage(%d)", (int)el);
-  return rdcstr(buf);
+  if(res.internal_msg != NULL && !res.internal_msg->empty())
+    return std::string(res.internal_msg->c_str());
+
+  const char *name = ResultCodeName(res.code);
+  char buf[64];
+  if(name != NULL)
+    snprintf(buf, sizeof(buf), "%s", name);
+  else
+    snprintf(buf, sizeof(buf), "ResultCode(%u)", (unsigned)res.code);
+  return buf;
 }
 
-template <>
-rdcstr DoStringise(const MessageSeverity &el)
+//: The numeric forms below are this tool's established output: RenderDoc's own names live in its
+//: unexported stringise.cpp, and the API headers are where the number is looked up.
+static std::string UsageText(ResourceUsage usage)
 {
   char buf[32];
-  snprintf(buf, sizeof(buf), "severity(%d)", (int)el);
-  return rdcstr(buf);
+  snprintf(buf, sizeof(buf), "usage(%u)", (unsigned)usage);
+  return buf;
 }
 
-template <>
-rdcstr DoStringise(const GPUCounter &el)
+static std::string SeverityText(MessageSeverity severity)
 {
   char buf[32];
-  snprintf(buf, sizeof(buf), "counter(%d)", (int)el);
-  return rdcstr(buf);
+  snprintf(buf, sizeof(buf), "severity(%u)", (unsigned)severity);
+  return buf;
+}
+
+static std::string CounterText(GPUCounter counter)
+{
+  char buf[32];
+  snprintf(buf, sizeof(buf), "counter(%u)", (unsigned)counter);
+  return buf;
 }
 
 // --------------------------------------------------------------------------- output helpers
 
 static bool g_json = false;
 static int g_indent = 0;
+
+//: The output format is fixed for the run (it comes from `--json` before anything else happens), so
+//: the commands ask rather than read the flag: a raw global read at thirty call sites is how the
+//: text and JSON paths drift apart.
+static bool IsJson()
+{
+  return g_json;
+}
 
 //: One row of an array. `g_firstRow` is reset by `ArrayOpen` so commas land between rows and never
 //: after the last one -- a trailing comma is not JSON.
@@ -86,8 +166,17 @@ static bool g_firstRow = true;
 //: not exported, so this copies the 8 bytes out exactly the way RenderDoc's `DoStringise<ResourceId>`
 //: does (`core.cpp`) -- the struct is a `uint64_t` wrapper by design. Ids then read the same way the
 //: offline tool prints them (`res1234`).
+//:
+//: The two static_asserts are what make that byte copy defensible rather than hopeful: `memcpy` into
+//: a `uint64_t` is only defined for a trivially copyable source of the same size ([basic.types],
+//: [class.mem]), and if either stops being true this fails to compile instead of reading whatever
+//: the object happens to look like.
 static std::string IdText(ResourceId id)
 {
+  static_assert(std::is_trivially_copyable<ResourceId>::value,
+                "ResourceId must stay trivially copyable for the byte copy below to be defined");
+  static_assert(sizeof(ResourceId) == sizeof(uint64_t), "ResourceId is a uint64_t wrapper");
+
   uint64_t value = 0;
   memcpy(&value, &id, sizeof(value));
   char buf[32];
@@ -95,20 +184,159 @@ static std::string IdText(ResourceId id)
   return buf;
 }
 
-//: Progress on stderr when `$RDC_REPLAY_DEBUG` is set: a crash inside the replay engine leaves no
-//: traceback, so knowing which step it died on -- and how long it ran -- is the difference between a
-//: fix and a guess.
-static ULONGLONG g_traceStart = 0;
+//: Progress goes to stderr, never stdout: stdout is the command's output and something may be
+//: parsing it. The same lines also go to a log file, *one per run* and beside the executable
+//: (`--log <file>` names one exact file instead). That is what makes a long batch watchable -- and
+//: readable after a run that had to be killed, since no later run can touch this one's file.
+static ULONGLONG g_start = 0;
+static FILE *g_logFile = NULL;
 
+static ULONGLONG Millis()
+{
+  return GetTickCount64();
+}
+
+static void Log(const char *fmt, ...)
+{
+  char text[512];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(text, sizeof(text), fmt, args);
+  va_end(args);
+
+  const double seconds = (g_start == 0) ? 0.0 : (Millis() - g_start) / 1000.0;
+  fprintf(stderr, "[replay_dump] %6.1fs  %s\n", seconds, text);
+  fflush(stderr);
+
+  if(g_logFile != NULL)
+  {
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    fprintf(g_logFile, "%04d-%02d-%02d %02d:%02d:%02d.%03d  %7.1fs  %s\n", now.wYear, now.wMonth,
+            now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, seconds, text);
+    fflush(g_logFile);
+  }
+}
+
+//: The extra step tracing that only appears with `$RDC_REPLAY_DEBUG`: a crash inside the engine
+//: leaves no traceback, so knowing which step it died on is the difference between a fix and a guess.
 static void Trace(const char *step)
 {
-  if(getenv("RDC_REPLAY_DEBUG"))
+  if(getenv("RDC_REPLAY_DEBUG") != NULL)
+    Log("%s", step);
+}
+
+//: A run that stops early has to say so *in the log*, not only on stderr. Without this the log just
+//: ends at whatever step was reached, which is indistinguishable from a run that hung there -- and
+//: that is not hypothetical: a failed `OpenFile`, which logs nothing after it, was read as a hang
+//: until the same run was timed on its own and exited in 0.2 s. Both outputs get the same text, so a
+//: log and a stderr capture say the same thing.
+static int Fail(int code, _Printf_format_string_ const char *fmt, ...)
+{
+  char text[512];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(text, sizeof(text), fmt, args);
+  va_end(args);
+
+  fprintf(stderr, "error: %s\n", text);
+  Log("failed: %s", text);
+  return code;
+}
+
+//: A path as this process will actually use it. Relative paths are resolved against the *working
+//: directory*, which is not the directory of whatever launched the tool: a runner that starts the
+//: exe from elsewhere gets `can't open ... errno 2` and no clue where it looked. Printing the
+//: absolute form (and the working directory, once) turns that into an answer.
+static std::string AbsolutePath(const char *path)
+{
+  if(path == NULL || *path == '\0')
+    return std::string();
+
+  char buf[4096];
+  const DWORD len = GetFullPathNameA(path, (DWORD)sizeof(buf), buf, NULL);
+  if(len == 0 || len >= sizeof(buf))
+    return std::string(path);
+  return std::string(buf);
+}
+
+static std::string WorkingDirectory()
+{
+  char buf[4096];
+  const DWORD len = GetCurrentDirectoryA((DWORD)sizeof(buf), buf);
+  return (len == 0 || len >= sizeof(buf)) ? std::string("?") : std::string(buf);
+}
+
+//: This run's log base name, *without* the extension: `<exe stem>_<date>_<time>` beside the
+//: executable, always, with no environment variable to set. A tool that has to be *told* where to
+//: write its progress is a tool that produces none at the moment it matters -- and the log beside the
+//: exe is also the one place a reader will look for it.
+//:
+//: One file *per run*, named after the second it starts. A single shared file has to choose between
+//: two wrong answers: truncating loses the run that hung as soon as the next one starts, and
+//: appending grows without bound while mixing the runs that are being compared -- and two runs
+//: started at once interleave in either mode. Per-run files keep every run whole, and the name says
+//: which is which. `--log <file>` names one exact file instead (see `OpenLog`).
+//:
+//: The extension is deliberately left to `OpenLog`, which adds it *after* the collision suffix:
+//: `.log.txt` is two extensions, so completing the name here filed the second run of a second as
+//: `..._14-32-07.log-2.txt` -- a suffix in the middle of the name.
+static std::string DefaultLogStem()
+{
+  char exe[4096];
+  const DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
+  std::string path =
+      (len == 0 || len >= sizeof(exe)) ? std::string("replay_dump") : std::string(exe, len);
+
+  const size_t slash = path.find_last_of("\\/");
+  const size_t dot = path.find_last_of('.');
+  if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
+    path = path.substr(0, dot);                      // the exe's stem: the extension is dropped
+
+  SYSTEMTIME now;
+  GetLocalTime(&now);
+  char name[4200];
+  snprintf(name, sizeof(name), "%s_%04d-%02d-%02d_%02d-%02d-%02d", path.c_str(), now.wYear,
+           now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+  return name;
+}
+
+//: Open this run's log, creating it if and only if the name is free (`wx`), because a per-run name
+//: must not already exist and `wx` is what makes "is this name free?" atomic instead of a check with
+//: a race behind it. Two runs starting in the same second then get `..._14-32-07.log.txt` and
+//: `..._14-32-07-2.log.txt` rather than one quietly writing into the other's file.
+//:
+//: `--log <file>` names one exact file, which is opened the ordinary way: truncated, since it is
+//: still *this* run's log and nothing else's.
+static FILE *OpenLog(const std::string &requested, bool perRun, std::string &openedAs)
+{
+  const std::string stem = AbsolutePath(requested.c_str());
+  if(!perRun)
   {
-    if(g_traceStart == 0)
-      g_traceStart = GetTickCount64();
-    fprintf(stderr, "[replay_dump] +%5llums %s\n", GetTickCount64() - g_traceStart, step);
-    fflush(stderr);
+    openedAs = stem;
+    return fopen(openedAs.c_str(), "w");
   }
+
+  for(int n = 1; n <= 99; n++)
+  {
+    char name[4200];
+    if(n == 1)
+      snprintf(name, sizeof(name), "%s.log.txt", stem.c_str());
+    else
+      snprintf(name, sizeof(name), "%s-%d.log.txt", stem.c_str(), n);
+
+    FILE *f = fopen(name, "wx");
+    if(f != NULL)
+    {
+      openedAs = name;
+      return f;
+    }
+    if(errno != EEXIST)
+      break;                                         // a missing directory, no permission, ...
+  }
+
+  openedAs = stem;                                   // the refused name, for the warning
+  return NULL;
 }
 
 static std::string JsonEscape(const char *s)
@@ -139,6 +367,11 @@ static std::string JsonEscape(const char *s)
   return out;
 }
 
+static std::string JsonEscape(const std::string &s)
+{
+  return JsonEscape(s.c_str());
+}
+
 static std::string JsonEscape(const rdcstr &s)
 {
   return JsonEscape(s.c_str());
@@ -152,11 +385,15 @@ static void Indent()
 }
 
 //: One `key: value` line in text mode, `"key": "value",` in JSON mode.
+//:
+//: The value is escaped: it routinely carries a Windows path (`capture`), an engine-supplied name
+//: or a debug message, and a single unescaped backslash in any of them makes the whole document
+//: unparseable -- which is exactly what `--json` did before this.
 static void Field(const char *key, const std::string &value, bool last = false)
 {
   Indent();
   if(g_json)
-    printf("\"%s\": \"%s\"%s\n", key, value.c_str(), last ? "" : ",");
+    printf("\"%s\": \"%s\"%s\n", key, JsonEscape(value).c_str(), last ? "" : ",");
   else
     printf("%-18s %s\n", key, value.c_str());
 }
@@ -192,13 +429,22 @@ static void ArrayClose(bool last = true)
     printf("]%s\n", last ? "" : ",");
 }
 
+//: The separator in front of the next item of the current array, and the bookkeeping for the one
+//: after it. Writing it *before* an item is what makes a trailing comma impossible: there is no
+//: point at which the writer knows an item is last, and a comma after the last one is not JSON.
+static const char *TakeSeparator()
+{
+  const char *sep = g_firstRow ? "" : ",\n";
+  g_firstRow = false;
+  return sep;
+}
+
 static void Row(const std::string &text)
 {
   if(g_json)
   {
     Indent();
-    printf("%s\"%s\"\n", g_firstRow ? "" : ",\n", JsonEscape(text.c_str()).c_str());
-    g_firstRow = false;
+    printf("%s\"%s\"\n", TakeSeparator(), JsonEscape(text.c_str()).c_str());
   }
   else
   {
@@ -206,14 +452,77 @@ static void Row(const std::string &text)
   }
 }
 
-static std::string Fmt(const char *fmt, ...)
+//: An item of the enclosing array that is an object rather than a string -- `draws` writes one row
+//: per event. Sharing `TakeSeparator` with `Row` is what keeps that row from carrying a trailing
+//: comma, which it used to do for every event including the last.
+static void ObjectRow(const std::string &object)
 {
-  char buf[1024];
+  if(g_json)
+  {
+    Indent();
+    printf("%s%s\n", TakeSeparator(), object.c_str());
+  }
+  else
+  {
+    printf("%s\n", object.c_str());
+  }
+}
+
+//: The `{` of an object that is an item of the enclosing array, for an object whose members are
+//: written by the calls that follow rather than assembled into one string first. The separator goes
+//: in front of it exactly as for `Row`/`ObjectRow`, so an object item never carries a trailing comma
+//: either, and the members inside indentation one level deeper than the brace.
+static void ObjectOpen()
+{
+  if(IsJson())
+  {
+    Indent();
+    fputs(TakeSeparator(), stdout);
+    fputs("{\n", stdout);
+    g_indent++;
+  }
+}
+
+//: The matching `}`. Nothing follows it: whether the *enclosing* array has more items is the next
+//: item's separator to write, and whether the array is the last member is its `ArrayClose` to say.
+static void ObjectClose()
+{
+  if(IsJson())
+  {
+    g_indent--;
+    Indent();
+    fputs("}\n", stdout);
+  }
+}
+
+//: printf-style formatting for the output lines. The SAL annotation makes the compiler check every
+//: call site's arguments against the format string, which is the only way a varargs helper like
+//: this stays honest -- a mismatch is undefined behaviour ([expr.call]: the argument must match the
+//: parameter after the default argument promotions), and it is also how the tool would print
+//: nonsense. The buffer grows to fit instead of truncating at a fixed size, because a truncated
+//: JSON row is not valid JSON and a truncated text row is not the data the reader asked for.
+static std::string FmtV(_Printf_format_string_ const char *fmt, va_list args)
+{
+  va_list counted;
+  va_copy(counted, args);
+  const int needed = vsnprintf(NULL, 0, fmt, counted);
+  va_end(counted);
+
+  if(needed <= 0)
+    return std::string();
+
+  std::vector<char> buf((size_t)needed + 1);
+  vsnprintf(buf.data(), buf.size(), fmt, args);
+  return std::string(buf.data(), (size_t)needed);
+}
+
+static std::string Fmt(_Printf_format_string_ const char *fmt, ...)
+{
   va_list args;
   va_start(args, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, args);
+  std::string text = FmtV(fmt, args);
   va_end(args);
-  return buf;
+  return text;
 }
 
 static const char *StageName(ShaderStage stage)
@@ -255,16 +564,34 @@ static const D3D12Pipe::Shader *StageShader(const D3D12Pipe::State *d3d12, Shade
 
 static ShaderStage StageFromName(const char *name)
 {
-  if(!strcmp(name, "vs")) return ShaderStage::Vertex;
-  if(!strcmp(name, "hs")) return ShaderStage::Hull;
-  if(!strcmp(name, "ds")) return ShaderStage::Domain;
-  if(!strcmp(name, "gs")) return ShaderStage::Geometry;
-  if(!strcmp(name, "ps")) return ShaderStage::Pixel;
-  if(!strcmp(name, "cs")) return ShaderStage::Compute;
-  if(!strcmp(name, "as")) return ShaderStage::Amplification;
-  if(!strcmp(name, "ms")) return ShaderStage::Mesh;
+  // The stages this tool reports and their command-line spellings, in one place, so `StageName` and
+  // the command line cannot drift apart (the order is also the order the commands print them in).
+  static const struct
+  {
+    const char *name;
+    ShaderStage stage;
+  } kStages[] = {
+      {"vs", ShaderStage::Vertex},        {"hs", ShaderStage::Hull},
+      {"ds", ShaderStage::Domain},        {"gs", ShaderStage::Geometry},
+      {"ps", ShaderStage::Pixel},         {"cs", ShaderStage::Compute},
+      {"as", ShaderStage::Amplification}, {"ms", ShaderStage::Mesh},
+  };
+
+  for(size_t i = 0; i < sizeof(kStages) / sizeof(kStages[0]); i++)
+    if(strcmp(name, kStages[i].name) == 0)
+      return kStages[i].stage;
+
+  // `ShaderStage::Invalid` is the enum's own sentinel (`Invalid = Count`), so "no such stage" has a
+  // defined spelling rather than an out-of-range value.
   return ShaderStage::Invalid;
 }
+
+//: The stages the commands report, in reporting order. Enumerating the enum instead would also walk
+//: the eight ray-tracing stages, which have no D3D12 pipeline state and can never be bound here.
+static const ShaderStage kReportedStages[] = {
+    ShaderStage::Vertex, ShaderStage::Hull,  ShaderStage::Domain, ShaderStage::Geometry,
+    ShaderStage::Pixel,  ShaderStage::Compute, ShaderStage::Amplification, ShaderStage::Mesh,
+};
 
 // --------------------------------------------------------------------------- renderdoc.dll loading
 
@@ -321,6 +648,47 @@ static ICaptureFile *OpenCaptureFile(HMODULE dll)
   return open();
 }
 
+// The teardown order is the engine's, and it is easy to get wrong by hand: the controller must go
+// before the capture file, and both before the replay system. Declaring one guard per step is what
+// makes the order automatic -- destruction runs in reverse -- and makes it happen on *every* path
+// out of `main`, including the early returns, which used to skip the shutdown entirely.
+struct ReplaySystemGuard
+{
+  ~ReplaySystemGuard()
+  {
+    if(g_ShutdownReplay != NULL)
+      g_ShutdownReplay();
+  }
+};
+
+struct CaptureFileGuard
+{
+  explicit CaptureFileGuard(ICaptureFile *capture) : file(capture) {}
+  ~CaptureFileGuard()
+  {
+    if(file != NULL)
+      file->Shutdown();
+  }
+  CaptureFileGuard(const CaptureFileGuard &) = delete;
+  CaptureFileGuard &operator=(const CaptureFileGuard &) = delete;
+
+  ICaptureFile *file;
+};
+
+struct ControllerGuard
+{
+  explicit ControllerGuard(IReplayController *replay) : ctrl(replay) {}
+  ~ControllerGuard()
+  {
+    if(ctrl != NULL)
+      ctrl->Shutdown();
+  }
+  ControllerGuard(const ControllerGuard &) = delete;
+  ControllerGuard &operator=(const ControllerGuard &) = delete;
+
+  IReplayController *ctrl;
+};
+
 // --------------------------------------------------------------------------- action tree
 
 //: One chunk of the structured file. `eid` is the depth-first index over *chunks* (parameters are
@@ -346,25 +714,42 @@ static bool IsAction(const rdcstr &name)
          name.beginsWith("ID3D12VideoCommandList") || name.beginsWith("ID3D12VideoEncodeCommandList");
 }
 
-static void Flatten(const SDObject *obj, int depth, int &next, std::vector<ActionRow> &out)
+//: The structured file is a tree whose depth is the capture's to choose, so the walk is bounded: a
+//: corrupt or crafted file must not be able to exhaust the stack. Real nesting is a handful of
+//: levels (a command list inside a frame) and the cap is far above that.
+static const int kMaxTreeDepth = 256;
+
+//: Walks one object and everything below it, numbering every *structured-data object* -- chunks and
+//: their parameters alike -- which is what makes the ids line up with the engine's (`probe` is how
+//: that was established). `truncated` records whether the depth cap was ever reached, so a command
+//: can say so rather than present a partial tree as the whole one.
+static void Flatten(const SDObject *obj, int depth, int &next, std::vector<ActionRow> &rows,
+                    bool &truncated)
 {
-  // Every structured-data object takes the next id, chunks and their parameters alike: that is what
-  // makes the numbering line up with the engine's (verified with `probe`).
-  int id = next++;
+  const int id = next++;
   if(obj->type.basetype == SDBasic::Chunk)
   {
-    const SDChunk *chunk = (const SDChunk *)obj;
+    // The tag says this object is a chunk; the cast says which kind. `static_cast` rather than a
+    // C-style cast, so only the derived-to-base relationship can be involved ([expr.cast]).
+    const SDChunk *chunk = static_cast<const SDChunk *>(obj);
     ActionRow row;
     row.eid = IsAction(chunk->name) ? id : 0;
     row.depth = depth;
     row.name = chunk->name;
     row.chunkID = chunk->metadata.chunkID;
-    out.push_back(row);
+    rows.push_back(row);
     depth++;
   }
 
-  for(size_t i = 0; i < obj->NumChildren(); i++)
-    Flatten(obj->GetChild(i), depth, next, out);
+  if(depth >= kMaxTreeDepth)
+  {
+    truncated = true;
+    return;
+  }
+
+  const size_t children = obj->NumChildren();
+  for(size_t i = 0; i < children; i++)
+    Flatten(obj->GetChild(i), depth, next, rows, truncated);
 }
 
 //: A draw, dispatch or copy: what a frame is *read* through, as opposed to the state and marker
@@ -372,37 +757,45 @@ static void Flatten(const SDObject *obj, int depth, int &next, std::vector<Actio
 static bool IsCall(const rdcstr &name)
 {
   const char *n = strstr(name.c_str(), "::");
-  n = n ? n + 2 : name.c_str();
-  return !strncmp(n, "Draw", 4) || !strncmp(n, "Dispatch", 8) || !strncmp(n, "ExecuteIndirect", 15) ||
-         !strncmp(n, "Copy", 4) || !strncmp(n, "Clear", 5) || !strncmp(n, "Present", 7) ||
-         !strncmp(n, "ResolveSubresource", 18) || !strncmp(n, "BeginRenderPass", 15);
+  n = (n != NULL) ? n + 2 : name.c_str();
+  return strncmp(n, "Draw", 4) == 0 || strncmp(n, "Dispatch", 8) == 0 ||
+         strncmp(n, "ExecuteIndirect", 15) == 0 || strncmp(n, "Copy", 4) == 0 ||
+         strncmp(n, "Clear", 5) == 0 || strncmp(n, "Present", 7) == 0 ||
+         strncmp(n, "ResolveSubresource", 18) == 0 || strncmp(n, "BeginRenderPass", 15) == 0;
 }
 
-static std::vector<ActionRow> Actions(IReplayController *ctrl)
+static std::vector<ActionRow> Actions(IReplayController *ctrl, bool &truncated)
 {
   const SDFile &sd = ctrl->GetStructuredFile();
   std::vector<ActionRow> rows;
   int next = 1;
+  truncated = false;
   for(size_t i = 0; i < sd.chunks.size(); i++)
-    Flatten(sd.chunks[i], 0, next, rows);
+    Flatten(sd.chunks[i], 0, next, rows, truncated);
   return rows;
 }
 
 // --------------------------------------------------------------------------- value formatting
 
+//: How deep a struct-of-structs is expanded before the rest is elided. The tree comes from the
+//: shader, so bounding it bounds both the work and the stack, the same reasoning as kMaxTreeDepth.
+static const int kMaxValueDepth = 16;
+
 //: A shader variable as `name = value`, recursing into structs and arrays (a constant buffer is a
-//: tree of these). Vector components are formatted to 6 significant digits, which is enough to read a
-//: matrix by eye without drowning in noise.
-static std::string FormatValue(const ShaderVariable &v)
+//: tree of these). Vector components are formatted to 6 significant digits, which is enough to read
+//: a matrix by eye without drowning in noise.
+static std::string FormatValue(const ShaderVariable &v, int depth)
 {
   const ShaderValue &val = v.value;
 
   if(!v.members.empty())
   {
+    if(depth >= kMaxValueDepth)
+      return "{...}";
     std::string out = "{ ";
     for(size_t i = 0; i < v.members.size(); i++)
       out += (i ? ", " : "") + std::string(v.members[i].name.c_str()) + "=" +
-             FormatValue(v.members[i]);
+             FormatValue(v.members[i], depth + 1);
     return out + " }";
   }
 
@@ -433,23 +826,30 @@ static std::string FormatValue(const ShaderVariable &v)
   return out.empty() ? "-" : out;
 }
 
+static std::string FormatValue(const ShaderVariable &v)
+{
+  return FormatValue(v, 0);
+}
+
 static void PrintVariables(const rdcarray<ShaderVariable> &vars, int depth)
 {
   for(size_t i = 0; i < vars.size(); i++)
   {
     const ShaderVariable &v = vars[i];
-    std::string pad(depth * 2, ' ');
-    if(g_json)
+    const std::string pad((size_t)depth * 2, ' ');
+    const std::string value = FormatValue(v);
+    if(IsJson())
     {
-      Indent();
-      printf("\"%s\": \"%s\",\n", JsonEscape(v.name).c_str(),
-             JsonEscape(FormatValue(v).c_str()).c_str());
+      // One `name = value` per array element, with the nesting shown the way the text output shows
+      // it. This used to emit `"name": "value",` *inside* an array -- object syntax in a list, with
+      // a trailing comma, which no JSON parser accepts.
+      Row(Fmt("%s%s = %s", pad.c_str(), v.name.c_str(), value.c_str()));
     }
     else
     {
-      printf("  %s%-28s %s\n", pad.c_str(), v.name.c_str(), FormatValue(v).c_str());
+      printf("  %s%-28s %s\n", pad.c_str(), v.name.c_str(), value.c_str());
     }
-    if(!v.members.empty())
+    if(!v.members.empty() && depth < kMaxValueDepth)
       PrintVariables(v.members, depth + 1);
   }
 }
@@ -495,7 +895,8 @@ static int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *pat
                     const char *filter)
 {
   PrintCaptureHeader(file, path);
-  std::vector<ActionRow> rows = Actions(ctrl);
+  bool truncated = false;
+  const std::vector<ActionRow> rows = Actions(ctrl, truncated);
 
   int shown = 0, events = 0;
   ArrayOpen("events");
@@ -504,9 +905,9 @@ static int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *pat
     const ActionRow &r = rows[i];
     if(r.eid == 0)
       continue;                                    // a device-level chunk: not an event
-    bool call = IsCall(r.name);
+    const bool call = IsCall(r.name);
     events++;
-    if(filter && *filter && strstr(r.name.c_str(), filter) == NULL)
+    if(filter != NULL && *filter != '\0' && strstr(r.name.c_str(), filter) == NULL)
       continue;
     if(!call && filter == NULL)
       continue;                                    // without a filter: calls and markers only
@@ -515,22 +916,27 @@ static int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *pat
 
     if(g_json)
     {
-      Indent();
-      printf("{\"eid\": %d, \"depth\": %d, \"chunkID\": %u, \"name\": \"%s\"}%s\n", r.eid, r.depth,
-             r.chunkID, JsonEscape(r.name).c_str(), ",\n");
+      ObjectRow(Fmt("{\"eid\": %d, \"depth\": %d, \"chunkID\": %u, \"name\": \"%s\"}", r.eid, r.depth,
+                    r.chunkID, JsonEscape(r.name).c_str()));
     }
     else
     {
-      std::string pad(r.depth * 2, ' ');
+      const std::string pad((size_t)r.depth * 2, ' ');
       printf("%-7d %-5d %s%s\n", r.eid, r.depth, pad.c_str(), r.name.c_str());
     }
     shown++;
   }
-  ArrayClose();
+  ArrayClose(false);                                 // totalChunks/totalEvents/shown follow
   g_indent = g_json ? 1 : 0;
   Field("totalChunks", (long long)rows.size());
   Field("totalEvents", events);
-  Field("shown", shown, true);
+  Field("shown", shown, !truncated);
+  if(truncated)
+  {
+    // Only reachable on a capture whose action tree is deeper than kMaxTreeDepth: say so rather
+    // than presenting a partial tree as the whole one.
+    Field("truncated", std::string("action tree deeper than the recursion limit"), true);
+  }
   g_indent = 0;
   if(g_json)
     printf("}\n");
@@ -543,7 +949,6 @@ static int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *pat
 static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid)
 {
   ctrl->SetFrameEvent(eid, true);
-  const PipeState &pipe = ctrl->GetPipelineState();
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -552,15 +957,15 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
 
   ArrayOpen("shaders");
-  for(int i = 0; i < (int)ShaderStage::Count; i++)
+  for(size_t i = 0; i < sizeof(kReportedStages) / sizeof(kReportedStages[0]); i++)
   {
-    ShaderStage stage = (ShaderStage)i;
+    const ShaderStage stage = kReportedStages[i];
     const D3D12Pipe::Shader *sh = StageShader(d3d12, stage);
     if(sh == NULL || sh->resourceId == ResourceId::Null())
       continue;
     Row(Fmt("%-3s res%-7s", StageName(stage), IdText(sh->resourceId).c_str()));
   }
-  ArrayClose();
+  ArrayClose(false);                                 // renderTargets follows
 
   ArrayOpen("renderTargets");
   if(d3d12)
@@ -573,7 +978,7 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
               IdText(d3d12->outputMerger.renderTargets[i].resource).c_str()));
     }
   }
-  ArrayClose();
+  ArrayClose(d3d12 == NULL);                         // depthTarget/rootSignature follow if there is state
   if(d3d12)
     Field("depthTarget", IdText(d3d12->outputMerger.depthTarget.resource));
 
@@ -614,28 +1019,42 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
   ctrl->SetFrameEvent(eid, true);
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   if(d3d12 == NULL)
-  {
-    fprintf(stderr, "error: no D3D12 pipeline state at eid %d\n", eid);
-    return 1;
-  }
+    return Fail(1, "no D3D12 pipeline state at eid %d", eid);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
 
-  for(int i = 0; i < (int)ShaderStage::Count; i++)
+  // One object per bound stage, in a `stages` array. They cannot be members of one flat object:
+  // two bound stages then repeat every key (`stage`, `resource`, `constantBlocks`, ...) and every
+  // JSON reader keeps only the last value of a repeated key, so the vertex shader's whole reflection
+  // was silently dropped on any draw that had one. The array also makes the empty case (no stage
+  // bound -- a copy, a marker, or an event with no pipeline state) a valid document, where a flat
+  // object used to end on `eid`'s separator with nothing after it.
+  ArrayOpen("stages");
+  for(size_t i = 0; i < sizeof(kReportedStages) / sizeof(kReportedStages[0]); i++)
   {
-    ShaderStage stage = (ShaderStage)i;
-    ResourceId shader = StageShader(d3d12, stage) ? StageShader(d3d12, stage)->resourceId
-                                                  : ResourceId::Null();
+    const ShaderStage stage = kReportedStages[i];
+    const D3D12Pipe::Shader *stageState = StageShader(d3d12, stage);
+    const ResourceId shader = stageState ? stageState->resourceId : ResourceId::Null();
     if(shader == ResourceId::Null())
       continue;
 
     // An empty entry-point name means "the default one"; `ShaderEntryPoint` carries the stage too.
     const ShaderReflection *refl =
         ctrl->GetShader(d3d12->pipelineResourceId, shader, ShaderEntryPoint(rdcstr(), stage));
+
+    ObjectOpen();
+
     if(refl == NULL)
     {
-      printf("  %-3s res%-7s (no reflection)\n", StageName(stage), IdText(shader).c_str());
+      if(IsJson())
+      {
+        Field(Fmt("%s (no reflection)", StageName(stage)).c_str(), IdText(shader));
+      }
+      else
+      {
+        printf("  %-3s res%-7s (no reflection)\n", StageName(stage), IdText(shader).c_str());
+      }
       continue;
     }
 
@@ -653,7 +1072,7 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
               cb.fixedBindNumber, cb.fixedBindSetOrSpace, (int)cb.byteSize,
               (int)cb.variables.size()));
     }
-    ArrayClose();
+    ArrayClose(false);                               // more members of this stage follow
 
     ArrayOpen("readOnlyResources");
     for(size_t r = 0; r < refl->readOnlyResources.size(); r++)
@@ -661,7 +1080,7 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
               refl->readOnlyResources[r].fixedBindNumber,
               refl->readOnlyResources[r].fixedBindSetOrSpace,
               (int)refl->readOnlyResources[r].bindArraySize));
-    ArrayClose();
+    ArrayClose(false);                               // more members of this stage follow
 
     ArrayOpen("readWriteResources");
     for(size_t r = 0; r < refl->readWriteResources.size(); r++)
@@ -669,19 +1088,19 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
               refl->readWriteResources[r].fixedBindNumber,
               refl->readWriteResources[r].fixedBindSetOrSpace,
               (int)refl->readWriteResources[r].bindArraySize));
-    ArrayClose();
+    ArrayClose(false);                               // more members of this stage follow
 
     ArrayOpen("inputSignature");
     for(size_t s = 0; s < refl->inputSignature.size(); s++)
       Row(Fmt("%s%d reg%d", refl->inputSignature[s].semanticName.c_str(),
               refl->inputSignature[s].semanticIndex, refl->inputSignature[s].regIndex));
-    ArrayClose();
+    ArrayClose(false);                               // outputSignature follows
 
     ArrayOpen("outputSignature");
     for(size_t s = 0; s < refl->outputSignature.size(); s++)
       Row(Fmt("%s%d reg%d", refl->outputSignature[s].semanticName.c_str(),
               refl->outputSignature[s].semanticIndex, refl->outputSignature[s].regIndex));
-    ArrayClose(false);
+    ArrayClose(!wantDisasm);
 
     if(wantDisasm)
     {
@@ -690,13 +1109,12 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
       rdcstr asmText = ctrl->DisassembleShader(d3d12->pipelineResourceId, refl, rdcstr());
       ArrayOpen("disassembly");
       // one entry per line so JSON consumers can diff it
-      std::string text(asmText.c_str());
+      const std::string text(asmText.c_str());
       size_t start = 0;
       while(start <= text.size())
       {
-        size_t nl = text.find('\n', start);
-        std::string line = text.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
-        Row(line);
+        const size_t nl = text.find('\n', start);
+        Row(text.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
         if(nl == std::string::npos)
           break;
         start = nl + 1;
@@ -704,9 +1122,9 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
       ArrayClose();
     }
 
-    if(g_json)
-      printf(",\n");
+    ObjectClose();                                   // this stage's object
   }
+  ArrayClose(true);                                  // `stages` is the object's last member
 
   g_indent = 0;
   if(g_json)
@@ -723,10 +1141,7 @@ static int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *p
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   const D3D12Pipe::Shader *sh = StageShader(d3d12, stage);
   if(sh == NULL || sh->resourceId == ResourceId::Null())
-  {
-    fprintf(stderr, "error: no %s shader is bound at eid %d\n", StageName(stage), eid);
-    return 1;
-  }
+    return Fail(1, "no %s shader is bound at eid %d", StageName(stage), eid);
 
   // The pipeline object is what the reflection is looked up through, and it is the bound PSO -- the
   // same one whether this is a draw or a dispatch. The entry point comes from the reflection, which
@@ -788,13 +1203,16 @@ static int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *
     std::string id = IdText(t.resourceId);
     if(filter && *filter && strstr(id.c_str(), filter) == NULL)
       continue;
-    if(g_json)
+    if(IsJson())
     {
-      Indent();
-      printf("{\"resource\": \"%s\", \"dimension\": %d, \"width\": %u, \"height\": %u, \"depth\": %u,"
-             " \"mips\": %u, \"arraySize\": %u, \"samples\": %u, \"format\": \"%s\", \"bytes\": %llu}%s\n",
-             id.c_str(), (int)t.dimension, t.width, t.height, t.depth, t.mips, t.arraysize, t.msSamp,
-             t.format.Name().c_str(), (unsigned long long)t.byteSize, ",");
+      // An element of the array, so it goes through `ObjectRow`: writing it out by hand meant a
+      // hardcoded trailing comma, and therefore a document no parser would read.
+      ObjectRow(Fmt("{\"resource\": \"%s\", \"dimension\": %d, \"width\": %u, \"height\": %u,"
+                    " \"depth\": %u, \"mips\": %u, \"arraySize\": %u, \"samples\": %u,"
+                    " \"format\": \"%s\", \"bytes\": %llu}",
+                    id.c_str(), (int)t.dimension, t.width, t.height, t.depth, t.mips, t.arraysize,
+                    t.msSamp, JsonEscape(t.format.Name().c_str()).c_str(),
+                    (unsigned long long)t.byteSize));
     }
     else
     {
@@ -811,16 +1229,26 @@ static int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *
       TextureSave save;
       save.resourceId = t.resourceId;
       save.destType = FileType::PNG;
-      std::string out = Fmt("%s\\tex_%s.png", saveDir, id.c_str());
-      ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
+      const std::string out = Fmt("%s\\tex_%s.png", saveDir, id.c_str());
+      const ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
       if(!res.OK())
+      {
         fprintf(stderr, "  warning: could not save res%s: %s\n", id.c_str(),
-                res.Message().c_str());
+                ResultText(res).c_str());
+      }
+      else if(IsJson())
+      {
+        // Progress belongs on stderr in JSON mode: a bare line inside the object would make the
+        // document unparseable, which is what used to happen here.
+        fprintf(stderr, "  -> %s\n", out.c_str());
+      }
       else
+      {
         printf("  -> %s\n", out.c_str());
+      }
     }
   }
-  ArrayClose();
+  ArrayClose(false);                                 // total/shown follow
   g_indent = g_json ? 1 : 0;
   Field("total", (long long)texs.size());
   Field("shown", shown, true);
@@ -841,18 +1269,22 @@ static int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path
   Field("eid", (long long)eid);
   Field("instance", (long long)instance);
 
-  MeshFormat mesh = ctrl->GetPostVSData((uint32_t)instance, 0, MeshDataStage::VSOut);
+  const MeshFormat mesh = ctrl->GetPostVSData((uint32_t)instance, 0, MeshDataStage::VSOut);
+  const bool hasData = mesh.vertexResourceId != ResourceId::Null() && mesh.vertexByteStride != 0;
+
   Field("topology", (long long)mesh.topology);
   Field("vertexResource", IdText(mesh.vertexResourceId));
   Field("vertexStride", (long long)mesh.vertexByteStride);
   Field("vertexBytes", (long long)mesh.vertexByteSize);
   Field("indexResource", IdText(mesh.indexResourceId));
   Field("indexBytes", (long long)mesh.indexByteSize);
-  Field("baseVertex", (long long)mesh.baseVertex);
+  // Whether this is the last member of the object depends on whether the stream follows, and the
+  // separator has to agree with that: `last` is the one thing the writer cannot work out alone.
+  Field("baseVertex", (long long)mesh.baseVertex, !hasData);
 
-  if(mesh.vertexResourceId == ResourceId::Null() || mesh.vertexByteStride == 0)
+  if(!hasData)
   {
-    if(g_json)
+    if(IsJson())
       printf("}\n");
     else
       printf("(no post-VS data for this event)\n");
@@ -862,25 +1294,36 @@ static int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path
   // The data is the post-VS stream, so it is printed as the floats it is: `stride / 4` per vertex.
   // Which float is which attribute is the shader reflection's business (`shaders <eid>`), not
   // something this buffer can say.
-  bytebuf data = ctrl->GetBufferData(mesh.vertexResourceId, mesh.vertexByteOffset,
-                                     mesh.vertexByteSize);
-  const uint32_t stride = mesh.vertexByteStride;
-  const uint32_t count = (uint32_t)(data.size() / stride);
-  const uint32_t comps = stride / 4;
+  //
+  // A binary32 has no trap representations, so every bit pattern that comes back is a value that can
+  // be printed; the assert keeps that assumption attached to the code that relies on it.
+  static_assert(std::numeric_limits<float>::is_iec559, "the vertex stream is read as IEEE-754 binary32");
+  static_assert(sizeof(float) == 4, "a vertex component is four bytes");
+
+  const bytebuf data = ctrl->GetBufferData(mesh.vertexResourceId, mesh.vertexByteOffset,
+                                           mesh.vertexByteSize);
+  const size_t stride = mesh.vertexByteStride;      // non-zero: checked above (no division by zero)
+  const size_t count = (stride != 0) ? data.size() / stride : 0;
+  const size_t comps = stride / sizeof(float);
 
   ArrayOpen("vertices");
-  for(uint32_t v = 0; v < count && (maxRows <= 0 || (int)v < maxRows); v++)
+  for(size_t v = 0; v < count && (maxRows <= 0 || (long long)v < maxRows); v++)
   {
-    std::string line = Fmt("[%u]", v);
-    for(uint32_t c = 0; c < comps; c++)
+    std::string line = Fmt("[%llu]", (unsigned long long)v);
+    for(size_t c = 0; c < comps; c++)
     {
+      // The offset is computed in `size_t` and checked before it is used: `v * stride` in 32 bits
+      // could wrap, and a wrapped offset would read outside the buffer ([expr.add]).
+      const size_t offset = v * stride + c * sizeof(float);
+      if(offset + sizeof(float) > data.size())
+        break;
       float f = 0.0f;
-      memcpy(&f, data.data() + v * stride + c * 4, 4);
-      line += Fmt(" %g", f);
+      memcpy(&f, data.data() + offset, sizeof(float));
+      line += Fmt(" %g", (double)f);
     }
     Row(line);
   }
-  ArrayClose();
+  ArrayClose(false);                                 // vertexCount/componentsPerVertex follow
   g_indent = g_json ? 1 : 0;
   Field("vertexCount", (long long)count);
   Field("componentsPerVertex", (long long)comps, true);
@@ -890,73 +1333,103 @@ static int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path
   return 0;
 }
 
+//: Little-endian field writers: BMP's byte order is fixed by the file format, not by the machine
+//: that happens to be writing it, so the bytes are written one at a time rather than by copying a
+//: host-order integer into the header.
+static void PutLE16(uint8_t *dst, uint16_t value)
+{
+  dst[0] = (uint8_t)(value & 0xffu);
+  dst[1] = (uint8_t)((value >> 8) & 0xffu);
+}
+
+static void PutLE32(uint8_t *dst, uint32_t value)
+{
+  dst[0] = (uint8_t)(value & 0xffu);
+  dst[1] = (uint8_t)((value >> 8) & 0xffu);
+  dst[2] = (uint8_t)((value >> 16) & 0xffu);
+  dst[3] = (uint8_t)((value >> 24) & 0xffu);
+}
+
 //: A 24-bit BMP of the texture display at one event. BMP rather than PNG because it needs no
 //: encoder: the pixels come back as RGBA and the header is 54 bytes.
+//:
+//: The size arithmetic is done in `size_t` and checked before it is used, because the width and
+//: height come from the engine as `int32_t`: `width * height * 4` in `int` can overflow
+//: ([expr.mul], [ub:expr.mul.representable.type.result]), and the wrapped value is exactly what a
+//: bounds check would then be trusting. Every write is checked too -- a short write leaves a
+//: truncated image that otherwise looks like success.
 static bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t height)
 {
-  if(width <= 0 || height <= 0 || rgba.size() < (size_t)(width * height * 4))
+  if(width <= 0 || height <= 0)
     return false;
 
-  const int rowBytes = width * 3;
-  const int pad = (4 - (rowBytes % 4)) % 4;
-  const uint32_t imageSize = (uint32_t)((rowBytes + pad) * height);
-  const uint32_t fileSize = 54 + imageSize;
+  const size_t w = (size_t)width;
+  const size_t h = (size_t)height;
 
-  FILE *f = fopen(path, "wb");
-  if(!f)
+  // The buffer has to hold w*h pixels of 4 bytes; the division detects a wrapped product.
+  const size_t needed = w * h * 4;
+  if(needed / 4 / h != w || rgba.size() < needed)
     return false;
+
+  const size_t rowBytes = w * 3;
+  const size_t pad = (4 - (rowBytes % 4)) % 4;
+  const size_t imageSize = (rowBytes + pad) * h;
+  if(imageSize > 0xffffffffu - 54u)
+    return false;                                    // the header's size fields are 32-bit
 
   uint8_t header[54] = {};
   header[0] = 'B';
   header[1] = 'M';
-  memcpy(header + 2, &fileSize, 4);
-  uint32_t offset = 54;
-  memcpy(header + 10, &offset, 4);
-  uint32_t dibSize = 40;
-  memcpy(header + 14, &dibSize, 4);
-  int32_t w = width, h = height;
-  memcpy(header + 18, &w, 4);
-  memcpy(header + 22, &h, 4);
-  uint16_t planes = 1, bpp = 24;
-  memcpy(header + 26, &planes, 2);
-  memcpy(header + 28, &bpp, 2);
-  memcpy(header + 34, &imageSize, 4);
+  PutLE32(header + 2, (uint32_t)(54u + imageSize));
+  PutLE32(header + 10, 54u);
+  PutLE32(header + 14, 40u);
+  PutLE32(header + 18, (uint32_t)w);
+  PutLE32(header + 22, (uint32_t)h);
+  PutLE16(header + 26, 1u);
+  PutLE16(header + 28, 24u);
+  PutLE32(header + 34, (uint32_t)imageSize);
 
-  fwrite(header, 1, 54, f);
+  FILE *f = fopen(path, "wb");
+  if(f == NULL)
+    return false;
+
+  bool ok = fwrite(header, 1, sizeof(header), f) == sizeof(header);
   std::vector<uint8_t> row(rowBytes + pad, 0);
-  for(int y = height - 1; y >= 0; y--)              // BMP rows are bottom-up
+  for(size_t line = 0; line < h && ok; line++)
   {
-    for(int x = 0; x < width; x++)
+    const size_t y = h - 1 - line;                   // BMP rows are bottom-up
+    const uint8_t *px = rgba.data() + y * w * 4;
+    for(size_t x = 0; x < w; x++)
     {
-      const uint8_t *px = rgba.data() + (y * width + x) * 4;
-      row[x * 3 + 0] = px[2];
-      row[x * 3 + 1] = px[1];
-      row[x * 3 + 2] = px[0];
+      row[x * 3 + 0] = px[x * 4 + 2];
+      row[x * 3 + 1] = px[x * 4 + 1];
+      row[x * 3 + 2] = px[x * 4 + 0];
     }
-    fwrite(row.data(), 1, row.size(), f);
+    ok = fwrite(row.data(), 1, row.size(), f) == row.size();
   }
-  fclose(f);
-  return true;
+  return (fclose(f) == 0) && ok;
 }
 
 static int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                     const char *outPath)
 {
   ctrl->SetFrameEvent(eid, true);
-  const PipeState &pipe = ctrl->GetPipelineState();
 
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   ResourceId rt = d3d12 && !d3d12->outputMerger.renderTargets.empty()
                       ? d3d12->outputMerger.renderTargets[0].resource
                       : ResourceId::Null();
   if(rt == ResourceId::Null())
-  {
-    fprintf(stderr, "error: nothing is bound to render target 0 at eid %d\n", eid);
-    return 1;
-  }
+    return Fail(1, "nothing is bound to render target 0 at eid %d", eid);
 
   IReplayOutput *out = ctrl->CreateOutput(CreateHeadlessWindowingData(256, 256),
                                          ReplayOutputType::Texture);
+  if(out == NULL)
+  {
+    // Creating the output can fail (no window, no device): everything below dereferences it.
+    return Fail(1, "could not create a texture output for res%s", IdText(rt).c_str());
+  }
+
   TextureDisplay disp;
   disp.resourceId = rt;
   disp.typeCast = CompType::Typeless;
@@ -1009,9 +1482,9 @@ static int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *
   // gets printed here; `GPUCounter`'s numbering is in the API headers.
   ArrayOpen("counters");
   for(size_t i = 0; i < results.size(); i++)
-    Row(Fmt("eid %-7u %-18s = %f", results[i].eventId, ToStr(results[i].counter).c_str(),
-            results[i].value.d));
-  ArrayClose();
+    Row(Fmt("eid %-7u %-18s = %f", (unsigned)results[i].eventId,
+            CounterText(results[i].counter).c_str(), results[i].value.d));
+  ArrayClose(false);                                 // total follows
   g_indent = g_json ? 1 : 0;
   Field("total", (long long)results.size(), true);
   g_indent = 0;
@@ -1027,9 +1500,9 @@ static int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *pat
 
   ArrayOpen("messages");
   for(size_t i = 0; i < msgs.size(); i++)
-    Row(Fmt("eid %-6u %-8s %s", msgs[i].eventId, ToStr(msgs[i].severity).c_str(),
+    Row(Fmt("eid %-6u %-8s %s", (unsigned)msgs[i].eventId, SeverityText(msgs[i].severity).c_str(),
             msgs[i].description.c_str()));
-  ArrayClose();
+  ArrayClose(false);                                 // total follows
   g_indent = g_json ? 1 : 0;
   Field("total", (long long)msgs.size(), true);
   g_indent = 0;
@@ -1058,17 +1531,14 @@ static int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *pat
     }
   }
   if(id == ResourceId::Null())
-  {
-    fprintf(stderr, "error: no resource with id or name '%s'\n", what);
-    return 1;
-  }
+    return Fail(1, "no resource with id or name '%s'", what);
 
   rdcarray<EventUsage> usage = ctrl->GetUsage(id);
 
   ArrayOpen("usage");
   for(size_t i = 0; i < usage.size(); i++)
-    Row(Fmt("eid %-7u %s", usage[i].eventId, ToStr(usage[i].usage).c_str()));
-  ArrayClose();
+    Row(Fmt("eid %-7u %s", (unsigned)usage[i].eventId, UsageText(usage[i].usage).c_str()));
+  ArrayClose(false);                                 // total follows
   g_indent = g_json ? 1 : 0;
   Field("total", (long long)usage.size(), true);
   g_indent = 0;
@@ -1082,6 +1552,12 @@ static int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *pat
 //: matched exactly on one capture and did not on another, and `SetFrameEvent` accepts any number
 //: (forcing an event that does not exist) rather than failing, so the only reliable answer is to ask
 //: the engine which ids are real.
+//:
+//: It must be the *first* thing the process asks. `SetFrameEvent(n, true)` on an id that is not an
+//: event does not clear the pipeline state: it leaves the last replayed event's state in place, so
+//: after any other command a forced non-event looks like it has state. Measured on the Android
+//: capture: `probe 120` alone reports 25-32 ids, and the same `probe 120` after eight other commands
+//: reports ~120. The first answer is the true one; a batch file should therefore put `probe` first.
 static int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid)
 {
   PrintCaptureHeader(file, path);
@@ -1109,7 +1585,7 @@ static int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *pat
             (int)d3d12->rootSignature.parameters.size()));
     found++;
   }
-  ArrayClose();
+  ArrayClose(false);                                 // scanned/withState follow
   g_indent = g_json ? 1 : 0;
   Field("scanned", (long long)maxEid);
   Field("withState", found, true);
@@ -1124,7 +1600,7 @@ static int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *pat
 static void Usage()
 {
   printf(
-      "replay_dump - headless RenderDoc replay as a data source (ROADMAP 1)\n"
+      "replay_dump - headless RenderDoc replay as a data source (README §9)\n"
       "\n"
       "usage: replay_dump <command> <capture.rdc> [args] [--json]\n"
       "\n"
@@ -1140,10 +1616,222 @@ static void Usage()
       "  debug   <rdc>                     debug messages (validation layer, etc.)\n"
       "  usage   <rdc> <resId>             every event that touches a resource\n"
       "  probe   <rdc> [maxEid=2000]       which event ids actually have pipeline state\n"
+      "  batch   <rdc> <file>              run every command in <file> against one open capture\n"
       "\n"
-      "Event ids match the offline tool's chunk indices, which `draws` here confirms rather than\n"
-      "assumes. $RDC_RENDERDOC_DLL overrides the renderdoc.dll to load (default: the installed one).\n"
-      "$RDC_REPLAY_DEBUG=1 traces each step on stderr, for when the engine takes the process down.\n");
+      "Options (any position): --json, --log <file>, --disasm, --save <dir>.\n"
+      "\n"
+      "A batch file holds one command per line, in the same syntax minus the executable and the\n"
+      "capture (`state 270 --json`), with `#` for comments. Each line's output is preceded by a\n"
+      "`#=== <line>` marker so a stream can be split again. This is the cheap way to run many\n"
+      "commands: opening a capture and standing the replay engine up costs ~3 s on a small capture\n"
+      "and ~10 s on a 1.4 GB one, and batch pays it once for the whole file.\n"
+      "\n"
+      "Progress goes to stderr and to one log file per run, <exe name>_<date>_<time>.log.txt beside\n"
+      "the executable (--log <file> names one exact file and truncates it); the timings in it are\n"
+      "what to read when a run looks stuck. Event ids are the engine's, and they are not the offline\n"
+      "tool's chunk indices: `probe` lists the ids that actually have pipeline state.\n"
+      "$RDC_RENDERDOC_DLL overrides the renderdoc.dll to load (default: the installed one) and\n"
+      "$RDC_REPLAY_DEBUG=1 traces every step, for when the engine takes the process down. Run one\n"
+      "replay at a time: the engine creates a device per process, and two at once on one GPU is what\n"
+      "makes it look stuck.\n");
+}
+
+//: A command-line integer, validated: `atoi` answers 0 for anything that is not a number, and 0
+//: silently means "no limit" for a row count and "event 0" for an event id, so a typo changed what
+//: the command did rather than failing. An unparsable argument is reported and the default is used.
+static bool ParseInt(const char *text, int &value)
+{
+  if(text == NULL || *text == '\0')
+    return false;
+
+  const char *end = text + strlen(text);
+  long long parsed = 0;
+  const std::from_chars_result result = std::from_chars(text, end, parsed);
+  if(result.ec != std::errc() || result.ptr != end)
+    return false;
+  if(parsed < (long long)std::numeric_limits<int>::min() ||
+     parsed > (long long)std::numeric_limits<int>::max())
+    return false;
+
+  value = (int)parsed;
+  return true;
+}
+
+static int ToInt(const std::string &text, int fallback)
+{
+  int value = 0;
+  if(!ParseInt(text.c_str(), value))
+  {
+    fprintf(stderr, "warning: '%s' is not an integer, using %d\n", text.c_str(), fallback);
+    return fallback;
+  }
+  return value;
+}
+
+//: The option spellings, in one place: `main` reads them out of `argv` and `SplitLine` out of a
+//: batch line, and a rename must not be able to drift between the two.
+static const char *kJsonFlag = "--json";
+static const char *kDisasmFlag = "--disasm";
+static const char *kSaveFlag = "--save";
+static const char *kLogFlag = "--log";
+
+static void Usage();
+
+//: Runs one command against an already-open capture. Shared by `main` and `batch`, so a command
+//: name and its arguments mean the same thing however they were spelled.
+static int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
+                           const std::vector<std::string> &args, bool wantDisasm, const char *saveDir)
+{
+  if(args.empty())
+    return 2;
+
+  const char *cmd = args[0].c_str();
+  if(!strcmp(cmd, "info"))
+    return CmdInfo(ctrl, file, path);
+  if(!strcmp(cmd, "draws"))
+    return CmdDraws(ctrl, file, path, args.size() > 1 ? ToInt(args[1], 80) : 80,
+                    args.size() > 2 ? args[2].c_str() : NULL);
+  if(!strcmp(cmd, "state") && args.size() > 1)
+    return CmdState(ctrl, file, path, ToInt(args[1], 0));
+  if(!strcmp(cmd, "shaders") && args.size() > 1)
+    return CmdShaders(ctrl, file, path, ToInt(args[1], 0), wantDisasm);
+  if(!strcmp(cmd, "cb") && args.size() > 3)
+  {
+    const ShaderStage stage = StageFromName(args[2].c_str());
+    if(stage == ShaderStage::Invalid)
+      return Fail(2, "'%s' is not a shader stage (vs hs ds gs ps cs as ms)", args[2].c_str());
+    return CmdCbuffer(ctrl, file, path, ToInt(args[1], 0), stage, ToInt(args[3], 0));
+  }
+  if(!strcmp(cmd, "textures"))
+    return CmdTextures(ctrl, file, path, args.size() > 1 ? args[1].c_str() : NULL, saveDir);
+  if(!strcmp(cmd, "mesh") && args.size() > 1)
+    return CmdMesh(ctrl, file, path, ToInt(args[1], 0), args.size() > 2 ? ToInt(args[2], 0) : 0,
+                   args.size() > 3 ? ToInt(args[3], 16) : 16);
+  if(!strcmp(cmd, "image") && args.size() > 2)
+    return CmdImage(ctrl, file, path, ToInt(args[1], 0), args[2].c_str());
+  if(!strcmp(cmd, "counters"))
+    return CmdCounters(ctrl, file, path);
+  if(!strcmp(cmd, "debug"))
+    return CmdDebug(ctrl, file, path);
+  if(!strcmp(cmd, "usage") && args.size() > 1)
+    return CmdUsage(ctrl, file, path, args[1].c_str());
+  if(!strcmp(cmd, "probe"))
+    return CmdProbe(ctrl, file, path, args.size() > 1 ? ToInt(args[1], 2000) : 2000);
+
+  Fail(2, "unknown command '%s' (or missing arguments)", cmd);
+  Usage();
+  return 2;
+}
+
+//: Splits a command line into arguments, taking the options out as it goes. Double quotes group a
+//: token, which `--save` and `image` need for a path with spaces.
+static void SplitLine(const std::string &line, std::vector<std::string> &args, bool &json, bool &disasm,
+                      std::string &saveDir)
+{
+  std::string token;
+  bool quoted = false;
+  bool wantSaveDir = false;
+  for(size_t i = 0; i <= line.size(); i++)
+  {
+    const char c = (i < line.size()) ? line[i] : ' ';
+    if(c == '"')
+    {
+      quoted = !quoted;
+      continue;
+    }
+    if(!quoted && (c == ' ' || c == '\t'))
+    {
+      if(token.empty())
+        continue;
+      if(token == kJsonFlag)
+        json = true;
+      else if(token == kDisasmFlag)
+        disasm = true;
+      else if(token == kSaveFlag)
+        wantSaveDir = true;
+      else if(wantSaveDir)
+      {
+        saveDir = token;
+        wantSaveDir = false;
+      }
+      else
+        args.push_back(token);
+      token.clear();
+      continue;
+    }
+    token += c;
+  }
+}
+
+//: Runs a file of command lines against one open capture. The point is the cost of a replay
+//: session, not the cost of the commands: standing the engine up and opening the capture is ~4 s on
+//: a small capture and ~11 s on a 1.4 GB one, and this pays it once for the whole file.
+static int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
+                    const char *batchPath)
+{
+  FILE *f = fopen(batchPath, "rb");
+  if(f == NULL)
+    return Fail(2, "cannot read batch file %s", batchPath);
+
+  int ret = 0, ran = 0;
+  bool sawProbe = false, sawOther = false;
+  std::string line;
+  for(;;)
+  {
+    const int ch = fgetc(f);
+    if(ch != EOF && ch != '\n')
+    {
+      if(ch != '\r')
+        line += (char)ch;
+      continue;
+    }
+
+    // A blank line or a `#` comment is skipped, so a batch file can be annotated.
+    const size_t first = line.find_first_not_of(" \t");
+    if(first != std::string::npos && line[first] != '#')
+    {
+      std::vector<std::string> args;
+      bool json = false, disasm = false;
+      std::string saveDir;
+      SplitLine(line.substr(first), args, json, disasm, saveDir);
+
+      // `probe` forces non-events, and a forced non-event leaves the last real event's state in
+      // place; whichever ran second, one of the two answers would be wrong. It belongs in its own
+      // run, and saying so here is cheaper than explaining a mysteriously different answer.
+      const bool isProbe = !args.empty() && args[0] == "probe";
+      sawProbe = sawProbe || isProbe;
+      sawOther = sawOther || !isProbe;
+
+      // The marker is what lets a caller split the stream back into one output per command. It is
+      // printed in both formats: JSON has no comment syntax, and guessing where one object ends and
+      // the next begins is not something a consumer should have to do.
+      printf("#=== %s\n", line.substr(first).c_str());
+      fflush(stdout);
+
+      g_json = json;
+      const ULONGLONG started = Millis();
+      const int code = DispatchCommand(ctrl, file, path, args, disasm,
+                                       saveDir.empty() ? NULL : saveDir.c_str());
+      ran++;
+      ret = (code != 0) ? code : ret;
+      Log("batch %d: %s -> exit %d in %.1fs", ran, line.substr(first).c_str(), code,
+          (Millis() - started) / 1000.0);
+    }
+
+    if(ch == EOF)
+      break;
+    line.clear();
+  }
+
+  if(sawProbe && sawOther)
+  {
+    Log("warning: this batch mixes `probe` with other commands; probe forces non-events, which "
+        "leaves stale state behind, so run it on its own");
+  }
+
+  fclose(f);
+  Log("batch finished: %d command(s)", ran);
+  return ret;
 }
 
 int main(int argc, char **argv)
@@ -1152,18 +1840,26 @@ int main(int argc, char **argv)
   // losing the output that was already produced would hide exactly what happened.
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
+  g_start = Millis();                                // progress timings are relative to this
 
   std::vector<std::string> args;
   bool wantDisasm = false;
   const char *saveDir = NULL;
+  std::string logPath = DefaultLogStem();
+  bool perRunLog = true;                             // until `--log` names one exact file
   for(int i = 1; i < argc; i++)
   {
-    if(!strcmp(argv[i], "--json"))
+    if(!strcmp(argv[i], kJsonFlag))
       g_json = true;
-    else if(!strcmp(argv[i], "--disasm"))
+    else if(!strcmp(argv[i], kDisasmFlag))
       wantDisasm = true;
-    else if(!strcmp(argv[i], "--save") && i + 1 < argc)
+    else if(!strcmp(argv[i], kSaveFlag) && i + 1 < argc)
       saveDir = argv[++i];
+    else if(!strcmp(argv[i], kLogFlag) && i + 1 < argc)
+    {
+      logPath = argv[++i];
+      perRunLog = false;
+    }
     else
       args.push_back(argv[i]);
   }
@@ -1180,86 +1876,100 @@ int main(int argc, char **argv)
     fprintf(stderr, "error: %s needs a capture path\n", cmd);
     return 2;
   }
-  const char *path = args[1].c_str();
 
-  Trace("loading renderdoc.dll");
+  // The log is opened only once the command is known to be runnable, so `--help` and a command
+  // without a capture path -- which do nothing -- leave no file behind. The absolute name goes into
+  // the first line: a per-run name carries a timestamp, so it is not something to guess, and a wrong
+  // capture path is what makes the working directory worth stating.
+  if(!logPath.empty())
+  {
+    std::string openedAs;
+    g_logFile = OpenLog(logPath, perRunLog, openedAs);
+    if(g_logFile == NULL)
+      fprintf(stderr, "warning: cannot write the log file %s\n", openedAs.c_str());
+    else
+      Log("log file: %s", openedAs.c_str());
+  }
+
+  // Every path is made absolute here, and the working directory is logged: a path that only works
+  // from one directory is otherwise indistinguishable from a missing file.
+  const std::string pathAbs = AbsolutePath(args[1].c_str());
+  const char *path = args[1].c_str();                // as given: what the output shows
+  std::string saveDirAbs, batchPathAbs;
+  if(saveDir != NULL)
+    saveDirAbs = AbsolutePath(saveDir);
+  if(args.size() > 2 && !strcmp(cmd, "batch"))
+    batchPathAbs = AbsolutePath(args[2].c_str());
+
+  Log("working directory: %s", WorkingDirectory().c_str());
+  Log("loading renderdoc.dll");
   HMODULE dll = LoadReplayDLL();
   if(dll == NULL)
-    return 1;
+    return Fail(1, "cannot load renderdoc.dll");
 
-  Trace("RENDERDOC_InitialiseReplay");
+  Log("starting the replay system");
   if(!InitialiseReplay(dll, argc, argv))
-    return 1;
+    return Fail(1, "RENDERDOC_InitialiseReplay failed");
+  const ReplaySystemGuard replaySystem;              // declared first, so it shuts down last
 
   Trace("RENDERDOC_OpenCaptureFile");
   ICaptureFile *file = OpenCaptureFile(dll);
   if(file == NULL)
     return 1;
+  const CaptureFileGuard captureFile(file);
 
+  // The capture is opened by its absolute path (a relative one depends on the working directory),
+  // while the *output* keeps the path as it was given, so a command's text is the same however it
+  // was invoked. The absolute form and the working directory go to the log, where a wrong path is
+  // the thing being diagnosed.
+  Log("reading the container of %s", pathAbs.c_str());
   Trace("OpenFile");
-  ResultDetails res = file->OpenFile(path, "rdc", NULL);
+  const ResultDetails res = file->OpenFile(pathAbs.c_str(), "rdc", NULL);
   if(!res.OK())
-  {
-    fprintf(stderr, "error: cannot open %s: %s\n", path, res.Message().c_str());
-    return 1;
-  }
+    return Fail(1, "cannot open %s: %s", pathAbs.c_str(), ResultText(res).c_str());
 
-  Trace("OpenCapture (replay)");
+  // This is where a run looks stuck, and it is worth saying so before it happens: the engine builds
+  // its own copy of the frame and creates a replay device, which is ~3 s for a small capture and
+  // ~10 s for a 1.4 GB one, and longer if another replay session is competing for the same GPU.
+  // A batch file pays it once for the whole file.
+  Log("opening the capture and creating the replay device (this is the slow part; if another "
+      "replay is running, that is why)");
   // Every member of ReplayOptions is default-initialised in the header, but zeroing the whole struct
   // also rules out a layout disagreement with the DLL: all-zero means "no overrides" either way.
   ReplayOptions opts;
   memset(&opts, 0, sizeof(opts));
-  rdcpair<ResultDetails, IReplayController *> opened = file->OpenCapture(opts, NULL);
+  const rdcpair<ResultDetails, IReplayController *> opened = file->OpenCapture(opts, NULL);
   Trace("OpenCapture returned");
   if(!opened.first.OK())
-  {
-    fprintf(stderr, "error: cannot replay %s: %s\n", path, opened.first.Message().c_str());
-    return 1;
-  }
+    return Fail(1, "cannot replay %s: %s", path, ResultText(opened.first).c_str());
   IReplayController *ctrl = opened.second;
+  const ControllerGuard controller(ctrl);
+  Log("replay ready");
 
-  Trace("running the command");
   int ret;
-  if(!strcmp(cmd, "info"))
-    ret = CmdInfo(ctrl, file, path);
-  else if(!strcmp(cmd, "draws"))
-    ret = CmdDraws(ctrl, file, path, args.size() > 2 ? atoi(args[2].c_str()) : 80,
-                   args.size() > 3 ? args[3].c_str() : NULL);
-  else if(!strcmp(cmd, "state") && args.size() > 2)
-    ret = CmdState(ctrl, file, path, atoi(args[2].c_str()));
-  else if(!strcmp(cmd, "shaders") && args.size() > 2)
-    ret = CmdShaders(ctrl, file, path, atoi(args[2].c_str()), wantDisasm);
-  else if(!strcmp(cmd, "cb") && args.size() > 4)
-    ret = CmdCbuffer(ctrl, file, path, atoi(args[2].c_str()), StageFromName(args[3].c_str()),
-                     atoi(args[4].c_str()));
-  else if(!strcmp(cmd, "textures"))
-    ret = CmdTextures(ctrl, file, path, args.size() > 2 ? args[2].c_str() : NULL, saveDir);
-  else if(!strcmp(cmd, "mesh") && args.size() > 2)
-    ret = CmdMesh(ctrl, file, path, atoi(args[2].c_str()), args.size() > 3 ? atoi(args[3].c_str()) : 0,
-                  args.size() > 4 ? atoi(args[4].c_str()) : 16);
-  else if(!strcmp(cmd, "image") && args.size() > 3)
-    ret = CmdImage(ctrl, file, path, atoi(args[2].c_str()), args[3].c_str());
-  else if(!strcmp(cmd, "counters"))
-    ret = CmdCounters(ctrl, file, path);
-  else if(!strcmp(cmd, "debug"))
-    ret = CmdDebug(ctrl, file, path);
-  else if(!strcmp(cmd, "usage") && args.size() > 2)
-    ret = CmdUsage(ctrl, file, path, args[2].c_str());
-  else if(!strcmp(cmd, "probe"))
-    ret = CmdProbe(ctrl, file, path, args.size() > 2 ? atoi(args[2].c_str()) : 2000);
+  const ULONGLONG started = Millis();
+  if(!strcmp(cmd, "batch") && args.size() > 2)
+  {
+    ret = CmdBatch(ctrl, file, path, batchPathAbs.c_str());
+  }
   else
   {
-    fprintf(stderr, "error: unknown command '%s' (or missing arguments)\n", cmd);
-    Usage();
-    ret = 2;
+    // The command, then everything after the capture path: `DispatchCommand` takes the command as
+    // `args[0]` and never the capture, exactly as a batch line spells it (`state 270`).
+    std::vector<std::string> cmdArgs;
+    cmdArgs.push_back(args[0]);
+    cmdArgs.insert(cmdArgs.end(), args.begin() + 2, args.end());
+    ret = DispatchCommand(ctrl, file, path, cmdArgs, wantDisasm,
+                          saveDirAbs.empty() ? NULL : saveDirAbs.c_str());
   }
+  Log("done: exit %d after %.1fs", ret, (Millis() - started) / 1000.0);
 
-  Trace("shutting down");
-  ctrl->Shutdown();
-  file->Shutdown();
-  if(g_ShutdownReplay)
-    g_ShutdownReplay();
-  // The DLL is deliberately not freed: the objects above are owned by it, and RenderDoc's own tools
-  // let the process exit instead.
+  // The controller, the capture file and the replay system are torn down by the guards above, in
+  // that order, as this function returns.
+  //
+  // The DLL is deliberately not freed: the objects are owned by it, and RenderDoc's own tools let
+  // the process exit instead of unloading the engine underneath its own state.
+  if(g_logFile != NULL)
+    fclose(g_logFile);
   return ret;
 }

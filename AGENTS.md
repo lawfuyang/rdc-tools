@@ -72,6 +72,24 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - Never assume an event id is a chunk index: `probe` is the authority (`README.md` §9). The offline tool's
   chunk numbering matched the engine on the Unreal captures and not on the hobby-renderer one, and a wrong id
   silently returns an *empty* state rather than failing.
+- The driver must not specialise RenderDoc's function templates (`DoStringise<...>`). RenderDoc defines them in
+  its own `stringise.cpp`, unreachable from our translation unit
+  (`[ifndr:temp.expl.spec.unreachable.declaration]`, `[basic.def.odr]`); use local, distinctly-named helpers
+  instead, and read `ResultDetails` through its public `internal_msg`/`code` members rather than `Message()`.
+  Anything that looks like it needs a specialisation to link is a reason to stop calling the header inline that
+  pulled it in, not to supply the definition.
+- The driver's output writer has two rules that are load-bearing for `--json`: every string that reaches the
+  output goes through `JsonEscape` (a Windows path in `capture` broke every document once), and a separator is
+  written *before* each item after the first, never after a last one — so a field which may be the object's
+  last must say so with its `last` argument. After changing any command, validate:
+  `build\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
+  the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
+- Undefined behaviour and IFNDR are treated as bugs here: no `memcpy` out of a class without a
+  `static_assert` that it is trivially copyable and the right size, no signed overflow in size arithmetic
+  (compute in `size_t` and check the product), no out-of-range `static_cast` to an enum without a fixed
+  underlying type, no pointer arithmetic past the end of a buffer, and no unbounded recursion over
+  engine-supplied data. The two annexes in the parent folder (`cpp-annex-F-ub-core-undefined-behavior.md`,
+  `cpp-annex-G-ifndr-ill-formed-no-diagnostic-required.md`) are the checklist.
 - `draws` reports the D3D12 command-list state in effect at each call (see `DrawState`): bindings survive
   `SetPipelineState` and draws, `Reset()` clears them, and only a *changed* root signature invalidates root
   arguments. Do not reintroduce a per-draw or per-PSO reset, and keep the state keyed per command list.

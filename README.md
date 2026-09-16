@@ -303,7 +303,7 @@ which replay does not expose.
 | Command | Arguments | Output |
 |---|---|---|
 | `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §1) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §9.5) |
 
 ### 4.5 Chunk level
 
@@ -689,7 +689,7 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 Most of these bullets are **replay's job, not offline work** — decoded textures, disassembly, the non-frame
 sections, uniform names — and `ROADMAP.md` keeps them out of the offline plan on purpose ("what is deliberately
 not on this list"). The ones that stay offline work items are tracked with an acceptance gate in `ROADMAP.md`
-§4. A bullet here is a known limitation, not a permanent design decision.
+§11. A bullet here is a known limitation, not a permanent design decision.
 
 * **Chunk names need the RenderDoc source tree in the root folder.** The tool expects
   `<root>/rdc-tools/renderdoc-src/` (see §1.1); if it is absent, or if its version is older than the one that
@@ -834,7 +834,10 @@ Three things to know about running it:
 
 ## 10. See also
 
-* `ROADMAP.md` — features not implemented yet: the **D3D12 harness**, and the driver's **engine event ids**.
+* `ROADMAP.md` — features not implemented yet, in priority order: the **executive summary** and the replay bundle
+  it reads (§1–§2), the driver's navigation and experiment commands (§3–§5), the offline **dependency graph**
+  and memory report (§6), **two-capture A/B** (§7), the **verification corpus** (§8), and the D3D12 harness for
+  synthetic inputs (§9.5).
 * RenderDoc source, expected at `<root>/rdc-tools/renderdoc-src/` (§1.1). The files this tool and its docs rely
   on: `serialise/serialiser.cpp` (chunk framing), `serialise/rdcfile.cpp` (container), `core/core.h` and
   `driver/d3d12/d3d12_common.h` (chunk-name enums), `driver/d3d12/d3d12_command_list_wrap.cpp` (payload

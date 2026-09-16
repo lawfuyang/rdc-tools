@@ -1029,7 +1029,7 @@ def cmd_dxbc(path: str) -> None:
     This is a *container* view, not a shader analysis: it says which shaders the capture embeds and
     where, so `dump-shaders` can extract the interesting ones. What a shader *reads* -- uniform
     names, bind points, signatures, disassembly -- is the shader reflection's job, and the reflection
-    is the replay driver's (ROADMAP §1). The tool used to guess at it by scanning containers for
+    is the replay driver's (README §9). The tool used to guess at it by scanning containers for
     GI-ish strings and `TEXCOORD6..12`; that harvest was a worse answer to a question replay answers
     exactly, so it was removed rather than kept.
     """
@@ -2259,9 +2259,9 @@ def cmd_dump_chunk(path: str, index: int, outfile: str) -> None:
 def cmd_dump_shaders(path: str, outdir: str) -> None:
     """Write every DXBC/DXIL container to `outdir` as a `.dxil` file plus an index in `shaders.txt`.
 
-    This is the offline route to the D3D12 harness's input (ROADMAP §2) and a way to hand a shader to
+    This is the offline route to the D3D12 harness's input (ROADMAP §9.5) and a way to hand a shader to
     `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
-    reflection's job, and the reflection is the replay driver's (ROADMAP §1).
+    reflection's job, and the reflection is the replay driver's (README §9).
     """
     _info, stream, _how = load_stream(path)
     os.makedirs(outdir, exist_ok=True)

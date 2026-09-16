@@ -1,0 +1,22 @@
+{
+  "title": "image",
+  "description": "One render target saved to a file, and whether the write succeeded.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "resource",
+               "width", "height", "file", "written"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "resource": {"type": "string"},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "file": {"type": "string"},
+    "written": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

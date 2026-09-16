@@ -1,0 +1,22 @@
+{
+  "title": "cb",
+  "description": "One constant buffer at one event: what it is bound to and one row per reflection variable, with the value read from the data.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stage",
+               "slot", "shader", "buffer", "variables"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "stage": {"type": "string"},
+    "slot": {"type": "integer"},
+    "shader": {"type": "string"},
+    "buffer": {"type": "string"},
+    "variables": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

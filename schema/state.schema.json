@@ -1,0 +1,24 @@
+{
+  "title": "state",
+  "description": "One event's bound state: the capture header, then that event. The arrays are the driver's own rows, which are text by design -- they carry the engine's names verbatim.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "api",
+               "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "api": {"type": "integer"},
+    "shaders": {"type": "array", "items": {"type": "string"},
+                "description": "`vs  res2348`, one row per bound stage -- including the stages this call kind does not use"},
+    "renderTargets": {"type": "array", "items": {"type": "string"}},
+    "depthTarget": {"type": "string", "description": "a resource id, `0` for none"},
+    "rootSignature": {"type": "string"},
+    "rootParameters": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

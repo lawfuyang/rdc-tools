@@ -160,7 +160,8 @@ appendix of reproduction commands.
 ### 1.4 The engine schema table
 
 Names like `MobileBasePass`, `IndirectLightingCache` and `Material` are Unreal's, and the summary can only
-speak that vocabulary if it is written down. A small, extendable table (`schemas/*.json`) maps a known engine's
+speak that vocabulary if it is written down. A small, extendable table (`engine-schemas/*.json` — not the
+driver's `schema/` folder, which is the contract for its documents, README §4.12) maps a known engine's
 constant-block, semantic and marker names onto concepts (`base pass`, `GI cache`, `light`, `material`,
 `shadow pass`). Everything derived from it is labelled as name-based; a capture from an unknown engine simply
 gets no interpretation rather than a wrong one. This is also where the project's original question finally gets
@@ -222,10 +223,6 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 * **`debug --group [--fail-on <severity>]`** — group messages by type/hash with counts and first/last eid, and
   exit non-zero when anything at or above a severity appears: the driver-side sanity gate, and the source of the
   summary's red-flag section. (~3 h)
-* **`schema` and a published JSON contract** — print a JSON Schema for each command's `--json` output, stamp a
-  `schemaVersion` into the documents, and validate the driver's own output against it in the harness. `--json`
-  changed shape once already (flat stage members → a `stages` array, because repeats silently dropped data);
-  consumers need a contract rather than reverse-engineering. (~4 h)
 * **The driver as a library** — a thin C ABI over the same code, called from Python with `ctypes`, so the offline
   tool can query a frame in-process instead of one process per question. It makes §1's bundle an optimisation
   rather than a requirement ("ask the engine for just what the summary needs"), and removes the 28-process
@@ -347,8 +344,12 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 * **Fixture bundles** — small, hand-written bundles in `tests/` that exercise every summary detector and report
   section without a capture, a GPU or the driver. This is what makes §1 testable in CI and what keeps its
   heuristics from being unfalsifiable. (~1 d, and it grows with every detector)
-* **Schema validation everywhere** — validate the driver's `--json` output and the bundle's files against the
-  published schemas (§2), in the harness and in the offline tests. (~4 h)
+* **Schema validation in the harness** — in place: the driver publishes the schemas (`schema --out schema`),
+  `schema --check` fails when the checked-in copies and the driver have drifted (every branch covered by the
+  driver's `selftest`), and `validate` checks a bundle against them, with the offline tests covering the
+  validator and the schemas themselves. What is left is the last mile inside the baseline pass: run the check
+  and `validate` over its own output, so a driver change that breaks a document fails the pass instead of the
+  next consumer. (~1 h)
 * **The capture corpus with labelled expectations** — a `captures/` index (path, provenance, API, engine, size,
   what is known to be wrong with it) and a `*.expect.json` per capture: "this frame has an unbound `rp7`, a dead
   4 MB UAV, a marker imbalance" — and the detectors must fire. Unlabelled captures are still useful (no crash,
@@ -361,10 +362,6 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 * **Driver version guard** — compare `RENDERDOC_GetVersionString` with the capture's file version and refuse
   clearly (replay must be ≥ the capture's version), with a `--dll <path>`/`$RDC_RENDERDOC_DLL` override and a
   documented matrix of what has been tested. Today a mismatch surfaces as whatever the engine does next. (~4 h)
-* **A driver `selftest`** — DLL load, version, entry points, help text, and the writer's helpers (escaping,
-  separator, `last`) as hermetic unit tests in the same spirit as the offline suite; plus `--json` output checked
-  against the schema. (~half a day)
-
 ## 8. P2/P3 — Beyond the local desktop
 
 * **Remote replay** — capture on a phone, replay where the driver lives: RenderDoc's remote server plus
@@ -457,29 +454,27 @@ never silent ones).
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — the frame-level answer (its skeleton is landed: `report`, README §4.11)**
-1. **`--json` schema (§2) + the driver `selftest` (§7)** — the report and every later feature read the bundle,
-   so pin its contract while the ink is still wet.
-2. **Detectors, ranked by evidence (§1.1)** — start with the certain ones (unbound descriptors, zero work,
+**Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, README §4.11)**
+1. **Detectors, ranked by evidence (§1.1)** — start with the certain ones (unbound descriptors, zero work,
    mismatch checks) and only then the heuristics; each lands with a fixture that fires it.
-3. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
+2. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
    own words is the acceptance case for all of the above, and the table is what lets the report name a pass
    instead of describing its state.
 
 **Phase 2 — exploration and experiments**
-4. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
+3. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
    navigable; ~2 days for all four.
-5. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
+4. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
-6. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
-7. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
-8. **Dependency graph, memory/aliasing report (§5)** — the evidence behind the remaining detectors.
+5. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
+6. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
+7. **Dependency graph, memory/aliasing report (§5)** — the evidence behind the remaining detectors.
 
 **Phase 3 — comparisons and the long tail**
-9. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
-10. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
-    be trusted rather than hoped for.
-11. **Bundled chunk names (§5, = §10.1)** — ~2 h, removes the last environment dependency and closes the last
+8. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
+9. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
+   be trusted rather than hoped for.
+10. **Bundled chunk names (§5, = §10.1)** — ~2 h, removes the last environment dependency and closes the last
     README §8 bullet that is not replay's job.
-12. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
-13. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.
+11. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
+12. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.

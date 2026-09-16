@@ -1,0 +1,28 @@
+{
+  "title": "mesh",
+  "description": "One draw's mesh: the state that feeds it, and -- when the capture has post-VS data -- the vertices the vertex shader emitted.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "instance",
+               "topology", "vertexResource", "vertexStride", "vertexBytes", "indexResource", "indexBytes"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "instance": {"type": "integer"},
+    "topology": {"type": "integer"},
+    "vertexResource": {"type": "string"},
+    "vertexStride": {"type": "integer"},
+    "vertexBytes": {"type": "integer"},
+    "indexResource": {"type": "string"},
+    "indexBytes": {"type": "integer"},
+    "baseVertex": {"type": "integer"},
+    "vertices": {"type": "array", "items": {"type": "string"}},
+    "vertexCount": {"type": "integer"},
+    "componentsPerVertex": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

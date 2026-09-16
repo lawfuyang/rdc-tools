@@ -1,0 +1,38 @@
+{
+  "title": "events",
+  "description": "Every id with bound state, and what was bound. One entry per state change plus the ids the scan was told to include. A state hash repeats when nothing changed, so a consumer can group without re-reading the state files.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events", "total",
+               "scanned", "scanFrom", "scanTo", "scanStopped", "stateFiles"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "events": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "pso", "psoKind", "shaders", "targets", "depth", "rootParameters", "state"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "pso": {"type": "string", "description": "the pipeline state object's resource id"},
+        "psoKind": {"enum": ["graphics", "compute"]},
+        "shaders": {"type": "string", "description": "`vs=2348 ps=2349`, stages in a fixed order"},
+        "targets": {"type": "array", "items": {"type": "string"},
+                    "description": "`<id> <w>x<h>x<d> <FORMAT>`, the output-merge state at this id"},
+        "depth": {"type": "string", "description": "the depth target's resource id, `0` for none"},
+        "rootParameters": {"type": "integer"},
+        "state": {"type": "string", "description": "hash of what the state file was written from"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"},
+    "scanned": {"type": "integer"},
+    "scanFrom": {"type": "integer"},
+    "scanTo": {"type": "integer"},
+    "scanStopped": {"type": "string", "description": "why the sweep stopped, empty when it reached the end"},
+    "stateFiles": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,31 @@
+{
+  "title": "draws",
+  "description": "The structured file's draw-like chunks in order. `eid` is the *engine's* id where one is known and the chunk index where it is not: the two spaces are not the same (README §9), and `probe` lists the ids that have state.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
+               "totalChunks", "totalEvents", "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "events": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "depth", "chunkID", "name"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "depth": {"type": "integer"},
+        "chunkID": {"type": "integer"},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": false
+    }},
+    "totalChunks": {"type": "integer"},
+    "totalEvents": {"type": "integer"},
+    "shown": {"type": "integer"},
+    "truncated": {"type": "string", "description": "present only when the action tree was deeper than the recursion limit"}
+  },
+  "additionalProperties": false
+}

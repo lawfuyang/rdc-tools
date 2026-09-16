@@ -1,0 +1,19 @@
+{
+  "title": "probe",
+  "description": "Which ids in a range have pipeline state. Rows are strings (`eid <n>  shaders=.. rootSig=.. params=..`), the same text the terminal prints.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
+               "scanned", "withState"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "events": {"type": "array", "items": {"type": "string"}},
+    "scanned": {"type": "integer"},
+    "withState": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

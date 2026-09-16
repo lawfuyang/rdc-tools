@@ -1,0 +1,15 @@
+{
+  "title": "bundle-verify",
+  "description": "The result of re-hashing a bundle against its manifest: one row per file that is missing, short, long or whose hash differs, and the counts. `problems` is the exit code.",
+  "type": "object",
+  "required": ["schemaVersion", "manifest", "files", "checked", "problems", "fileCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "manifest": {"type": "string"},
+    "files": {"type": "array", "items": {"type": "string"}},
+    "checked": {"type": "integer"},
+    "problems": {"type": "integer"},
+    "fileCount": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

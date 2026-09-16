@@ -1,0 +1,17 @@
+{
+  "title": "messages",
+  "description": "The engine's own messages, one row each (`eid <n>  <severity>  <text>`), plus the header. Rows are strings: they are the same text the terminal prints, so nothing is lost between the two forms.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "messages", "total"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "messages": {"type": "array", "items": {"type": "string"}},
+    "total": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

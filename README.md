@@ -124,6 +124,7 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | Why is my capture unreadable / what compression is used? | `blocks` |
 | What is the shape of the frame (passes, draws, chunk histogram)? | `summary` |
 | What does this whole frame do, pass by pass, and what is off about it? | `report <rdc> <bundleDir>` — after `replay_dump dump` (§4.11) |
+| Do the driver's documents still match their contract? | `validate <bundleDir> schema` (§4.12) |
 | Show me the pass/primitive tree | `markers` |
 | Which draw is the one I care about? | `markers`, then `chunks <limit> List_Draw` |
 | What pipeline state, constant buffers and vertex streams does draw N use? | `draws` |
@@ -522,6 +523,35 @@ slot was never written during the capture (§8). The layouts are in §3.4; what 
 
 ---
 
+### 4.12 Schema validation
+
+`validate <file|bundleDir> <schemaDir|one.schema.json> [kind]` checks documents against the schemas the
+driver publishes — `schema/` in this repo, written by `replay_dump schema --out schema` and checked in, so the
+contract is a file a consumer can read rather than something reverse-engineered from a writer.
+
+```powershell
+python rdc_analysis.py validate bundle schema        # every document in a bundle
+python rdc_analysis.py validate t.json schema textures   # a document saved from a command's stdout
+```
+
+Every `--json` document carries `schemaVersion` (1 today), so a consumer can refuse a shape it does not
+know. The validator implements the subset the schemas are written in — `type`, `required`, `properties`,
+`items`, `enum`, `const`, `additionalProperties` — and reports any *other* keyword as a failure instead of
+ignoring it: a silently-skipped keyword is how "validated" stops meaning anything. `additionalProperties` is
+`false` throughout, so an unlisted member is an error, which is what catches a writer and its schema drifting
+apart. A schema change is a one-command regeneration plus a review of the diff:
+
+```powershell
+.\build\replay_dump.exe schema --out schema
+.\build\replay_dump.exe schema --check schema      # fails when the folder and the driver disagree
+```
+
+That check is what makes the regeneration a rule rather than a habit: it compares the folder against the
+driver's own table — missing files, files whose text differs, and files left behind for a document kind that
+no longer exists — and exits non-zero on any difference (line endings are folded away first, so a checkout
+that rewrites them is not reported as a difference). Every branch of it is covered by the driver's `selftest`,
+which is why the checked-in copy cannot quietly go stale after a document changes.
+
 ### 4.11 The frame report
 
 `report <rdc> <bundleDir> [outDir]` turns a **bundle** — what `replay_dump dump` writes (README §9) — into
@@ -788,8 +818,19 @@ one's job is what reading the file cannot answer at all.
 | `probe <rdc> [maxEid]` | which event ids the engine actually has — see below |
 | `dump <rdc> [outDir=bundle]` | the whole frame to disk as a *bundle* for the offline tool — see below |
 | `bundle-verify <dir>` | re-hash a bundle's files against its manifest (no device, no DLL) |
+| `schema [<name>] [--out <dir>]` | the JSON Schema for each `--json` document (no capture, no DLL) |
+| `selftest` | the driver checking itself: JSON writer, schema table, help text, the DLL it loads |
 
 `--json` works on every command.
+
+**The contract — `schema`, `selftest` and `schemaVersion`.** Every `--json` document carries
+`schemaVersion` (1 today), so a reader can refuse a shape it does not understand instead of guessing. `schema`
+prints the JSON Schema for each document kind, and `schema --out schema` writes the checked-in `schema/`
+folder that `python rdc_analysis.py validate <bundle> schema` reads (README §4.12), and `schema --check <dir>`
+fails when that folder and the driver disagree — which is how a committed copy is kept from going stale.
+`selftest` runs where a
+capture cannot: the JSON writer's escaping, separators and balance, the schema table, the help text, and the
+`renderdoc.dll` it would load — skipping the DLL checks, rather than failing, when RenderDoc is not installed.
 
 **The bundle — `dump` and `bundle-verify`.** `dump` is one replay session turned into files, so the offline
 half (and a reader) can work without a device. It writes:
@@ -915,7 +956,8 @@ not exist yet, everything else runs today.
   `chunks`, `chunk`, `draws`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`, `dxbc`,
   `dump-chunk`, `dump-shaders`, `cache`, `selftest` (README §4).
 * **Driver today** — `info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
-  `debug`, `usage`, `probe`, `batch`, and the bundle pair `dump` + `bundle-verify` (README §9).
+  `debug`, `usage`, `probe`, `batch`, the bundle pair `dump` + `bundle-verify`, and the contract pair `schema` +
+`selftest` (README §9).
 * **Roadmap** — `--repl`, `find`/`--at-marker`,
   `statediff`, `buffer`, `watch`, `debug --group`, `schema`, `sweep` (ROADMAP §2), pixel history, shader patching,
   shader debugging, overlays (ROADMAP §3), contact sheets, per-pass counters, `mesh --stage/--obj`, texture
@@ -980,6 +1022,8 @@ offline tool, and it survives the process that produced it; stdout does not, and
 ```powershell
 .\build\replay_dump.exe dump 'capture.rdc' bundle --with-images   # README §9: one replay, everything
 python rdc_analysis.py report 'capture.rdc' bundle                # README §4.11: the frame report
+python rdc_analysis.py validate bundle schema                     # README §4.12: the documents vs their schemas
+.\build\replay_dump.exe schema --check schema                     # README §4.12: the schemas vs the driver
 ```
 
 Read it in this order: frame at a glance → pipeline map → pass by pass → the caveats → the appendix of

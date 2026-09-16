@@ -153,6 +153,10 @@ static std::string CounterText(GPUCounter counter)
 // --------------------------------------------------------------------------- output helpers
 
 static bool g_json = false;
+//: Stamped into every `--json` document and every file the bundle writes, so a consumer can refuse a
+//: document it does not understand instead of guessing at a shape. The schemas themselves are the table
+//: further down (`schema [<name>]`), and this number is what they all declare.
+static const int kSchemaVersion = 1;
 static int g_indent = 0;
 
 //: The output format is fixed for the run (it comes from `--json` before anything else happens), so
@@ -881,6 +885,7 @@ static void PrintCaptureHeader(ICaptureFile *file, const char *path)
   if(g_json)
     printf("{\n");
   g_indent = g_json ? 1 : 0;
+  Field("schemaVersion", (long long)kSchemaVersion);   // every document says what shape it is
   Field("capture", std::string(path));
   Field("renderdoc", std::string(g_GetVersionString ? g_GetVersionString() : "?"));
   Field("driver", file->DriverName());
@@ -2405,6 +2410,7 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
     const std::string captureAbs = AbsolutePath(path);
     printf("{\n");                                   // this writer builds its own document
     g_indent = 1;
+    Field("schemaVersion", (long long)kSchemaVersion);
     Field("bundleVersion", 1);
     Field("driver", std::string("replay_dump"));
     Field("renderdoc", std::string(g_GetVersionString ? g_GetVersionString() : "?"));
@@ -2499,6 +2505,7 @@ static int CmdBundleVerify(const char *dir)
   if(g_json)
     printf("{\n");
   g_indent = g_json ? 1 : 0;
+  Field("schemaVersion", (long long)kSchemaVersion);
   Field("manifest", manifestPath);
 
   int checked = 0, bad = 0;
@@ -2558,11 +2565,888 @@ static int CmdBundleVerify(const char *dir)
   g_indent = g_json ? 1 : 0;
   Field("checked", (long long)checked);
   Field("problems", (long long)bad);
-  Field("files", (long long)(checked + bad), true);
+  // `fileCount`, not `files`: the array above already holds that name, and a repeated key in one object is
+  // resolved by every parser to the last one -- so the count silently replaced the rows. Writing the
+  // document's schema is what surfaced it (the schema cannot describe two members with one name).
+  Field("fileCount", (long long)(checked + bad), true);
   g_indent = 0;
   if(g_json)
     printf("}\n");
   return bad == 0 ? 0 : 1;
+}
+
+// --------------------------------------------------------------------------- schema
+//
+// Every `--json` document needs a contract that is not "read the writer and infer it": the frame report and
+// the offline tool read these documents, and a shape change has already gone unnoticed once (a stage's
+// members were written flat into one object, so the repeated keys silently dropped the vertex shader).
+// Documents therefore carry `schemaVersion`, and this table is the schema for each kind.
+//
+// The schemas are hand-written because the writers are hand-written: there is no descriptor to generate
+// both from, and inventing one for fifteen documents is more machinery than it saves. They stay honest by
+// being *used*: `schema --out <dir>` writes them, the copy in `schema/` is checked in, and
+// `python rdc_analysis.py validate <bundle> schema` validates real documents against that copy -- so a
+// schema that has drifted from its writer fails a run instead of misleading a reader. Writing them found a
+// defect immediately: `bundle-verify` wrote `"files"` twice in one object (the per-file rows, then their
+// count), which every parser resolves to the count.
+//
+// The keyword subset is exactly what the offline validator implements -- type, required, properties, items,
+// enum, const, description, additionalProperties. `additionalProperties` is `false` throughout, so an
+// unlisted member is a validation failure rather than something a consumer discovers later.
+struct SchemaDoc
+{
+  const char *name;                                       // `schema <name>`; what validate matches a file by
+  const char *writtenBy;                                  // which command writes it, for the index
+  const char *text;
+};
+
+static const SchemaDoc kSchemas[] = {
+    {"capture", "info, dump (capture.json)", R"sc({
+  "title": "capture",
+  "description": "A capture's own facts. `info` writes the short form; the bundle's capture.json adds the byte count, the absolute path and the pixel-history flag.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "pipelineType",
+               "localRenderer", "remoteReplay", "vendor", "shaderDebugging", "chunks", "resources",
+               "textures", "buffers", "debugMessages"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string", "description": "the path as given on the command line"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string", "description": "the capture's API, e.g. D3D12"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "pipelineType": {"type": "integer"},
+    "localRenderer": {"type": "integer"},
+    "remoteReplay": {"type": "integer"},
+    "vendor": {"type": "integer"},
+    "shaderDebugging": {"type": "integer"},
+    "pixelHistory": {"type": "integer"},
+    "chunks": {"type": "integer"},
+    "resources": {"type": "integer"},
+    "textures": {"type": "integer"},
+    "buffers": {"type": "integer"},
+    "debugMessages": {"type": "integer"},
+    "captureBytes": {"type": "integer"},
+    "absPath": {"type": "string"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"events", "dump (events.json)", R"sc({
+  "title": "events",
+  "description": "Every id with bound state, and what was bound. One entry per state change plus the ids the scan was told to include. A state hash repeats when nothing changed, so a consumer can group without re-reading the state files.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events", "total",
+               "scanned", "scanFrom", "scanTo", "scanStopped", "stateFiles"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "events": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "pso", "psoKind", "shaders", "targets", "depth", "rootParameters", "state"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "pso": {"type": "string", "description": "the pipeline state object's resource id"},
+        "psoKind": {"enum": ["graphics", "compute"]},
+        "shaders": {"type": "string", "description": "`vs=2348 ps=2349`, stages in a fixed order"},
+        "targets": {"type": "array", "items": {"type": "string"},
+                    "description": "`<id> <w>x<h>x<d> <FORMAT>`, the output-merge state at this id"},
+        "depth": {"type": "string", "description": "the depth target's resource id, `0` for none"},
+        "rootParameters": {"type": "integer"},
+        "state": {"type": "string", "description": "hash of what the state file was written from"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"},
+    "scanned": {"type": "integer"},
+    "scanFrom": {"type": "integer"},
+    "scanTo": {"type": "integer"},
+    "scanStopped": {"type": "string", "description": "why the sweep stopped, empty when it reached the end"},
+    "stateFiles": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"resources", "dump (resources.json)", R"sc({
+  "title": "resources",
+  "description": "Every resource the engine knows, with the usage list it was gathered from. A texture carries its format and dimensions, a buffer its size in bytes; `usage` is what makes \"who touched this\" answerable.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "resources", "total"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "resources": {"type": "array", "items": {
+      "type": "object",
+      "required": ["resource", "name", "kind"],
+      "properties": {
+        "resource": {"type": "string"},
+        "name": {"type": "string", "description": "the application's name, empty when it has none"},
+        "kind": {"enum": ["texture", "buffer", "other"]},
+        "format": {"type": "string"},
+        "dimension": {"type": "integer"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "depth": {"type": "integer"},
+        "mips": {"type": "integer"},
+        "arraySize": {"type": "integer"},
+        "samples": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "usage": {"type": ["array", "string"], "items": {
+          "type": "object",
+          "required": ["eid", "usage"],
+          "properties": {"eid": {"type": "integer"}, "usage": {"type": "integer"}},
+          "additionalProperties": false
+        }, "description": "every event that touched this resource; a short string instead when the bundle was written with --no-usage, and the manifest's resourceUsage says why"},
+        "usageCount": {"type": "integer"},
+        "firstEvent": {"type": "integer", "description": "absent with --no-usage, like `usage`"},
+        "lastEvent": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"manifest", "dump (manifest.json)", R"sc({
+  "title": "manifest",
+  "description": "What the bundle is and what is in it: the capture it was written from (with its hash), the flags it was written with, every file with its size and SHA-256, and the list of things the bundle deliberately does not contain. This is what a reader checks before trusting the rest.",
+  "type": "object",
+  "required": ["schemaVersion", "bundleVersion", "driver", "renderdoc", "capture", "captureAbsolute",
+               "captureBytes", "captureSha256", "since", "until", "maxEvents", "withImages", "withCounters",
+               "withTextures", "resourceUsage", "stateHashInputs", "statesRule", "notInThisBundle", "skipped",
+               "files", "fileCount", "fileBytes"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "bundleVersion": {"type": "integer", "description": "the layout of the bundle itself"},
+    "driver": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "capture": {"type": "string"},
+    "captureAbsolute": {"type": "string"},
+    "captureBytes": {"type": "integer"},
+    "captureSha256": {"type": "string"},
+    "since": {"type": "integer"},
+    "until": {"type": "integer"},
+    "maxEvents": {"type": "integer"},
+    "withImages": {"type": "integer"},
+    "withCounters": {"type": "integer"},
+    "withTextures": {"type": "integer"},
+    "resourceUsage": {"type": "string", "description": "`collected`, or why the usage lists are absent"},
+    "stateHashInputs": {"type": "string", "description": "what the events' state hash is computed from"},
+    "statesRule": {"type": "string", "description": "when a state file is written"},
+    "notInThisBundle": {"type": "array", "items": {
+      "type": "object",
+      "required": ["what", "why"],
+      "properties": {"what": {"type": "string"}, "why": {"type": "string"}},
+      "additionalProperties": false
+    }},
+    "skipped": {"type": "array", "items": {"type": "string"}},
+    "files": {"type": "array", "items": {
+      "type": "object",
+      "required": ["path", "bytes", "sha256"],
+      "properties": {"path": {"type": "string"}, "bytes": {"type": "integer"}, "sha256": {"type": "string"}},
+      "additionalProperties": false
+    }},
+    "fileCount": {"type": "integer"},
+    "fileBytes": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"state", "state, dump (states/<eid>.state.json)", R"sc({
+  "title": "state",
+  "description": "One event's bound state: the capture header, then that event. The arrays are the driver's own rows, which are text by design -- they carry the engine's names verbatim.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "api",
+               "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "api": {"type": "integer"},
+    "shaders": {"type": "array", "items": {"type": "string"},
+                "description": "`vs  res2348`, one row per bound stage -- including the stages this call kind does not use"},
+    "renderTargets": {"type": "array", "items": {"type": "string"}},
+    "depthTarget": {"type": "string", "description": "a resource id, `0` for none"},
+    "rootSignature": {"type": "string"},
+    "rootParameters": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"shaders", "shaders, dump (states/<eid>.shaders.json)", R"sc({
+  "title": "shaders",
+  "description": "The reflection of every stage bound at one event, one object per stage -- an array, because two stages share every member name and a flat object would let a reader keep only the last.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stages"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "stages": {"type": "array", "items": {
+      "type": "object",
+      "required": ["stage", "resource", "entry", "encoding", "bytes", "constantBlocks",
+                   "readOnlyResources", "readWriteResources", "inputSignature", "outputSignature"],
+      "properties": {
+        "stage": {"type": "string", "description": "vs hs ds gs ps cs as ms"},
+        "resource": {"type": "string"},
+        "entry": {"type": "string"},
+        "encoding": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "constantBlocks": {"type": "array", "items": {"type": "string"}},
+        "readOnlyResources": {"type": "array", "items": {"type": "string"}},
+        "readWriteResources": {"type": "array", "items": {"type": "string"}},
+        "inputSignature": {"type": "array", "items": {"type": "string"}},
+        "outputSignature": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    }}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"messages", "debug, dump (messages.json)", R"sc({
+  "title": "messages",
+  "description": "The engine's own messages, one row each (`eid <n>  <severity>  <text>`), plus the header. Rows are strings: they are the same text the terminal prints, so nothing is lost between the two forms.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "messages", "total"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "messages": {"type": "array", "items": {"type": "string"}},
+    "total": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"counters", "counters, dump (counters.json)", R"sc({
+  "title": "counters",
+  "description": "The driver's counter results, one row each (`eid <n>  <name> = <value>`), plus the header. Only written when the bundle was asked for them and the driver supports them.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "counters", "total"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "counters": {"type": "array", "items": {"type": "string"}},
+    "total": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"textures", "textures", R"sc({
+  "title": "textures",
+  "description": "Every texture the engine knows, with the format and dimensions from the resource description.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "textures", "total",
+               "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "textures": {"type": "array", "items": {
+      "type": "object",
+      "required": ["resource", "dimension", "width", "height", "depth", "mips", "arraySize", "samples",
+                   "format", "bytes"],
+      "properties": {
+        "resource": {"type": "string"},
+        "dimension": {"type": "integer"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "depth": {"type": "integer"},
+        "mips": {"type": "integer"},
+        "arraySize": {"type": "integer"},
+        "samples": {"type": "integer"},
+        "format": {"type": "string"},
+        "bytes": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"},
+    "shown": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"draws", "draws", R"sc({
+  "title": "draws",
+  "description": "The structured file's draw-like chunks in order. `eid` is the *engine's* id where one is known and the chunk index where it is not: the two spaces are not the same (README §9), and `probe` lists the ids that have state.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
+               "totalChunks", "totalEvents", "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "events": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "depth", "chunkID", "name"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "depth": {"type": "integer"},
+        "chunkID": {"type": "integer"},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": false
+    }},
+    "totalChunks": {"type": "integer"},
+    "totalEvents": {"type": "integer"},
+    "shown": {"type": "integer"},
+    "truncated": {"type": "string", "description": "present only when the action tree was deeper than the recursion limit"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"probe", "probe", R"sc({
+  "title": "probe",
+  "description": "Which ids in a range have pipeline state. Rows are strings (`eid <n>  shaders=.. rootSig=.. params=..`), the same text the terminal prints.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
+               "scanned", "withState"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "events": {"type": "array", "items": {"type": "string"}},
+    "scanned": {"type": "integer"},
+    "withState": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"cb", "cb", R"sc({
+  "title": "cb",
+  "description": "One constant buffer at one event: what it is bound to and one row per reflection variable, with the value read from the data.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stage",
+               "slot", "shader", "buffer", "variables"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "stage": {"type": "string"},
+    "slot": {"type": "integer"},
+    "shader": {"type": "string"},
+    "buffer": {"type": "string"},
+    "variables": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"mesh", "mesh", R"sc({
+  "title": "mesh",
+  "description": "One draw's mesh: the state that feeds it, and -- when the capture has post-VS data -- the vertices the vertex shader emitted.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "instance",
+               "topology", "vertexResource", "vertexStride", "vertexBytes", "indexResource", "indexBytes"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "instance": {"type": "integer"},
+    "topology": {"type": "integer"},
+    "vertexResource": {"type": "string"},
+    "vertexStride": {"type": "integer"},
+    "vertexBytes": {"type": "integer"},
+    "indexResource": {"type": "string"},
+    "indexBytes": {"type": "integer"},
+    "baseVertex": {"type": "integer"},
+    "vertices": {"type": "array", "items": {"type": "string"}},
+    "vertexCount": {"type": "integer"},
+    "componentsPerVertex": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"image", "image", R"sc({
+  "title": "image",
+  "description": "One render target saved to a file, and whether the write succeeded.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "resource",
+               "width", "height", "file", "written"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "resource": {"type": "string"},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "file": {"type": "string"},
+    "written": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"bundle-verify", "bundle-verify", R"sc({
+  "title": "bundle-verify",
+  "description": "The result of re-hashing a bundle against its manifest: one row per file that is missing, short, long or whose hash differs, and the counts. `problems` is the exit code.",
+  "type": "object",
+  "required": ["schemaVersion", "manifest", "files", "checked", "problems", "fileCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "manifest": {"type": "string"},
+    "files": {"type": "array", "items": {"type": "string"}},
+    "checked": {"type": "integer"},
+    "problems": {"type": "integer"},
+    "fileCount": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+};
+
+static const int kSchemaCount = (int)(sizeof(kSchemas) / sizeof(kSchemas[0]));
+
+static const SchemaDoc *FindSchema(const char *name)
+{
+  for(int i = 0; i < kSchemaCount; i++)
+  {
+    if(!strcmp(kSchemas[i].name, name))
+      return &kSchemas[i];
+  }
+  return NULL;
+}
+
+//: Read one schema file, folding CRLF to LF: a checkout can rewrite a file's line endings, and the contract
+//: is the JSON, not the ending. A missing or unreadable file is a difference, not an error.
+static bool ReadSchemaText(const std::string &path, std::string &text)
+{
+  if(!ReadWholeFile(path.c_str(), text))
+    return false;
+
+  std::string folded;
+  folded.reserve(text.size());
+  for(size_t i = 0; i < text.size(); i++)
+  {
+    if(text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n')
+      continue;
+    folded += text[i];
+  }
+  text = folded;
+  return true;
+}
+
+//: How many ways `dir` differs from this driver's table: a schema file that is missing, one whose text
+//: differs, and a `<name>.schema.json` for a document kind the table no longer has -- which is worse than
+//: useless, because a reader would take it for current. One code path for `schema --check` and for the
+//: selftest, so the mode that is checked is the mode that runs.
+static int CheckSchemasAgainstDir(const std::string &dir, bool report)
+{
+  int differences = 0;
+  for(int i = 0; i < kSchemaCount; i++)
+  {
+    const std::string path = dir + "\\" + kSchemas[i].name + ".schema.json";
+    std::string text;
+    if(!ReadSchemaText(path, text))
+    {
+      if(report)
+        printf("missing %s (%s)\n", kSchemas[i].name, path.c_str());
+      differences++;
+      continue;
+    }
+
+    std::string want = kSchemas[i].text;
+    want += "\n";                                    // `--out` ends the file with a newline, and so must this
+    if(text != want)
+    {
+      if(report)
+        printf("stale   %s (differs from this driver's schema)\n", kSchemas[i].name);
+      differences++;
+    }
+    else if(report)
+    {
+      printf("ok      %s\n", kSchemas[i].name);
+    }
+  }
+
+  WIN32_FIND_DATAA found;
+  const std::string pattern = dir + "\\*.schema.json";
+  HANDLE search = FindFirstFileA(pattern.c_str(), &found);
+  if(search != INVALID_HANDLE_VALUE)
+  {
+    do
+    {
+      const std::string name = found.cFileName;
+      const size_t cut = name.rfind(".schema.json");
+      if(FindSchema(name.substr(0, cut).c_str()) == NULL)
+      {
+        if(report)
+          printf("extra   %s (no document kind of that name any more)\n", name.c_str());
+        differences++;
+      }
+    } while(FindNextFileA(search, &found));
+    FindClose(search);
+  }
+  return differences;
+}
+
+//: Write the table to `dir`; `name` limits it to one schema. Returns 0, or the exit code of the failure.
+static int WriteSchemasTo(const std::string &dir, const char *name, bool report)
+{
+  int written = 0;
+  for(int i = 0; i < kSchemaCount; i++)
+  {
+    if(name != NULL && *name && strcmp(name, kSchemas[i].name) != 0)
+      continue;
+
+    const std::string path = dir + "\\" + kSchemas[i].name + ".schema.json";
+    FILE *f = fopen(path.c_str(), "wb");
+    if(f == NULL)
+      return Fail(1, "cannot write %s", path.c_str());
+    fputs(kSchemas[i].text, f);
+    fputc('\n', f);
+    fclose(f);
+    if(report)
+      printf("written: %s\n", path.c_str());
+    written++;
+  }
+  if(written == 0)
+    return Fail(2, "no schema named '%s' (`schema` lists them)", name == NULL ? "" : name);
+  if(report)
+    printf("%d schema file(s), schemaVersion %d\n", written, kSchemaVersion);
+  return 0;
+}
+
+//: `schema [<name>] [--out <dir>] [--check <dir>]`. Without a name it prints the index -- every kind, the
+//: command that writes it and the version they all declare. `--out` writes `<dir>/<name>.schema.json` for
+//: each, which is how the checked-in `schema/` folder is made; `--check` compares that folder against this
+//: driver's table and exits non-zero when they differ. The check is what makes "regenerate after changing a
+//: document" enforceable rather than a convention: a generated file that is committed *can* go stale, and
+//: the only cure is a command that says so.
+static int CmdSchema(const char *name, const char *outDir, const char *checkDir)
+{
+  if(outDir != NULL && *outDir && checkDir != NULL && *checkDir)
+    return Fail(2, "`--out` writes the schemas and `--check` verifies them: pass one of the two");
+
+  if(checkDir != NULL && *checkDir)
+  {
+    const int differences = CheckSchemasAgainstDir(checkDir, true);
+    if(differences == 0)
+    {
+      printf("%d schema file(s) match this driver, schemaVersion %d\n", kSchemaCount, kSchemaVersion);
+      return 0;
+    }
+    printf("%d of %d file(s) differ: regenerate with `replay_dump schema --out %s`\n", differences,
+           kSchemaCount, checkDir);
+    return 1;
+  }
+
+  if(outDir != NULL && *outDir)
+    return WriteSchemasTo(outDir, name, true);
+
+  if(name != NULL && *name)
+  {
+    const SchemaDoc *doc = FindSchema(name);
+    if(doc == NULL)
+      return Fail(2, "no schema named '%s' (`schema` lists them)", name);
+    fputs(doc->text, stdout);
+    fputc('\n', stdout);
+    return 0;
+  }
+
+  printf("schemaVersion %d, %d document kind(s):\n", kSchemaVersion, kSchemaCount);
+  for(int i = 0; i < kSchemaCount; i++)
+    printf("  %-14s %s\n", kSchemas[i].name, kSchemas[i].writtenBy);
+  printf("`schema <name>` prints one; `schema --out <dir>` writes them all where a consumer can read "
+         "them, which is how the checked-in schema/ folder is made; `schema --check <dir>` fails when that "
+         "folder and this driver disagree.\n");
+  return 0;
+}
+
+// --------------------------------------------------------------------------- selftest
+//
+// What can be checked without a capture is checked without one -- the writer's escaping, its separators and
+// whether a document it wrote is balanced -- and what needs the engine is checked against the DLL alone
+// (load, version, entry points). A machine without RenderDoc reports those as *skipped*, the same
+// convention the offline suite uses, because the hermetic half is still worth running there.
+//
+// The full check of a document is its schema, and that belongs to the tool with a JSON parser:
+// `python rdc_analysis.py validate <bundle> schema` reads these very documents and the schemas below.
+// This runs where neither a capture nor a parser is available, so it checks what text can be checked.
+static void Usage();
+
+struct SelfTest
+{
+  int passed = 0, failed = 0, skipped = 0;
+
+  void Ok(const char *name) { printf("ok      %s\n", name); passed++; }
+  void Skipped(const char *name, const char *why) { printf("skipped %s -- %s\n", name, why); skipped++; }
+  void Failed(const char *name, const char *why) { printf("FAILED  %s -- %s\n", name, why); failed++; }
+  void Check(bool condition, const char *name, const char *why)
+  {
+    if(condition)
+      Ok(name);
+    else
+      Failed(name, why);
+  }
+  void Equal(const std::string &got, const std::string &want, const char *name)
+  {
+    if(got == want)
+    {
+      Ok(name);
+      return;
+    }
+    printf("FAILED  %s\n          got      %s\n          expected %s\n", name, got.c_str(), want.c_str());
+    failed++;
+  }
+};
+
+//: Whether `text` is one balanced JSON object. Not a parser -- it cannot tell a wrong member from a right
+//: one -- but it catches the failure that matters for a document nobody looks at before it ships: a
+//: truncated write, or a separator bug that leaves the object open. The writer's output is checked with it
+//: here, and the offline validator checks the documents themselves against the schema.
+static bool JsonBalanced(const std::string &text)
+{
+  size_t i = 0;
+  while(i < text.size() && (text[i] == ' ' || text[i] == '\n' || text[i] == '\r' || text[i] == '\t'))
+    i++;
+  if(i >= text.size() || text[i] != '{')
+    return false;
+
+  int depth = 0;
+  bool inString = false, escaped = false;
+  for(; i < text.size(); i++)
+  {
+    const char c = text[i];
+    if(inString)
+    {
+      if(escaped)
+        escaped = false;
+      else if(c == '\\')
+        escaped = true;
+      else if(c == '"')
+        inString = false;
+      continue;
+    }
+    if(c == '"')
+      inString = true;
+    else if(c == '{' || c == '[')
+      depth++;
+    else if(c == '}' || c == ']')
+      if(--depth < 0)
+        return false;
+  }
+  return depth == 0 && !inString;
+}
+
+static int CmdSelftest()
+{
+  SelfTest t;
+
+  // ------------------------------------------------------------------ the writer's helpers
+  t.Equal(JsonEscape("a\"b"), "a\\\"b", "json-escape-quote");
+  t.Equal(JsonEscape("a\\b"), "a\\\\b", "json-escape-backslash");
+  t.Equal(JsonEscape("a\nb\tc\rd"), "a\\nb\\tc\\rd", "json-escape-controls");
+  t.Equal(JsonEscape(std::string("\x01")), "\\u0001", "json-escape-low-byte");
+  // A Windows path is the common case and the one that broke documents before escaping existed.
+  t.Equal(JsonEscape("renderdoc-src\\Android.rdc"), "renderdoc-src\\\\Android.rdc", "json-escape-path");
+
+  // The separator machinery is a state machine, and its two failure modes are opposite: a missing comma is
+  // unreadable and a trailing one is too. Writing a small document and looking at the bytes pins both --
+  // reading the writer cannot, which is how a hardcoded trailing comma got into a document once.
+  {
+    const std::string path = DefaultLogStem() + ".selftest.json";
+    {
+      const JsonDocument json;                       // JSON, whatever the terminal asked for
+      const CaptureStdout out(path.c_str());
+      if(!out.Ok())
+        return Fail(1, "cannot write %s for the selftest", path.c_str());
+      g_indent = 1;
+      printf("{\n");
+      Field("a", 1);
+      Field("b", std::string("x"));
+      ArrayOpen("rows");
+      Row(std::string("one"));
+      ObjectOpen();
+      Field("k", 2, true);
+      ObjectClose();
+      Row(std::string("two"));
+      ArrayClose(false);
+      Field("n", 3, true);
+      g_indent = 0;
+      printf("}\n");
+    }
+
+    std::string text;
+    const bool read = ReadWholeFile(path.c_str(), text);
+    remove(path.c_str());
+    t.Check(read, "writer-document-written", "the selftest could not read back what it wrote");
+    t.Check(JsonBalanced(text), "writer-document-balanced", "the writer's document is not balanced");
+
+    // The separators are compared with the whitespace removed, because the writer puts a separator *in
+    // front* of the item that needs one (and indents to its own taste): what must be exactly right is the
+    // sequence of commas, and pinning the bytes would pin the layout instead.
+    std::string flat;
+    for(size_t i = 0; i < text.size(); i++)
+    {
+      const char c = text[i];
+      if(c != ' ' && c != '\n' && c != '\r' && c != '\t')
+        flat += c;
+    }
+    t.Check(flat.find("[\"one\",{\"k\":2},\"two\"]") != std::string::npos, "writer-separators",
+            "array items are not comma-separated in the right places (the separator goes in front of an "
+            "item, and never in front of the first)");
+    t.Check(flat.find(",}") == std::string::npos && flat.find(",]") == std::string::npos,
+            "writer-no-trailing-comma", "a trailing comma makes the document unreadable");
+    t.Check(flat.find("\"n\":3") != std::string::npos, "writer-last-field", "the `last` member is missing");
+    t.Check(flat.find("{\"k\":2}") != std::string::npos, "writer-object-row",
+            "an object's last member has a comma, or the object was not closed");
+    t.Check(!JsonBalanced("{\"a\": 1"), "writer-balance-detects-truncation",
+            "a truncated document was reported as balanced");
+    t.Check(!JsonBalanced("{\"a\": \"unterminated}"), "writer-balance-detects-unclosed-string",
+            "an unclosed string was reported as balanced");
+  }
+
+  // ------------------------------------------------------------------ the schema table
+  {
+    bool unique = true, versioned = true, objects = true;
+    for(int i = 0; i < kSchemaCount; i++)
+    {
+      for(int j = i + 1; j < kSchemaCount; j++)
+        if(!strcmp(kSchemas[i].name, kSchemas[j].name))
+          unique = false;
+      const std::string text = kSchemas[i].text;
+      if(text.find("\"schemaVersion\"") == std::string::npos || text.find("\"const\": 1") == std::string::npos)
+        versioned = false;
+      if(text.empty() || text[0] != '{' || text[text.size() - 1] != '}')
+        objects = false;
+    }
+    t.Check(unique, "schema-names-unique", "two schemas share a name");
+    t.Check(versioned, "schema-declares-version", "a schema does not describe schemaVersion as a const");
+    t.Check(objects, "schema-is-one-object", "a schema is not a single JSON object");
+    t.Check(FindSchema("state") != NULL && FindSchema("manifest") != NULL && FindSchema("events") != NULL,
+            "schema-covers-the-bundle", "a document the bundle depends on has no schema");
+    t.Check(kSchemaVersion == 1, "schema-version-known", "the offline validator does not know this version");
+  }
+
+  // ------------------------------------------------------------------ `schema --check`
+  {
+    const std::string dir = DefaultLogStem() + ".schemacheck";
+    const std::string stale = dir + "\\state.schema.json";
+    const std::string extra = dir + "\\gone.schema.json";
+    CreateDirectoryA(dir.c_str(), NULL);
+
+    t.Check(WriteSchemasTo(dir, NULL, false) == 0, "schema-check-writes",
+            "the selftest could not write the schemas to a folder of its own");
+    t.Check(CheckSchemasAgainstDir(dir, false) == 0, "schema-check-clean",
+            "a folder written from this driver's own table does not check clean");
+
+    FILE *f = fopen(stale.c_str(), "wb");
+    if(f != NULL)
+    {
+      fputs("{}", f);
+      fclose(f);
+    }
+    t.Check(CheckSchemasAgainstDir(dir, false) > 0, "schema-check-detects-stale",
+            "a file that disagrees with the table was reported as matching");
+
+    remove(stale.c_str());
+    t.Check(CheckSchemasAgainstDir(dir, false) > 0, "schema-check-detects-missing",
+            "a missing file was reported as matching");
+
+    f = fopen(extra.c_str(), "wb");
+    if(f != NULL)
+    {
+      fputs("{}", f);
+      fclose(f);
+    }
+    t.Check(CheckSchemasAgainstDir(dir, false) > 0, "schema-check-detects-extra",
+            "a file with no document kind behind it was reported as matching");
+
+    // Leave the folder as it was found: a leftover file would fail the *next* run's clean check, on another
+    // day, in a directory nobody connects to this one.
+    for(int i = 0; i < kSchemaCount; i++)
+      remove((dir + "\\" + kSchemas[i].name + ".schema.json").c_str());
+    remove(extra.c_str());
+    RemoveDirectoryA(dir.c_str());
+    t.Check(GetFileAttributesA(dir.c_str()) == INVALID_FILE_ATTRIBUTES, "schema-check-cleanup",
+            "the selftest left its scratch folder behind");
+  }
+
+  // ------------------------------------------------------------------ the help text and the DLL
+  {
+    std::string usage;
+    {
+      const std::string path = DefaultLogStem() + ".usage.txt";
+      {
+        const CaptureStdout out(path.c_str());
+        if(!out.Ok())
+          return Fail(1, "cannot write %s for the selftest", path.c_str());
+        Usage();
+      }
+      ReadWholeFile(path.c_str(), usage);
+      remove(path.c_str());
+    }
+    t.Check(usage.find("schema") != std::string::npos, "usage-lists-schema", "the usage text omits schema");
+    t.Check(usage.find("selftest") != std::string::npos, "usage-lists-selftest",
+            "the usage text omits selftest");
+    t.Check(usage.find("dump") != std::string::npos, "usage-lists-dump", "the usage text omits dump");
+
+    HMODULE dll = LoadReplayDLL();
+    if(dll == NULL)
+    {
+      t.Skipped("dll-load", "renderdoc.dll was not found ($RDC_RENDERDOC_DLL overrides the path)");
+      t.Skipped("dll-version", "no dll");
+      t.Skipped("dll-entry-points", "no dll");
+    }
+    else
+    {
+      t.Ok("dll-load");
+      const char *version = g_GetVersionString ? g_GetVersionString() : NULL;
+      t.Check(version != NULL && *version != '\0', "dll-version",
+              "RENDERDOC_GetVersionString returned nothing");
+      t.Check(OpenCaptureFile(dll) != NULL, "dll-entry-points",
+              "RENDERDOC_OpenCaptureFile is not exported");
+    }
+  }
+
+  printf("\n%d passed, %d failed, %d skipped\n", t.passed, t.failed, t.skipped);
+  if(t.failed == 0)
+    printf("the documents themselves are checked with `python rdc_analysis.py validate <bundle> schema`\n");
+  return t.failed == 0 ? 0 : 1;
 }
 
 // --------------------------------------------------------------------------- CLI
@@ -2589,8 +3473,10 @@ static void Usage()
       "  dump    <rdc> [outDir=bundle]     the whole frame to disk, for the offline tool (ROADMAP §2)\n"
       "  bundle-verify <dir>               check a bundle's hashes and sizes (no device, no DLL)\n"
       "  batch   <rdc> <file>              run every command in <file> against one open capture\n"
+      "  schema  [<name>] [--out|--check <dir>]   the JSON Schema for each --json document (no capture, no DLL)\n"
+      "  selftest                          this program checking itself: writer, schemas, help, DLL\n"
       "\n"
-      "Options (any position): --json, --log <file>, --disasm, --save <dir>.\n"
+      "Options (any position): --json, --log <file>, --disasm, --save <dir>, --out <dir>, --check <dir>.\n"
       "\n"
       "A batch file holds one command per line, in the same syntax minus the executable and the\n"
       "capture (`state 270 --json`), with `#` for comments. Each line's output is preceded by a\n"
@@ -2609,6 +3495,15 @@ static void Usage()
       "have nothing bound), `--max-events` caps how many events are written, `--events 270,452` forces extra\n"
       "state files, `--no-usage` skips the usage lists (the slow part) and `--overwrite` reuses a folder.\n"
       "`bundle-verify <dir>` re-hashes a bundle with no device involved, so it can be checked anywhere.\n"
+      "\n"
+      "Every --json document carries `schemaVersion` (1 today), and `schema` prints the JSON Schema for\n"
+      "each kind: `schema --out schema` writes the checked-in copies, and the offline tool validates real\n"
+      "documents against those (`python rdc_analysis.py validate <bundle> schema`). `schema --check <dir>`\n"
+      "compares that folder with this driver and exits non-zero when they disagree, which is what keeps a\n"
+      "committed copy from going stale after a document changes. `selftest` needs no\n"
+      "capture: it checks the JSON writer (escaping, separators, balance), the schema table, this help\n"
+      "text and the renderdoc.dll it would load, and it skips the DLL checks rather than failing when\n"
+      "RenderDoc is not installed.\n"
       "\n"
       "Progress goes to stderr and to one log file per run, <exe name>_<date>_<time>.log.txt beside\n"
       "the executable (--log <file> names one exact file and truncates it); the timings in it are\n"
@@ -2835,6 +3730,8 @@ int main(int argc, char **argv)
   const char *saveDir = NULL;
   std::string logPath = DefaultLogStem();
   bool perRunLog = true;                             // until `--log` names one exact file
+  std::string schemaOut;                             // `--out <dir>`: where `schema` writes them
+  std::string schemaCheck;                           // `--check <dir>`: the copy to verify against
   for(int i = 1; i < argc; i++)
   {
     if(!strcmp(argv[i], kJsonFlag))
@@ -2848,6 +3745,10 @@ int main(int argc, char **argv)
       logPath = argv[++i];
       perRunLog = false;
     }
+    else if(!strcmp(argv[i], "--out") && i + 1 < argc)
+      schemaOut = argv[++i];
+    else if(!strcmp(argv[i], "--check") && i + 1 < argc)
+      schemaCheck = argv[++i];
     else
       args.push_back(argv[i]);
   }
@@ -2857,6 +3758,15 @@ int main(int argc, char **argv)
     Usage();
     return args.empty() ? 2 : 0;
   }
+
+  // `schema` and `selftest` are about this program rather than about a frame: no capture path, no device,
+  // and no log file -- they answer before anything is loaded, so a machine with no RenderDoc and no GPU
+  // still gets the half of the selftest that does not need them.
+  if(!strcmp(args[0].c_str(), "schema"))
+    return CmdSchema(args.size() > 1 ? args[1].c_str() : NULL, schemaOut.empty() ? NULL : schemaOut.c_str(),
+                     schemaCheck.empty() ? NULL : schemaCheck.c_str());
+  if(!strcmp(args[0].c_str(), "selftest"))
+    return CmdSelftest();
 
   const char *cmd = args[0].c_str();
   if(args.size() < 2)

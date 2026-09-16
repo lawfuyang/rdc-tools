@@ -1,0 +1,30 @@
+{
+  "title": "capture",
+  "description": "A capture's own facts. `info` writes the short form; the bundle's capture.json adds the byte count, the absolute path and the pixel-history flag.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "pipelineType",
+               "localRenderer", "remoteReplay", "vendor", "shaderDebugging", "chunks", "resources",
+               "textures", "buffers", "debugMessages"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string", "description": "the path as given on the command line"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string", "description": "the capture's API, e.g. D3D12"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "pipelineType": {"type": "integer"},
+    "localRenderer": {"type": "integer"},
+    "remoteReplay": {"type": "integer"},
+    "vendor": {"type": "integer"},
+    "shaderDebugging": {"type": "integer"},
+    "pixelHistory": {"type": "integer"},
+    "chunks": {"type": "integer"},
+    "resources": {"type": "integer"},
+    "textures": {"type": "integer"},
+    "buffers": {"type": "integer"},
+    "debugMessages": {"type": "integer"},
+    "captureBytes": {"type": "integer"},
+    "absPath": {"type": "string"}
+  },
+  "additionalProperties": false
+}

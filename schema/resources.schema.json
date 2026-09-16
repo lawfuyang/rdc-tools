@@ -1,0 +1,44 @@
+{
+  "title": "resources",
+  "description": "Every resource the engine knows, with the usage list it was gathered from. A texture carries its format and dimensions, a buffer its size in bytes; `usage` is what makes \"who touched this\" answerable.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "resources", "total"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "resources": {"type": "array", "items": {
+      "type": "object",
+      "required": ["resource", "name", "kind"],
+      "properties": {
+        "resource": {"type": "string"},
+        "name": {"type": "string", "description": "the application's name, empty when it has none"},
+        "kind": {"enum": ["texture", "buffer", "other"]},
+        "format": {"type": "string"},
+        "dimension": {"type": "integer"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "depth": {"type": "integer"},
+        "mips": {"type": "integer"},
+        "arraySize": {"type": "integer"},
+        "samples": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "usage": {"type": ["array", "string"], "items": {
+          "type": "object",
+          "required": ["eid", "usage"],
+          "properties": {"eid": {"type": "integer"}, "usage": {"type": "integer"}},
+          "additionalProperties": false
+        }, "description": "every event that touched this resource; a short string instead when the bundle was written with --no-usage, and the manifest's resourceUsage says why"},
+        "usageCount": {"type": "integer"},
+        "firstEvent": {"type": "integer", "description": "absent with --no-usage, like `usage`"},
+        "lastEvent": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

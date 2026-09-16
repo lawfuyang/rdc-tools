@@ -1,0 +1,34 @@
+{
+  "title": "shaders",
+  "description": "The reflection of every stage bound at one event, one object per stage -- an array, because two stages share every member name and a flat object would let a reader keep only the last.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stages"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "stages": {"type": "array", "items": {
+      "type": "object",
+      "required": ["stage", "resource", "entry", "encoding", "bytes", "constantBlocks",
+                   "readOnlyResources", "readWriteResources", "inputSignature", "outputSignature"],
+      "properties": {
+        "stage": {"type": "string", "description": "vs hs ds gs ps cs as ms"},
+        "resource": {"type": "string"},
+        "entry": {"type": "string"},
+        "encoding": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "constantBlocks": {"type": "array", "items": {"type": "string"}},
+        "readOnlyResources": {"type": "array", "items": {"type": "string"}},
+        "readWriteResources": {"type": "array", "items": {"type": "string"}},
+        "inputSignature": {"type": "array", "items": {"type": "string"}},
+        "outputSignature": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    }}
+  },
+  "additionalProperties": false
+}

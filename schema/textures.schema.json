@@ -1,0 +1,36 @@
+{
+  "title": "textures",
+  "description": "Every texture the engine knows, with the format and dimensions from the resource description.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "textures", "total",
+               "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "textures": {"type": "array", "items": {
+      "type": "object",
+      "required": ["resource", "dimension", "width", "height", "depth", "mips", "arraySize", "samples",
+                   "format", "bytes"],
+      "properties": {
+        "resource": {"type": "string"},
+        "dimension": {"type": "integer"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "depth": {"type": "integer"},
+        "mips": {"type": "integer"},
+        "arraySize": {"type": "integer"},
+        "samples": {"type": "integer"},
+        "format": {"type": "string"},
+        "bytes": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"},
+    "shown": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

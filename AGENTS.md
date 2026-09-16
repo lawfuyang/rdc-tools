@@ -84,6 +84,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   last must say so with its `last` argument. After changing any command, validate:
   `build\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
   the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
+- Every `--json` document carries `schemaVersion` (README §9, and §4.12 for the validator), and the schema for it lives in the
+  driver's `kSchemas` table. A new document, or a new member on an existing one, updates that schema **and**
+  the checked-in `schema/` folder in the same change (`replay_dump schema --out schema`, then
+  `replay_dump schema --check schema` — which fails a run when the two have drifted): the schemas are
+  `additionalProperties: false`, so a document that drifts from its schema fails `validate` — which is the
+  point, and only works if both halves move together. `selftest` covers the writer's own helpers (escaping,
+  separators, balance) and the schema table's self-consistency; the *documents* are the offline validator's.
 - The frame report (`report`, README §4.11) is deterministic *by contract*: byte-stable for a fixed bundle —
   sorted tables, no timestamps, no paths in the prose — because that is what lets two runs be diffed and
   `tests/test_rdc_report.py` pin the document. A change that alters those bytes is deliberate or it is a bug.

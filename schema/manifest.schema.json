@@ -1,0 +1,44 @@
+{
+  "title": "manifest",
+  "description": "What the bundle is and what is in it: the capture it was written from (with its hash), the flags it was written with, every file with its size and SHA-256, and the list of things the bundle deliberately does not contain. This is what a reader checks before trusting the rest.",
+  "type": "object",
+  "required": ["schemaVersion", "bundleVersion", "driver", "renderdoc", "capture", "captureAbsolute",
+               "captureBytes", "captureSha256", "since", "until", "maxEvents", "withImages", "withCounters",
+               "withTextures", "resourceUsage", "stateHashInputs", "statesRule", "notInThisBundle", "skipped",
+               "files", "fileCount", "fileBytes"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "bundleVersion": {"type": "integer", "description": "the layout of the bundle itself"},
+    "driver": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "capture": {"type": "string"},
+    "captureAbsolute": {"type": "string"},
+    "captureBytes": {"type": "integer"},
+    "captureSha256": {"type": "string"},
+    "since": {"type": "integer"},
+    "until": {"type": "integer"},
+    "maxEvents": {"type": "integer"},
+    "withImages": {"type": "integer"},
+    "withCounters": {"type": "integer"},
+    "withTextures": {"type": "integer"},
+    "resourceUsage": {"type": "string", "description": "`collected`, or why the usage lists are absent"},
+    "stateHashInputs": {"type": "string", "description": "what the events' state hash is computed from"},
+    "statesRule": {"type": "string", "description": "when a state file is written"},
+    "notInThisBundle": {"type": "array", "items": {
+      "type": "object",
+      "required": ["what", "why"],
+      "properties": {"what": {"type": "string"}, "why": {"type": "string"}},
+      "additionalProperties": false
+    }},
+    "skipped": {"type": "array", "items": {"type": "string"}},
+    "files": {"type": "array", "items": {
+      "type": "object",
+      "required": ["path", "bytes", "sha256"],
+      "properties": {"path": {"type": "string"}, "bytes": {"type": "integer"}, "sha256": {"type": "string"}},
+      "additionalProperties": false
+    }},
+    "fileCount": {"type": "integer"},
+    "fileBytes": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

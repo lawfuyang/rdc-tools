@@ -91,8 +91,8 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 1. P0 — Executive summary: one `.md` that explains a frame
 
-**What.** `python rdc_analysis.py summary <capture.rdc> --out <dir>` produces `summary.md` (plus
-`summary.json` and, with `--html`, one self-contained page) that describes a frame end to end: what the frame
+**What.** `python rdc_analysis.py report <capture.rdc> --out <dir>` produces `report.md` (plus
+`report.json` and, with `--html`, one self-contained page) that describes a frame end to end: what the frame
 is, what every major pass does, which passes and resources matter, what looks wrong, what to look at next — and
 what it could not determine. Every claim in it carries the event id and resource id that proves it, and the
 appendix lists the commands that reproduce each one, so a reader can check the report rather than trust it.
@@ -211,7 +211,7 @@ an answer in one place: the mobile-vs-PC GI investigation is the acceptance case
 
 * Runs on all three captures in this project, in seconds once the bundle exists, with no unhandled exception and
   no warning on stderr.
-* **Golden and deterministic**: a fixed bundle yields a byte-identical `summary.md` (§8), and the JSON twin is
+* **Golden and deterministic**: a fixed bundle yields a byte-identical `report.md` (§8), and the JSON twin is
   schema-valid.
 * **Testable without a GPU**: fixture bundles in `tests/` cover every detector and every report section; the
   suite grows the way the offline tool's does (`selftest`), and every detector added later lands with a fixture
@@ -238,6 +238,8 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 ## 2. P0/P1 — The bundle producer: `replay_dump dump <rdc> --out <dir>`
 
 The driver half of §1, and useful on its own: it turns "a frame" into files a human or a script can read.
+(Not the offline tool's `dump`, which hexdumps one raw range of the stream — README §4.2 — and not the offline
+`summary`, which is the structural histogram; the three names are close enough to say so once.)
 
 | File | Content |
 |---|---|
@@ -528,7 +530,7 @@ Phased, and each phase stands on its own — nothing here is blocked on somethin
 
 **Phase 1 — the frame-level answer (this is the headline, and it is why the bundle comes first)**
 1. **`replay_dump dump` (§2)** — the bundle producer: the expensive replay turned into files, once per frame.
-2. **`summary` skeleton (§1.1–1.3)** — bundle in, pass structure and per-pass roll-ups out, deterministic
+2. **`report` skeleton (§1.1–1.3)** — bundle in, pass structure and per-pass roll-ups out, deterministic
    Markdown, fixture-tested.
 3. **`--json` schema (§3) + the driver `selftest` (§8)** — the contract the bundle and every later feature
    depends on, while the ink is still wet.

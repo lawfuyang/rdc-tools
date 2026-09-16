@@ -567,6 +567,7 @@ which is why the checked-in copy cannot quietly go stale after a document change
 | frame at a glance | counts, resources by kind and bytes, the render targets and formats seen, debug messages by severity |
 | pipeline map | the passes in order — eid range, call kind, target, structure — plus a Mermaid graph of pass → target |
 | pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
+| red flags | what the detectors found, each with the evidence that proves it and how certain it is — and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §1.5) |
 | what this report cannot tell you | the report states its own gaps, and every one of them is a roadmap item |
 | appendix | the `replay_dump state` / `shaders` command pair that reproduces each pass |
 
@@ -575,7 +576,14 @@ so two runs diff cleanly and an analysis change shows up as a reviewable diff. I
 files: no capture, no GPU, no device, no `renderdoc-src`. `tests/test_rdc_report.py` tests it from fixture
 bundles written by hand, which is what keeps the analysis honest without a capture to hand.
 
-What it does **not** do yet (ROADMAP §1): red flags, ranked notables, recommendations, and the interpretation
+The **detectors** that run today are the ones a bundle can prove: the engine's own debug messages, constant
+blocks whose every value is zero (including the "no descriptor is bound for this block" case, which is
+ROADMAP §1.1's *nothing bound where the reflection expects something* found for real), and textures or
+buffers no call in the frame uses. A detector that could not look — the usage lists are absent with
+`--no-usage` — is reported as *skipped* with the reason, because "clean" and "not checked" are different
+answers, and a bundle with none of these findings says so without implying the frame is fine.
+
+What it does **not** do yet (ROADMAP §1): the rest of the detectors, ranked notables, recommendations, and the interpretation
 of engine names. Passes are therefore *state-derived*, not named — a run of events that agree on call kind and
 render targets, or on pipeline and shaders for a dispatch — and the report says so in its own words rather than
 describing a pass as something it has not established.

@@ -115,14 +115,20 @@ Each detector states what it means, what proves it, and how certain it is. A row
 labelled capture is marked *unproven* (§7) rather than quietly shipped; heuristics that key off names carry
 `[heuristic]` in their output. This is the list as designed (subject to being narrowed by evidence):
 
+Landed, from a bundle alone and `certain`: debug messages (grouped by text, with counts and eid ranges),
+all-zero constant blocks — which includes the "nothing bound for this block" case the driver names itself,
+so §1.1's *nothing bound where the reflection expects something* is found for real — and dead allocations
+(textures/buffers no call uses, biggest first). `report` prints them under **Red flags**, each with its
+evidence, and every finding is marked *unproven* until a capture with a known bug list confirms it (§1.5); a
+detector that could not look at all (no usage lists with `--no-usage`) is reported as *skipped*, because
+"clean" and "not checked" are different answers. The rows below are what is left, and each needs evidence a
+bundle does not hold:
+
 | Detector | What it means | Evidence | Certainty |
 |---|---|---|---|
-| Debug/validation messages ≥ warning | the API's own complaint, with the eid it happened at | `debug` bundle, grouped by message hash with counts and first/last eid | certain |
 | Nothing bound where the reflection expects something | `rpN`/table slot the shader reads has a null descriptor | root parameters + reflection | certain |
-| A CBV reads as all zeros | the uniforms the shader reads were never filled in, or the wrong buffer is bound | bundle cbuffer values (non-zero-majority check) | certain |
 | Read before write | a texture/UAV read in a pass that no earlier pass wrote | usage chain from the bundle + descriptor writes offline | medium: legitimate for persistent resources — reported as a question, not a verdict |
 | Write never read | an RT/UAV written and never read afterwards (and not presented) | usage chain + the final `Present` | medium |
-| Allocation never used | a resource created and never referenced by any draw | resource table + usage | certain |
 | VS out ≠ PS in | the vertex shader emits a semantic the pixel shader reads with a different index/width, or does not emit it at all | both reflections | certain |
 | Binding kind mismatch | an SRV bound where the reflection wants a CBV/UAV, or register/space disagreement | root parameters + reflection | certain |
 | Depth logic | depth write on with depth test off (or a depth test with no depth buffer bound) | pipeline state | certain |
@@ -455,8 +461,10 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, README §4.11)**
-1. **Detectors, ranked by evidence (§1.1)** — start with the certain ones (unbound descriptors, zero work,
-   mismatch checks) and only then the heuristics; each lands with a fixture that fires it.
+1. **The remaining detectors (§1.1)** — the bundle-only certain ones are landed (debug messages, all-zero
+   constant blocks, dead allocations, each with a fixture that fires it); what is left needs the `.rdc` side:
+   call arguments (zero work), descriptor writes (nothing-bound through a table, read-before-write), the
+   action list (marker imbalance, unattributed draws), pipeline state (depth logic, scissor, MSAA).
 2. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
    own words is the acceptance case for all of the above, and the table is what lets the report name a pass
    instead of describing its state.

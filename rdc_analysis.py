@@ -53,11 +53,16 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple, TypedDict, U
 # the modules, which is where the line counts are for a reason. `X as X` is the re-export form PEP 484
 # defines: it says "this name is part of this module's interface", so the type checker does not report the
 # import as unused while still checking that the module it comes from exports it.
-from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, REPORT_VERSION as REPORT_VERSION,
-                        BundleData as BundleData, BundleError as BundleError,
-                        ReportDocument as ReportDocument, ReportPass as ReportPass,
-                        cmd_report as cmd_report, frame_facts as frame_facts,
-                        load_bundle as load_bundle, reconstruct_passes as reconstruct_passes,
+from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT as DEAD_ALLOCATION_LIMIT,
+                        REPORT_VERSION as REPORT_VERSION, BundleData as BundleData,
+                        BundleError as BundleError, DetectorRun as DetectorRun,
+                        RedFlag as RedFlag, ReportDocument as ReportDocument, ReportPass as ReportPass,
+                        cmd_report as cmd_report, detect_all as detect_all,
+                        detect_dead_allocations as detect_dead_allocations,
+                        detect_messages as detect_messages,
+                        detect_zero_constant_blocks as detect_zero_constant_blocks,
+                        frame_facts as frame_facts, load_bundle as load_bundle,
+                        reconstruct_passes as reconstruct_passes,
                         render_report_markdown as render_report_markdown,
                         report_caveats as report_caveats)
 from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,

@@ -66,10 +66,11 @@ def write_json(root: str, name: str, doc: Any) -> None:
 
 def write_bundle(root: str, events: Optional[List[Dict[str, Any]]] = None,
                  resources: Optional[List[Dict[str, Any]]] = None,
-                 messages: Optional[List[Dict[str, Any]]] = None,
+                 messages: Optional[List[Any]] = None,
                  manifest: Optional[Dict[str, Any]] = None,
                  capture: Optional[Dict[str, Any]] = None,
-                 states: Optional[Dict[int, Dict[str, Any]]] = None) -> None:
+                 states: Optional[Dict[int, Dict[str, Any]]] = None,
+                 cbuffers: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
     """Write a bundle with the files the report requires, plus whatever the test cares about."""
     os.makedirs(root, exist_ok=True)
     base_manifest: Dict[str, Any] = {
@@ -95,6 +96,16 @@ def write_bundle(root: str, events: Optional[List[Dict[str, Any]]] = None,
             write_json(root, os.path.join('states', '%d.state.json' % eid), documents['state'])
         if 'shaders' in documents:
             write_json(root, os.path.join('states', '%d.shaders.json' % eid), documents['shaders'])
+    for name, document in (cbuffers or {}).items():
+        write_json(root, os.path.join('cbuffers', name), document)
+
+
+def cbuffer(eid: int, stage: str = 'ps', slot: int = 0, buffer: str = '300',
+            variables: Optional[List[str]] = None) -> Dict[str, Any]:
+    """One `cbuffers/<eid>_<stage>_<slot>.json`, with the header the driver writes."""
+    return {'capture': RDC, 'renderdoc': '1.46', 'driver': 'D3D12', 'localReplay': 1,
+            'machine': 'test', 'eid': eid, 'stage': stage, 'slot': slot, 'shader': '2348',
+            'buffer': buffer, 'variables': variables or []}
 
 
 class BundleCase(unittest.TestCase):
@@ -373,6 +384,107 @@ class TestReportDocument(BundleCase):
         self.assertTrue(os.path.isfile(os.path.join(out, 'report.md')))
         self.assertTrue(os.path.isfile(os.path.join(out, 'report.json')))
         self.assertIn(os.path.join(out, 'report.md'), printed)
+
+
+# =========================================================================== detectors
+class TestReportDetectors(BundleCase):
+    def flags(self, bundle: str, detector: str) -> List[Dict[str, Any]]:
+        self.passes(bundle)
+        return [flag for flag in self.document(bundle)['flags'] if flag['detector'] == detector]
+
+    def test_a_message_becomes_one_finding_per_complaint(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     messages=['eid 10     warning  D3D12 WARNING: heap is not shader visible',
+                               'eid 40     warning  D3D12 WARNING: heap is not shader visible',
+                               'eid 50     info     D3D12 INFO: driver version'])
+        flags = self.flags(bundle, 'debug-message')
+        self.assertEqual(len(flags), 2, 'the same complaint twice is one finding, and the info is its own')
+        warning = [f for f in flags if f['what'].startswith('warning:')][0]
+        self.assertIn('D3D12 WARNING: heap is not shader visible', warning['what'])
+        self.assertEqual(warning['evidence'], ['2 message(s), eid 10..40'])
+        self.assertEqual(warning['certainty'], 'certain')
+        self.assertTrue(warning['unproven'], 'no detector has been checked against a labelled capture yet')
+
+        clean = self.path('clean')
+        write_bundle(clean, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
+        self.assertEqual(self.flags(clean, 'debug-message'), [])
+
+    def test_an_all_zero_constant_block_is_a_finding(self):
+        bundle = self.path('b')
+        zero = ['Atmosphere = {', '  MultiScatteringFactor = 0', '  RayleighScattering = 0, 0, 0, 0']
+        write_bundle(bundle, events=[event(96, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     cbuffers={'96_ps_0.json': cbuffer(96, variables=zero),
+                               '200_ps_0.json': cbuffer(200, variables=['Light = {', '  intensity = 2.5'])})
+        flags = self.flags(bundle, 'all-zero-constant-block')
+        self.assertEqual(len(flags), 1)
+        self.assertIn('every value in this block is zero', flags[0]['what'])
+        self.assertIn('zero at 1 of the 2 event(s)', flags[0]['what'])
+        self.assertEqual(flags[0]['evidence'], ['ps stage, slot 0, buffer res300, eid 96'])
+
+        clean = self.path('clean')
+        write_bundle(clean, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     cbuffers={'1_ps_0.json': cbuffer(1, variables=['Light = {', '  intensity = 1'])})
+        self.assertEqual(self.flags(clean, 'all-zero-constant-block'), [])
+
+    def test_a_dead_allocation_is_a_finding(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     resources=[resource('11', name='SceneColour', first=1, bytes=1048576, width=64,
+                                         height=64, depth=1, format='R8G8B8A8_UNORM'),
+                                resource('22', name='DeadUAV', kind='buffer', first=0, bytes=4194304),
+                                resource('33', kind='other', first=0)])
+        # No usage bit anywhere: every record is usage 0.
+        with open(os.path.join(bundle, 'resources.json'), encoding='utf-8') as fh:
+            document = json.load(fh)
+        for entry in document['resources']:
+            for record in entry['usage']:
+                record['usage'] = 0
+        with open(os.path.join(bundle, 'resources.json'), 'w', encoding='utf-8') as fh:
+            json.dump(document, fh)
+
+        flags = self.flags(bundle, 'dead-allocation')
+        self.assertEqual(len(flags), 2, 'the used texture and the `other` resource are not allocations')
+        self.assertIn('res22 "DeadUAV" (buffer, buffer)', flags[0]['evidence'][0])
+        self.assertIn('4.00 MB', flags[0]['what'])
+
+    def test_more_dead_allocations_than_the_limit_are_counted(self):
+        bundle = self.path('b')
+        resources = [resource(str(100 + i), kind='buffer', first=0, bytes=1024) for i in range(23)]
+        for entry in resources:
+            entry['usage'] = [{'eid': 0, 'usage': 0}]
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])], resources=resources)
+        flags = self.flags(bundle, 'dead-allocation')
+        self.assertEqual(len(flags), R.DEAD_ALLOCATION_LIMIT + 1)
+        self.assertIn('3 smaller unused resource(s) are not listed', flags[-1]['what'])
+        self.assertEqual(flags[-1]['evidence'], ['23 unused in total'])
+
+    def test_the_usage_detector_reports_itself_skipped_without_usage_lists(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     manifest={'resourceUsage': 'not collected'})
+        self.passes(bundle)
+        document = self.document(bundle)
+        skipped = [run for run in document['detectors'] if not run['ran']]
+        self.assertEqual([run['detector'] for run in skipped], ['dead-allocation'])
+        self.assertIn('--no-usage', skipped[0]['why'])
+        self.assertEqual([f for f in document['flags'] if f['detector'] == 'dead-allocation'], [],
+                         'a detector that could not look must not report clean')
+        self.assertIn('Skipped: dead-allocation', self.markdown(bundle))
+
+    def test_the_red_flags_are_in_both_documents(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     messages=['eid 5      error    something the API disliked'])
+        self.passes(bundle)
+        text = self.markdown(bundle)
+        self.assertIn('## Red flags', text)
+        self.assertIn('| debug-message | error: something the API disliked |', text)
+        self.assertIn('unproven', text)
+        document = self.document(bundle)
+        self.assertEqual([flag['detector'] for flag in document['flags']], ['debug-message'])
+        self.assertEqual([run['detector'] for run in document['detectors']],
+                         ['debug-message', 'all-zero-constant-block', 'dead-allocation'])
 
 
 # =========================================================================== refusals

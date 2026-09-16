@@ -1,6 +1,6 @@
 """Tests for the frame report (`report`): a bundle in, deterministic Markdown out.
 
-The bundles here are written by hand from the shapes `replay_dump dump` produces (README §9), so these
+The bundles here are written by hand from the shapes `replay_dump dump` produces (REFERENCE §9), so these
 tests need no capture, no GPU, no replay and no `renderdoc-src`: the report reads files, and a file
 written by a test is a bundle like any other. That is also why the bundle writer lives here rather
 than in `rdc_fixtures` (which builds `.rdc` payloads).

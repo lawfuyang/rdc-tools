@@ -127,7 +127,7 @@ class ChunkInfo(TypedDict):
     """One framed SDChunk.
 
     `off` is the chunk start and `payload_offset` is where the payload begins, *after* the per-chunk
-    metadata (36 bytes in for the usual flags, see README 3.3) -- never assume `off + 8`. The
+    metadata (36 bytes in for the usual flags, see REFERENCE 3.3) -- never assume `off + 8`. The
     payload is `length` bytes at `payload_offset`; `pad_start`/`pad_len` describe the 64-byte
     alignment padding after it (stale buffer bytes, not data -- see `check_stream`).
     """
@@ -334,7 +334,7 @@ def parse_container(path: str) -> CaptureInfo:
     """Parse the `.rdc` container header, metadata, thumbnail and section table.
 
     The section walk stops at the first byte that is not 0: that byte is the end-of-sections
-    marker (see README 3.1). Section names are decoded as UTF-8 and NUL-trimmed.
+    marker (see REFERENCE 3.1). Section names are decoded as UTF-8 and NUL-trimmed.
     """
     with open(path, 'rb') as fh:
         data: bytes = fh.read()
@@ -1059,7 +1059,7 @@ def cmd_dxbc(path: str) -> None:
     This is a *container* view, not a shader analysis: it says which shaders the capture embeds and
     where, so `dump-shaders` can extract the interesting ones. What a shader *reads* -- uniform
     names, bind points, signatures, disassembly -- is the shader reflection's job, and the reflection
-    is the replay driver's (README §9). The tool used to guess at it by scanning containers for
+    is the replay driver's (REFERENCE §9). The tool used to guess at it by scanning containers for
     GI-ish strings and `TEXCOORD6..12`; that harvest was a worse answer to a question replay answers
     exactly, so it was removed rather than kept.
     """
@@ -1180,7 +1180,7 @@ STATE_SETTERS = ('List_SetPipelineState', 'List_SetGraphicsRootSignature',
                  'List_IASetIndexBuffer')
 
 #: Payload lengths the decoders expect for the chunks with a fixed layout, used as a checksum by
-#: `verify` (README 3.4: "chunk length is a checksum for your decoder"). Chunks carrying arrays or
+#: `verify` (REFERENCE 3.4: "chunk length is a checksum for your decoder"). Chunks carrying arrays or
 #: variable-length data are deliberately absent.
 EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
     'List_SetPipelineState': (16,),
@@ -1435,7 +1435,7 @@ def check_stream(stream: bytes, names: Optional[Dict[int, str]] = None,
 
     * a frame that cannot be true (truncated metadata, payload past the end of the stream);
     * a payload whose length disagrees with the layout the decoder expects (`EXPECTED_LENGTHS`) --
-      the chunk length is the checksum for the decoder (README 3.4).
+      the chunk length is the checksum for the decoder (REFERENCE 3.4).
 
     `notes` are legal but worth knowing:
 
@@ -1664,7 +1664,7 @@ def _portable_handle(blob: bytes, offset: int) -> Optional[Tuple[int, int]]:
     """`(heapId, index)` of the `PortableHandle` at `offset`, or None when it does not fit.
 
     A `PortableHandle` is `u64 heapId, u32 index` (`d3d12_manager.h`): 12 bytes, no padding, and the
-    same pair a descriptor-table binding carries (README 3.4).
+    same pair a descriptor-table binding carries (REFERENCE 3.4).
     """
     if offset < 0 or offset + 12 > len(blob):
         return None
@@ -1739,7 +1739,7 @@ def _descriptor_label(heaps: Dict[int, Dict[int, DescriptorInfo]],
 #            space | flags | tableOffset`, 24 bytes for a 1.1+ signature and 20 for a 1.0 one.
 #
 # The signature holds no names at all: `parse_rdef` is the only place they can come from, and every
-# capture in this repo strips it (see README 3.6). What the decode *does* give is what each `rpN` is
+# capture in this repo strips it (see REFERENCE 3.6). What the decode *does* give is what each `rpN` is
 # -- a table, a CBV at b1, four root constants -- which is the part that used to be a guess.
 # ---------------------------------------------------------------------------
 #: `D3D12_ROOT_PARAMETER_TYPE`.
@@ -1878,7 +1878,7 @@ def parse_rdef(data: bytes) -> List[ShaderBind]:
     same number a root signature's descriptors and ranges use, which is what makes the mapping
     possible. **No capture in this repo has an `RDEF` part** (all of them are DXIL with the
     reflection stripped), so this half of the item is source-derived rather than capture-verified --
-    README 8 says so.
+    REFERENCE 8 says so.
     """
     if len(data) < 20:
         return []
@@ -2291,7 +2291,7 @@ def cmd_dump_shaders(path: str, outdir: str) -> None:
 
     This is the offline route to the D3D12 harness's input (ROADMAP §8.5) and a way to hand a shader to
     `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
-    reflection's job, and the reflection is the replay driver's (README §9).
+    reflection's job, and the reflection is the replay driver's (REFERENCE §9).
     """
     _info, stream, _how = load_stream(path)
     os.makedirs(outdir, exist_ok=True)

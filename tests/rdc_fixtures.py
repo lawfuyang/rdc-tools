@@ -6,7 +6,7 @@ RenderDoc source, so the tests need no .rdc capture, no GPU, no renderdoc.pyd an
 
   * container      -> renderdoc/serialise/rdcfile.cpp  (FileHeader | thumbnail | metadata | sections)
   * chunk framing  -> renderdoc/serialise/serialiser.cpp (Serialiser<Reading>::BeginChunk)
-  * chunk payloads -> README section 3.4 (the table the decoders were written against)
+  * chunk payloads -> REFERENCE section 3.4 (the table the decoders were written against)
 
 The fixture builders deliberately do **not** import the module under test except for
 `parse_chunk_enum`/`load_chunk_names`, which are used to build the fake `renderdoc-src` tree, so a
@@ -180,7 +180,7 @@ def write_capture(path: str, chunks: Sequence[bytes], **kw: Any) -> str:
 
 
 # --------------------------------------------------------------------------- D3D12 payloads
-# Layouts follow README section 3.4 ("Payload decoding").
+# Layouts follow REFERENCE section 3.4 ("Payload decoding").
 #: One vertex-buffer view as the payload builder wants it: (resourceId, offset, size, stride).
 VertexView = Tuple[int, int, int, int]
 

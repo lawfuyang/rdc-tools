@@ -1,4 +1,4 @@
-// replay_dump — headless RenderDoc replay as a data source (README §9).
+// replay_dump — headless RenderDoc replay as a data source (REFERENCE §9).
 //
 // The offline tool (rdc_analysis.py) reads the *file*: the container, the chunk stream, the payload
 // layouts. This tool asks the *engine* instead, which is the only way to get frame data exactly:
@@ -2491,7 +2491,7 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
 //:
 //: The manifest is JSON and this is not a JSON parser: the `files` entries are matched against the exact
 //: shape this driver writes, and an entry that does not match stops the check rather than passing
-//: silently. Full document validation belongs to the offline side (`python -m json.tool`, README §10).
+//: silently. Full document validation belongs to the offline side (`python -m json.tool`, the README's playbook).
 static int CmdBundleVerify(const char *dir)
 {
   const std::string manifestPath = std::string(dir) + "\\manifest.json";
@@ -2981,7 +2981,7 @@ static int CmdSelftest()
 static void Usage()
 {
   printf(
-      "replay_dump - headless RenderDoc replay as a data source (README §9)\n"
+      "replay_dump - headless RenderDoc replay as a data source (REFERENCE §9)\n"
       "\n"
       "usage: replay_dump <command> <capture.rdc> [args] [--json]\n"
       "\n"

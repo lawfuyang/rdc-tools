@@ -1,4 +1,4 @@
-//: The schema table (README §4.12). Written and checked by replay_dump.cpp, which owns the plumbing
+//: The schema table (REFERENCE §4.12). Written and checked by replay_dump.cpp, which owns the plumbing
 //: for errors and the log; this file is the contract itself, so adding a document is a one-file diff.
 
 #include "schema.h"
@@ -301,7 +301,7 @@ const SchemaDoc kSchemas[] = {
 
     {"draws", "draws", R"sc({
   "title": "draws",
-  "description": "The structured file's draw-like chunks in order. `eid` is the *engine's* id where one is known and the chunk index where it is not: the two spaces are not the same (README §9), and `probe` lists the ids that have state.",
+  "description": "The structured file's draw-like chunks in order. `eid` is the *engine's* id where one is known and the chunk index where it is not: the two spaces are not the same (REFERENCE §9), and `probe` lists the ids that have state.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
                "totalChunks", "totalEvents", "shown"],

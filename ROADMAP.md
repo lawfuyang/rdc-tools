@@ -1,7 +1,7 @@
 # rdc-tools — expansion roadmap / TODO
 
 Features that are **not implemented yet** in `rdc_analysis.py` or in its replay driver (`replay_dump.cpp`,
-README §9), in rough priority order. Each item says what it is, why it is wanted, how it would be built, and
+REFERENCE §9), in rough priority order. Each item says what it is, why it is wanted, how it would be built, and
 what blocks it.
 
 Landed items are **removed** from this file rather than marked done: their reference moves to `README.md` (or to
@@ -14,14 +14,14 @@ opportunistic · **P3** = nice-to-have.
 
 `rdc_analysis.py` reads the **file**: the container, the chunk stream, payload layouts, resource tables,
 descriptor writes. `replay_dump.exe` asks the **engine**: names, values, decoded textures, geometry, the
-rendered image (README §9). Anything that spans the two is written here as a **pipeline** item, and the split
+rendered image (REFERENCE §9). Anything that spans the two is written here as a **pipeline** item, and the split
 inside it follows the same line — the driver *extracts* what only the engine knows, the offline tool
 *analyses and presents* it, because that half must be testable without a GPU, a capture or a driver (§7).
 
 ### What is deliberately *not* on this list
 
 Anything RenderDoc's own **replay engine** answers directly is not tracked as offline work here: the replay
-driver (**README §9**, landed 2026-09-15) answers it, and re-deriving it by hand would be building a worse
+driver (**REFERENCE §9**, landed 2026-09-15) answers it, and re-deriving it by hand would be building a worse
 version of a tool that already exists. The offline parser's job is what replay is bad at — the container-level,
 no-device, sub-second questions. Removed on those grounds: texture decoding (`GetTextureData` / `SaveTexture`),
 shader disassembly (`GetShader` → `ShaderReflection`), the non-frame `.rdc` sections (`d3d12core`,
@@ -49,16 +49,16 @@ The **D3D12 harness** (§8.5) absorbs nothing: it exists for the one question re
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
-(LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (README §4.8), walks the
+(LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (REFERENCE §4.8), walks the
 SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the resource table
-(id → kind/size/name, README §4.9), the descriptor heaps (§4.10) and the root signatures (§3.4), inventories the
+(id → kind/size/name, REFERENCE §4.9), the descriptor heaps (§4.10) and the root signatures (§3.4), inventories the
 DXBC/DXIL containers, and can check its own parse (`verify`). 22 commands, see `README.md`. The replay driver
-(README §9) adds 15 more (`info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
+(REFERENCE §9) adds 15 more (`info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
 `debug`, `usage`, `probe`, `batch`, and the bundle pair `dump` + `bundle-verify`) that ask the engine for what no
 file read can answer — including the bundle the report generator reads. Since 2026-09-15 the
 offline tool also has a hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
-`build/` folder. `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite is the safety
+`build/` folder. `AGENTS.md` holds the coding rules, REFERENCE §4.6/§4.7 how to run both. That suite is the safety
 net for everything below — land the tests with the change, not after it.
 
 ### Environment convention — `renderdoc-src` in the root folder
@@ -95,7 +95,7 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 1. P0 — Executive summary: what still has to go into it
 
-**Landed** (README §4.11, `report <rdc> <bundleDir>`): the command, the bundle interface (versioned, hashed,
+**Landed** (REFERENCE §4.11, `report <rdc> <bundleDir>`): the command, the bundle interface (versioned, hashed,
 and stated in the report's provenance), state-derived pass reconstruction with a reason per boundary, the
 per-pass roll-ups (work, targets, structure, shaders, constant blocks, resources first used), the deterministic
 Markdown report and its JSON twin, and the appendix that reproduces every claim. The tests are in
@@ -205,7 +205,7 @@ appendix of reproduction commands.
 
 Names like `MobileBasePass`, `IndirectLightingCache` and `Material` are Unreal's, and the summary can only
 speak that vocabulary if it is written down. A small, extendable table (`engine-schemas/*.json` — not the
-driver's `schema/` folder, which is the contract for its documents, README §4.12) maps a known engine's
+driver's `schema/` folder, which is the contract for its documents, REFERENCE §4.12) maps a known engine's
 constant-block, semantic and marker names onto concepts (`base pass`, `GI cache`, `light`, `material`,
 `shadow pass`). Everything derived from it is labelled as name-based; a capture from an unknown engine simply
 gets no interpretation rather than a wrong one. This is also where the project's original question finally gets
@@ -233,7 +233,7 @@ detectors (2–3 d, the value is in getting them *right* rather than numerous), 
 schema table and the pilot (2 d).
 
 **Blockers.** Bundle size on the 1.4 GB capture (mitigated by `--since`/`--until`/`--max-events` and by storing
-full state only for distinct PSOs plus pass boundaries, README §9); counters are hardware/driver dependent and slow;
+full state only for distinct PSOs plus pass boundaries, REFERENCE §9); counters are hardware/driver dependent and slow;
 some formats cannot be decoded; shader debug info is usually absent from captured shaders; and a capture is
 replayed on *this* machine's GPU, so device-specific behaviour is out of reach (§8, remote replay).
 
@@ -342,7 +342,7 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 * **Memory and aliasing report** — resource lifetimes (creation, first/last use, destruction, `AliasingBarrier`
   pairs) and the placement/committed type from the creation payloads, then "these two could share memory, saving
   N MB" and "these N MB are never read". Sub-allocated UE page buffers complicate this (a CBV into a page is
-  named after the page — README §4.9), so it reports what it can prove and says what it cannot. (~1 d)
+  named after the page — REFERENCE §4.9), so it reports what it can prove and says what it cannot. (~1 d)
 * **CSV and Markdown tables** — `--format table|csv|markdown` on `draws`, `resources`, `descriptors`, `rootsig`,
   `summary`, so results can be pasted into an issue or opened in a spreadsheet. (The replay driver has `--json`;
   the offline tool is the cheap, device-free half.) (~2 h)
@@ -446,14 +446,14 @@ iterate with than re-capturing a frame.
 | Standalone shader bisecting / permutation unit tests | ✖ | ✔ |
 | Fast iteration without a capture round-trip | ✖ | ✔ |
 
-**Verdict.** The replay driver is built (README §9), so the ✔ column above is no longer a plan — it is what
+**Verdict.** The replay driver is built (REFERENCE §9), so the ✔ column above is no longer a plan — it is what
 `replay_dump` does today, and §4.1's shader patching widens it. A harness is worth writing only for the ✖
 column: running a shader with hand-built constants — e.g. feed the mobile base-pass pixel shader the HISM's baked
 SH to prove the shader path in isolation — and even that can often be avoided by patching the shader in replay
 instead.
 
 **Sketch.** One `ID3D12Device` + a compute-style or full-screen-triangle PSO + a root signature matching the
-shader's bind points (the offline tool can now print that layout: `rootsig`, README §4.1); upload a 256-byte
+shader's bind points (the offline tool can now print that layout: `rootsig`, REFERENCE §4.1); upload a 256-byte
 constant buffer; dispatch/draw to a small RTV; read back with `ReadBackResource`. Inputs: the `.dxil` files from
 `dump-shaders` and a JSON of uniform values (which the replay driver can export directly).
 
@@ -472,17 +472,17 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 * **Format coverage in the offline view** — the same audit §4's format coverage does for the engine's textures,
   for the file's payloads: what was decoded, what was skipped, and why. (~2 h)
 
-## 10. Clear README §8 ("Pitfalls and known limitations")
+## 10. Clear REFERENCE §8 ("Pitfalls and known limitations")
 
-One entry per bullet in README §8 that is *not* left to replay (see the note at the top), with the change that
+One entry per bullet in REFERENCE §8 that is *not* left to replay (see the note at the top), with the change that
 closes it and the gate that proves it is closed.
 
-**"Resolved" means** the bullet is deleted from README §8, the `CHARACTERIZATION` tests that pinned the old
+**"Resolved" means** the bullet is deleted from REFERENCE §8, the `CHARACTERIZATION` tests that pinned the old
 behaviour are replaced by tests of the *correct* behaviour, and every doc that described the limitation is
 updated in the same change (AGENTS.md: behaviour is the contract, so these are deliberate, tested fixes —
 never silent ones).
 
-| # | README §8 bullet | Plan | Priority | Effort |
+| # | REFERENCE §8 bullet | Plan | Priority | Effort |
 |---|---|---|---|---|
 | 10.1 | Chunk names need `renderdoc-src` | §5 bundled chunk-name table | P2 | ~2 h |
 
@@ -498,7 +498,7 @@ never silent ones).
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, README §4.11)**
+**Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, REFERENCE §4.11)**
 1. **The remaining detectors (§1.1)** — eleven are landed (five over the bundle, three over the usage chain,
    three over the chunk stream, each with a fixture that fires it); the four that remain group by the one piece
    of evidence that unblocks them (the route table there): `dead compute` is route B's last row and also wants
@@ -521,7 +521,7 @@ Phased, and each phase stands on its own — nothing here is blocked on somethin
 8. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
 9. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-10. **Bundled chunk names (§5, = §10.1)** — ~2 h, removes the last environment dependency and closes the last
-    README §8 bullet that is not replay's job.
+10. **Bundled chunk names (§5, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+    REFERENCE §8 bullet that is not replay's job.
 11. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
 12. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.

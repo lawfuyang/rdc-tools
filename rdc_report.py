@@ -15,7 +15,7 @@ from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple, TypedD
 # ---------------------------------------------------------------------------
 # The frame report (`report`).
 #
-# ROADMAP section 1, skeleton: a bundle written by `replay_dump dump` (README §9) in, a deterministic
+# ROADMAP section 1, skeleton: a bundle written by `replay_dump dump` (REFERENCE §9) in, a deterministic
 # Markdown report out. What is here is deliberately structural -- it says what the engine reported,
 # every claim carries the event id it came from, and the report states in its own text what it cannot
 # say. The detectors, the notable lists and the engine-name interpretation are the later items in that
@@ -191,7 +191,7 @@ def _bundle_file(bundle_dir: str, name: str, required: bool = True) -> Any:
 
 
 def load_bundle(bundle_dir: str) -> BundleData:
-    """Read a bundle: the files `replay_dump dump` writes (README §9).
+    """Read a bundle: the files `replay_dump dump` writes (REFERENCE §9).
 
     `manifest.json`, `capture.json`, `events.json` and `resources.json` are required, because a report
     without them would have to invent something; `messages.json` and the per-event `states/` documents
@@ -855,7 +855,7 @@ def detect_marker_balance(path: str) -> Optional[List[RedFlag]]:
 
     A `PopMarker` with nothing pushed, or pushes still open at the end of the stream. Evidence is the chunk
     index, never an event id: the two are different spaces and the stream is all this detector can see
-    (README §9). Drawing a pass boundary from an unbalanced tree is how a report attributes work to the
+    (REFERENCE §9). Drawing a pass boundary from an unbalanced tree is how a report attributes work to the
     wrong pass, so this is reported before anything tries to.
     """
     chunks = _named_chunks(path, PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS)
@@ -1377,7 +1377,7 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
                  'list the detectors read (the engine\'s own `GetUsage`).' % _md(rdc))
     lines.append('')
     lines.append("Regenerate the bundle itself with `replay_dump dump '%s' <dir>`; run one replay at a "
-                 'time (README §9).' % _md(rdc))
+                 'time (REFERENCE §9).' % _md(rdc))
     lines.append('')
     return '\n'.join(lines)
 

@@ -6,7 +6,7 @@ Run directly, via unittest, or through the tool itself:
     python -m unittest tests.test_rdc_analysis
     python rdc_analysis.py selftest -k test_lz4
 
-Payload layouts used by the fixtures follow README section 3.4; where a decoder reads a chunk
+Payload layouts used by the fixtures follow REFERENCE section 3.4; where a decoder reads a chunk
 differently from another consumer of the same chunk, the test pins the behaviour actually
 implemented and says so in a comment.
 """
@@ -1612,7 +1612,7 @@ class TestIterChunks(unittest.TestCase):
                 self.assertEqual(ch['payload_offset'], data_off)
 
     def test_zero_callstack_frames(self):
-        # a chunk with the callstack flag but no frames: 36 bytes of header (README section 6)
+        # a chunk with the callstack flag but no frames: 36 bytes of header (REFERENCE section 6)
         raw = F.u32b(1200 | F.FLAG_CALLSTACK | F.FLAG_THREADID | F.FLAG_DURATION | F.FLAG_TIMESTAMP)
         raw += F.u32b(0) + F.u64b(0) + F.u64b(0) + F.u64b(0) + F.u32b(2) + b'hi'
         ch = list(R.iter_chunks(F.pad_to(raw)))[0]

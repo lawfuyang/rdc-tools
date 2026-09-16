@@ -543,7 +543,7 @@ class TestCmdDump(CmdCase):
         self.assertEqual(len([l for l in out.splitlines() if l.startswith('  @0x')]), 501)
 
     def test_hex_prefixed_arguments_are_not_accepted(self):
-        # README section 4.2 claims dump takes 0x-prefixed values; cmd_dump uses plain int()
+        # REFERENCE section 4.2 claims dump takes 0x-prefixed values; cmd_dump uses plain int()
         path = self.cap(self.ch('PushMarker', b'X'))
         with self.assertRaises(ValueError):
             self.out(R.cmd_dump, path, '0x8', '0x10')
@@ -777,7 +777,7 @@ class TestCmdDraws(CmdCase):
 
     def test_root_parameters_are_annotated_when_the_capture_has_the_signature(self):
         # `rpN` on its own says nothing about what the parameter holds, and assuming it
-        # is what produced the wrong conclusion recorded in README 9
+        # is what produced the wrong conclusion recorded in REFERENCE 9
         chunks = [
             self.sig_chunk(4200, [('table', 0, 0, 0, 0, [('uav', 0, 16, 0, 0)]),
                                   ('cbv', 0, 0, 0, 0, [])]),
@@ -984,7 +984,7 @@ class TestCmdDraws(CmdCase):
         self.assertIn('rp0=heap298[138455] -> uav res2234[SkyViewLut]', out)
 
     def test_an_unwritten_slot_falls_back_to_the_heap_name(self):
-        # descriptors written before the capture are not in the stream (README 8): say the heap
+        # descriptors written before the capture are not in the stream (REFERENCE 8): say the heap
         chunks = [self.ch('SetName', F.pl_set_name(298, 'GlobalResourceHeap')),
                   self.ch('List_SetComputeRootDescriptorTable', F.pl_root_table(7, 1, 298, 5)),
                   self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1))]

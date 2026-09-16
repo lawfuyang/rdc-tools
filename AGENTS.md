@@ -47,7 +47,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - `UPPER_SNAKE_CASE` constants, `snake_case` functions, no mutable default arguments, no bare `except:`.
   The one broad `except Exception` in `decode_chunk` is deliberate (a corrupt payload is reported, not
   raised) and must stay.
-- Keep the payload-layout comments (README §3.4): they are the reason the decoders can be trusted.
+- Keep the payload-layout comments (REFERENCE §3.4): they are the reason the decoders can be trusted.
 
 ### Structure and behaviour
 
@@ -59,17 +59,17 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   tests, docs and scripts reference them.
 - Descriptor resolution stays honest: only slots the capture actually wrote are recorded, a write or copy
   replaces what the slot held, and anything unknown is reported as the heap — never guessed at. See
-  `parse_descriptor_heaps` and README §4.10/§8.
+  `parse_descriptor_heaps` and REFERENCE §4.10/§8.
 - Root parameters stay honest the same way: `draws` annotates `rpN` with what the *signature* says (type,
   register, space, visibility, §3.4) and appends a name only when the capture's `RDEF` reflection offers one
   that every stage agrees on. Never invent a name, and never drop the annotation back to a bare index — an
-  index alone is what produced the wrong conclusion in README §9.
-- The replay driver (`replay_dump.cpp`, README §9) keeps the same rule: it prints what the engine returns and
+  index alone is what produced the wrong conclusion in REFERENCE §9.
+- The replay driver (`replay_dump.cpp`, REFERENCE §9) keeps the same rule: it prints what the engine returns and
   nothing else. It must keep doing the three things a replay host has to do — `REPLAY_PROGRAM_MARKER()` at file
   scope, `RENDERDOC_InitialiseReplay()` before opening, `RENDERDOC_ShutdownReplay()` on the way out — or it
   dies inside `OpenCapture` with no diagnostic at all. Its output is unbuffered on purpose, so a crash still
   leaves the output that was already produced, and `$RDC_REPLAY_DEBUG=1` traces each step on stderr.
-- Never assume an event id is a chunk index: `probe` is the authority (`README.md` §9). The offline tool's
+- Never assume an event id is a chunk index: `probe` is the authority (`REFERENCE` §9). The offline tool's
   chunk numbering matched the engine on the Unreal captures and not on the hobby-renderer one, and a wrong id
   silently returns an *empty* state rather than failing.
 - The driver must not specialise RenderDoc's function templates (`DoStringise<...>`). RenderDoc defines them in
@@ -100,14 +100,14 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   count**, not by `--until` (the log prints `sweeping ids A..B for bound state, at most N id(s) (the file's
   chunk count)`). For "look at a few events' state or reflection", use **`batch`** instead: one open capture,
   many commands (~20 s for 26 commands) against minutes for a bundle sweep.
-- Every `--json` document carries `schemaVersion` (README §9, and §4.12 for the validator), and the schema for it lives in the
+- Every `--json` document carries `schemaVersion` (REFERENCE §9, and §4.12 for the validator), and the schema for it lives in the
   driver's `kSchemas` table. A new document, or a new member on an existing one, updates that schema **and**
   the checked-in `schema/` folder in the same change (`replay_dump schema --out schema`, then
   `replay_dump schema --check schema` — which fails a run when the two have drifted): the schemas are
   `additionalProperties: false`, so a document that drifts from its schema fails `validate` — which is the
   point, and only works if both halves move together. `selftest` covers the writer's own helpers (escaping,
   separators, balance) and the schema table's self-consistency; the *documents* are the offline validator's.
-- The frame report (`report`, README §4.11) is deterministic *by contract*: byte-stable for a fixed bundle —
+- The frame report (`report`, REFERENCE §4.11) is deterministic *by contract*: byte-stable for a fixed bundle —
   sorted tables, no timestamps, no paths in the prose — because that is what lets two runs be diffed and
   `tests/test_rdc_report.py` pin the document. A change that alters those bytes is deliberate or it is a bug.
   Its "what this report cannot tell you" section names what is not implemented yet (ROADMAP §1): whatever lands
@@ -129,7 +129,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - CLI parsing stays hand-rolled: `main()` prints the module docstring for a missing/unknown command and lets
   `IndexError`/`ValueError` escape for bad arguments. Do not replace it with `argparse`. Commands that take no
   capture path (`selftest`, `cache`) are dispatched before the `len(argv) < 3` check.
-- Behaviour is the contract. The quirks in README §8 (6-character string floor, `first=0x-1`, the
+- Behaviour is the contract. The quirks in REFERENCE §8 (6-character string floor, `first=0x-1`, the
   `decode_chunk` field labels, ...) are pinned by tests and must survive a refactor; change them only as a
   deliberate, separately-tested fix.
 - Do not re-add a command that reconstructs *frame data* replay hands over directly (uniform values, shader
@@ -143,6 +143,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 ## Conventions
 
-- Docs: `README.md` (usage, internals, §8 pitfalls), `ROADMAP.md` (unimplemented work).
+- Docs: `README.md` (setup, quick start, the playbook for an agent), `REFERENCE.md` (internals, the command
+  reference, examples, pitfalls, the driver), `ROADMAP.md` (unimplemented work).
 - Never commit `renderdoc-src/` — vendored upstream code, gitignored.
 - Never run `git commit` or `git push` unless explicitly asked to.

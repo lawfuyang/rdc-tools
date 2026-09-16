@@ -29,6 +29,8 @@ for _p in (HERE, ROOT):
         sys.path.insert(0, _p)
 
 import rdc_analysis as R          # noqa: E402
+import rdc_fixtures as F          # noqa: E402
+from test_rdc_analysis import CmdCase as _CmdCase   # noqa: E402
 
 RDC = 'fixture.rdc'
 
@@ -465,12 +467,94 @@ class TestReportDetectors(BundleCase):
                      manifest={'resourceUsage': 'not collected'})
         self.passes(bundle)
         document = self.document(bundle)
-        skipped = [run for run in document['detectors'] if not run['ran']]
-        self.assertEqual([run['detector'] for run in skipped], ['dead-allocation'])
-        self.assertIn('--no-usage', skipped[0]['why'])
+        skipped = {run['detector']: run['why'] for run in document['detectors'] if not run['ran']}
+        self.assertIn('dead-allocation', skipped)
+        self.assertIn('--no-usage', skipped['dead-allocation'])
         self.assertEqual([f for f in document['flags'] if f['detector'] == 'dead-allocation'], [],
                          'a detector that could not look must not report clean')
         self.assertIn('Skipped: dead-allocation', self.markdown(bundle))
+
+    def test_a_constant_block_at_an_unset_root_parameter_is_a_finding(self):
+        bundle = self.path('b')
+        write_bundle(
+            bundle, events=[event(96, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+            states={96: {
+                'state': {'eid': 96, 'shaders': ['cs  res2317   '], 'renderTargets': [],
+                          # The middle row is what an unset root parameter looks like: register and space,
+                          # and nothing after them.
+                          'rootParameters': ['rp0   reg=0 space=0',
+                                             'rp1   reg=1 space=0 res344',
+                                             'rp3   reg=3 space=0 heap298+0x21cda']},
+                'shaders': {'eid': 96, 'stages': [
+                    {'stage': 'cs', 'resource': '2317', 'entry': 'Main',
+                     'constantBlocks': ['cbuffer[0] $Globals      b0 s0 80 bytes, 3 variables',
+                                        'cbuffer[1] Bound            b1 s0 64 bytes, 2 variables',
+                                        'cbuffer[2] NotInTheState    b2 s0 64 bytes, 2 variables',
+                                        'cbuffer[3] BehindATable     b3 s0 64 bytes, 2 variables']}]},
+            }})
+        flags = [f for f in self.flags(bundle, 'unbound-root-parameter')]
+        self.assertEqual(len(flags), 1, 'b0 is unset, b1 is bound, b2 has no row, b3 is behind a table')
+        self.assertIn('reads a constant block at b0 s0', flags[0]['what'])
+        self.assertIn('root constants are the other way', flags[0]['what'])
+        self.assertEqual(flags[0]['evidence'], ['cs stage, eid 96..96'])
+        self.assertEqual(flags[0]['certainty'], 'question',
+                         'root constants can serve the register too, and a bundle cannot say which')
+
+    def test_the_measured_vertex_and_pixel_signature_pair_does_not_fire(self):
+        """The real rows from `PC Renderer.rdc` at eid 700.
+
+        The vertex shader emits five semantics and the pixel shader reads six; the extra one is
+        `SV_IsFrontFace`, which the rasteriser supplies. That is why the rule ignores `SV_` on both sides --
+        and why this pair, the only measured attribute pass available, must stay silent. Committed as a test
+        rather than a note because it is the one case that could have made the rule fire on correct shaders.
+        """
+        bundle = self.path('b')
+        write_bundle(
+            bundle, events=[event(700, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+            states={700: {'shaders': {'eid': 700, 'stages': [
+                {'stage': 'vs', 'resource': '1', 'entry': 'Main', 'constantBlocks': [],
+                 'inputSignature': ['ATTRIBUTE0 reg0', 'ATTRIBUTE13 reg1', 'SV_InstanceID0 reg2',
+                                    'SV_VertexID0 reg3'],
+                 'outputSignature': ['TEXCOORD10_centroid0 reg0', 'TEXCOORD11_centroid0 reg1',
+                                     'PRIMITIVE_ID0 reg2', 'TEXCOORD9 reg3', 'SV_Position0 reg4']},
+                {'stage': 'ps', 'resource': '2', 'entry': 'MainPS', 'constantBlocks': [],
+                 'outputSignature': ['SV_Target0 reg0'],
+                 'inputSignature': ['TEXCOORD10_centroid0 reg0', 'TEXCOORD11_centroid0 reg1',
+                                    'PRIMITIVE_ID0 reg2', 'SV_IsFrontFace0 reg2', 'TEXCOORD9 reg3',
+                                    'SV_Position0 reg4']}]}}})
+        self.assertEqual(self.flags(bundle, 'shader-io-mismatch'), [],
+                         'a system input and an interpolation suffix are not mismatches')
+
+    def test_a_pixel_input_the_vertex_shader_does_not_emit_is_a_finding(self):
+        def pair(vs_out: List[str], ps_in: List[str], extra_stage: str = '') -> str:
+            bundle = self.path('b%d' % hash((tuple(vs_out), tuple(ps_in), extra_stage)))
+            stages = [
+                {'stage': 'vs', 'resource': '1', 'entry': 'Main', 'constantBlocks': [],
+                 'outputSignature': vs_out},
+                {'stage': 'ps', 'resource': '2', 'entry': 'MainPS', 'constantBlocks': [],
+                 'inputSignature': ps_in}]
+            if extra_stage:
+                stages.insert(1, {'stage': extra_stage, 'resource': '3', 'entry': 'MainGS',
+                                  'constantBlocks': [], 'outputSignature': [], 'inputSignature': []})
+            write_bundle(bundle, events=[event(96, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                         states={96: {'shaders': {'eid': 96, 'stages': stages}}})
+            return bundle
+
+        missing = self.flags(pair(['TEXCOORD0 reg0', 'SV_Position0 reg1'],
+                                  ['TEXCOORD4 reg0', 'SV_Position0 reg1']), 'shader-io-mismatch')
+        self.assertEqual(len(missing), 1)
+        self.assertIn('reads TEXCOORD4 and the vertex shader does not emit it', missing[0]['what'])
+        self.assertEqual(missing[0]['evidence'], ['vs Main -> ps MainPS, eid 96..96'])
+
+        modifier = self.flags(pair(['TEXCOORD9 reg0', 'SV_Position0 reg1'],
+                                   ['TEXCOORD9_centroid reg0', 'SV_Position0 reg1']),
+                              'shader-io-mismatch')
+        self.assertEqual(modifier, [], 'an interpolation suffix is the same semantic')
+
+        between = self.flags(pair(['TEXCOORD0 reg0', 'SV_Position0 reg1'],
+                                  ['TEXCOORD4 reg0', 'SV_Position0 reg1'], extra_stage='gs'),
+                             'shader-io-mismatch')
+        self.assertEqual(between, [], 'a geometry shader sits between them, so the rule does not apply')
 
     def test_the_red_flags_are_in_both_documents(self):
         bundle = self.path('b')
@@ -484,7 +568,182 @@ class TestReportDetectors(BundleCase):
         document = self.document(bundle)
         self.assertEqual([flag['detector'] for flag in document['flags']], ['debug-message'])
         self.assertEqual([run['detector'] for run in document['detectors']],
-                         ['debug-message', 'all-zero-constant-block', 'dead-allocation'])
+                         ['debug-message', 'all-zero-constant-block', 'unbound-root-parameter',
+                          'shader-io-mismatch', 'dead-allocation', 'read-before-write',
+                          'write-never-read', 'load-instead-of-clear', 'marker-imbalance',
+                          'unattributed-draws', 'zero-work'],
+                         'every detector is listed, whether it ran or was skipped')
+
+    def test_a_read_with_nothing_writing_it_first_is_a_question(self):
+        """The legitimate shapes and a real ordering bug are the same rows, so this reports the observation.
+
+        An upload (`CPUWrite` before the first read) and a buffer written later in the frame are both quiet:
+        the first has a write before its read, the second's finder is the later write. What fires is a
+        resource whose only history is reads -- the static-asset shape -- and the evidence names where the
+        first write is, or that there is none.
+        """
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])], resources=[
+            resource('326', name='ColoredTexture', usage=[{'eid': 282, 'usage': 17}]),
+            resource('342', name='Uploaded', kind='buffer',
+                     usage=[{'eid': 66, 'usage': 45}, {'eid': 124, 'usage': 8}]),
+            resource('315', name='Opened', kind='buffer',
+                     usage=[{'eid': 147, 'usage': 18}, {'eid': 200, 'usage': 27}]),
+            resource('9999', name='NotTracked', usage=[{'eid': 0, 'usage': 0}]),
+        ])
+        flags = self.flags(bundle, 'read-before-write')
+        self.assertEqual(len(flags), 2, 'one texture read and never written, one buffer written later')
+        texture = [f for f in flags if 'texture(s)' in f['what']][0]
+        self.assertIn('whose first use is a read (PS_Resource)', texture['what'])
+        self.assertEqual(texture['evidence'],
+                         ['res326 "ColoredTexture" (texture, 0x0x0 ?): read at eid 282, first write never in '
+                          'the frame'])
+        self.assertEqual(texture['certainty'], 'question')
+        buffer = [f for f in flags if 'buffer(s)' in f['what']][0]
+        self.assertIn('res315 "Opened" (buffer, 0.00 MB): read at eid 147, first write eid 200',
+                      buffer['evidence'][0])
+        self.assertNotIn('NotTracked', texture['what'] + str(texture['evidence']) + str(buffer['evidence']),
+                         'a resource the engine did not track is never judged')
+
+    def test_a_write_nothing_reads_later_is_a_question(self):
+        """Grouped by the kind of last write, because each group is a different story: a resolve nobody
+        reads is a readback that never happened, a dispatch output nobody reads is work that dies."""
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])], resources=[
+            resource('2236', name='SkyViewLut', usage=[{'eid': 154, 'usage': 27}]),
+            resource('2269', name='SceneColor',
+                     usage=[{'eid': 257, 'usage': 32}, {'eid': 434, 'usage': 17}]),
+            resource('2207', name='BufferedRT', usage=[{'eid': 444, 'usage': 32}]),
+            resource('9002', name='Readback', kind='buffer', usage=[{'eid': 520, 'usage': 40}]),
+        ])
+        flags = self.flags(bundle, 'write-never-read')
+        self.assertEqual(len(flags), 3, 'a target read later stays quiet; three write kinds fire')
+        dispatch = [f for f in flags if 'CS_RWResource' in f['what']][0]
+        self.assertIn('res2236 "SkyViewLut"', dispatch['evidence'][0])
+        target = [f for f in flags if f['what'].startswith('1 resource(s) whose last write is ColorTarget')][0]
+        self.assertIn('A swapchain image that exists only to be presented looks the same', target['what'],
+                      'a present is not a usage row, so the target group says so rather than saying "dead"')
+        self.assertIn('res2207 "BufferedRT"', target['evidence'][0])
+        resolve = [f for f in flags if 'ResolveDst' in f['what']][0]
+        self.assertIn('res9002 "Readback"', resolve['evidence'][0])
+
+    def test_a_target_with_nothing_clearing_or_writing_it_first_is_a_question(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])], resources=[
+            resource('2269', name='SceneColor',
+                     usage=[{'eid': 90, 'usage': 36}, {'eid': 241, 'usage': 35}, {'eid': 257, 'usage': 32}]),
+            resource('2270', name='SceneDepthZ',
+                     usage=[{'eid': 87, 'usage': 44}, {'eid': 242, 'usage': 35}, {'eid': 257, 'usage': 33}]),
+            resource('2207', name='BufferedRT',
+                     usage=[{'eid': 233, 'usage': 44}, {'eid': 444, 'usage': 32}]),
+            resource('3001', name='NeverATarget', usage=[{'eid': 10, 'usage': 17}]),
+        ])
+        flags = self.flags(bundle, 'load-instead-of-clear')
+        self.assertEqual(len(flags), 1, 'cleared and discarded targets stay quiet; a barrier is neither')
+        self.assertIn('first used as ColorTarget at eid 444', flags[0]['what'])
+        self.assertEqual(flags[0]['evidence'],
+                         ['res2207 "BufferedRT" (texture, 0x0x0 ?)', 'before that: 233:Barrier'])
+
+    def test_the_usage_detectors_are_skipped_without_usage_lists(self):
+        bundle = self.path('b')
+        write_bundle(bundle, manifest={'resourceUsage': 'not collected'},
+                     events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                     resources=[resource('326', usage=[{'eid': 282, 'usage': 17}])])
+        self.passes(bundle)
+        document = self.document(bundle)
+        runs = {run['detector']: run for run in document['detectors']}
+        for detector in ('dead-allocation', 'read-before-write', 'write-never-read',
+                         'load-instead-of-clear'):
+            self.assertFalse(runs[detector]['ran'], detector)
+            self.assertIn('--no-usage', runs[detector]['why'], detector)
+        self.assertEqual([flag for flag in document['flags'] if flag['detector'].endswith('-read')], [])
+
+
+# =========================================================================== the .rdc-side detectors
+class StreamCase(_CmdCase):
+    """The scratch directory and the fake `renderdoc-src` tree the chunk-name map needs.
+
+    The three detectors below read the capture's chunk stream, so they need names for its chunks -- which is
+    exactly what `CmdCase` provides (and why these tests are not `BundleCase`: they do not need a bundle at
+    all, they call the detectors with a capture and nothing else).
+    """
+
+    def chunk_ids(self) -> Dict[str, int]:
+        return {name: cid for cid, name in R.load_chunk_names().items()}
+
+    def rdc(self, *chunks: bytes) -> str:
+        return self.path('c.rdc', F.rdc([F.section('FrameCapture', F.stream(*chunks))]))
+
+    def chunk(self, name: str, payload: bytes = b'') -> bytes:
+        return F.chunk(self.chunk_ids()[name], payload)
+
+    def draw_instanced(self, vertices: int, instances: int = 1) -> bytes:
+        return self.chunk('List_DrawInstanced',
+                          F.u64b(0) + F.u32b(vertices) + F.u32b(instances) + F.u32b(0) + F.u32b(0))
+
+    def dispatch(self, x: int, y: int = 1, z: int = 1) -> bytes:
+        return self.chunk('List_Dispatch', F.u64b(0) + F.u32b(x) + F.u32b(y) + F.u32b(z))
+
+
+class TestStreamDetectors(StreamCase):
+    def test_marker_imbalance_is_found_both_ways(self):
+        unclosed = R.detect_marker_balance(self.rdc(self.chunk('PushMarker', b'BasePass\x00'),
+                                                    self.draw_instanced(100)))
+        self.assertIsNotNone(unclosed)
+        assert unclosed is not None
+        self.assertEqual(len(unclosed), 1)
+        self.assertIn('1 marker(s) never popped', unclosed[0]['what'])
+        self.assertEqual(unclosed[0]['evidence'], ['chunk 1'])
+
+        extra = R.detect_marker_balance(self.rdc(self.chunk('PopMarker', b'BasePass\x00'),
+                                                 self.chunk('PopMarker', b'Offscreen\x00')))
+        assert extra is not None
+        self.assertEqual(len(extra), 1)
+        self.assertIn('2 marker pop(s) with nothing pushed', extra[0]['what'])
+
+        balanced = R.detect_marker_balance(self.rdc(self.chunk('PushMarker', b'BasePass\x00'),
+                                                    self.draw_instanced(100),
+                                                    self.chunk('PopMarker', b'BasePass\x00')))
+        self.assertEqual(balanced, [])
+
+    def test_draws_outside_a_marker_are_counted(self):
+        path = self.rdc(self.draw_instanced(100),
+                        self.chunk('PushMarker', b'BasePass\x00'),
+                        self.draw_instanced(200),
+                        self.chunk('PopMarker', b'BasePass\x00'))
+        flags = R.detect_unattributed_draws(path)
+        assert flags is not None
+        self.assertEqual(len(flags), 1)
+        self.assertIn('1 draw(s) or dispatch(es) outside any marker', flags[0]['what'])
+        self.assertEqual(flags[0]['evidence'], ['List_DrawInstanced: chunk 1'])
+
+        inside = R.detect_unattributed_draws(
+            self.rdc(self.chunk('PushMarker', b'BasePass\x00'), self.draw_instanced(100),
+                     self.chunk('PopMarker', b'BasePass\x00')))
+        self.assertEqual(inside, [])
+
+    def test_zero_work_is_read_from_the_call_arguments(self):
+        path = self.rdc(self.draw_instanced(0), self.dispatch(1, 1, 0), self.draw_instanced(384, 2))
+        flags = R.detect_zero_work(path)
+        assert flags is not None
+        self.assertEqual(len(flags), 2)
+        self.assertIn('0 vertices, 1 instance(s)', flags[0]['what'])
+        self.assertEqual(flags[0]['evidence'], ['List_DrawInstanced at chunk 1'])
+        self.assertIn('dispatch 1x1x0', flags[1]['what'])
+
+    def test_a_detector_that_could_not_look_says_so(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
+        _flags, runs = R.detect_all(R.load_bundle(bundle))
+        skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
+        self.assertEqual(sorted(skipped), ['marker-imbalance', 'unattributed-draws', 'zero-work'])
+        self.assertTrue(all('no capture path given' in why for why in skipped.values()))
+
+        missing = self.path('nowhere.rdc')
+        _flags, runs = R.detect_all(R.load_bundle(bundle), missing)
+        skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
+        self.assertEqual(sorted(skipped), ['marker-imbalance', 'unattributed-draws', 'zero-work'])
+        self.assertTrue(all('could not be read' in why for why in skipped.values()))
 
 
 # =========================================================================== refusals

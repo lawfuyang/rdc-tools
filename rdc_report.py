@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple, TypedDict, Union
 
 # ---------------------------------------------------------------------------
 # The frame report (`report`).
@@ -586,7 +586,542 @@ def detect_dead_allocations(bundle: BundleData) -> List[RedFlag]:
     return flags
 
 
-def detect_all(bundle: BundleData) -> Tuple[List[RedFlag], List[DetectorRun]]:
+# ---------------------------------------------------------------------------
+# The usage chain (ROADMAP §1.1, route B): read-before-write, write-never-read, load-instead-of-clear.
+#
+# `GetUsage` answers, per resource, the events it was used at and *how*. The decode below is measured rather
+# than inferred, and two of its facts are the kind that would be wrong if assumed: the value is *one usage,
+# not a bitmask* (the API's own example says one entry per usage, and the real bundle shows one buffer with
+# eight `VertexBuffer` rows at one eid -- one per binding slot), and the numbering is the enum's declaration
+# order in `renderdoc-src/renderdoc/api/replay/replay_enums.h`. All 17 distinct values in the real bundle
+# land where their semantics say they must: 32/33 on the two target kinds `events.json` also names (the depth
+# texture's own chain proves it), 35/36 on the Clear/Discard rows before them, 42/43 on the copy halves.
+#
+# A resource whose only row is `(eid 0, Unused)` was not tracked by the engine -- the API documents exactly
+# that marker -- and is never judged. What the chain cannot show is named in the findings themselves: the
+# list stops at the capture, so a read by the next frame, or by the CPU after it, is indistinguishable from
+# nothing ever reading the resource.
+USAGE_NAMES: Tuple[str, ...] = (
+    'Unused', 'VertexBuffer', 'IndexBuffer',
+    'VS_Constants', 'HS_Constants', 'DS_Constants', 'GS_Constants', 'PS_Constants', 'CS_Constants',
+    'TS_Constants', 'MS_Constants', 'All_Constants',
+    'StreamOut',
+    'VS_Resource', 'HS_Resource', 'DS_Resource', 'GS_Resource', 'PS_Resource', 'CS_Resource',
+    'TS_Resource', 'MS_Resource', 'All_Resource',
+    'VS_RWResource', 'HS_RWResource', 'DS_RWResource', 'GS_RWResource', 'PS_RWResource', 'CS_RWResource',
+    'TS_RWResource', 'MS_RWResource', 'All_RWResource',
+    'InputTarget', 'ColorTarget', 'DepthStencilTarget',
+    'Indirect',
+    'Clear', 'Discard', 'GenMips', 'Resolve', 'ResolveSrc', 'ResolveDst', 'Copy', 'CopySrc', 'CopyDst',
+    'Barrier', 'CPUWrite')
+
+_USAGE_STAGES = ('VS', 'HS', 'DS', 'GS', 'PS', 'CS', 'TS', 'MS')
+
+#: Which usages *read* the resource's contents and which *write* them. `Resolve` and `Copy` are the
+#: source-and-destination forms and are in both; `Barrier` and `Unused` are in neither. The RW family is in
+#: both on purpose: a UAV may be read and written by the same dispatch and the row does not say which
+#: happened, so a rule that needs "definitely nothing writes here" must not see a read in an RW row.
+USAGE_READS = frozenset(
+    {'VertexBuffer', 'IndexBuffer', 'InputTarget', 'Indirect', 'ResolveSrc', 'CopySrc', 'Resolve', 'Copy',
+     'All_Constants', 'All_Resource'}
+    | {'%s_Constants' % stage for stage in _USAGE_STAGES}
+    | {'%s_Resource' % stage for stage in _USAGE_STAGES})
+USAGE_WRITES = frozenset(
+    {'ColorTarget', 'DepthStencilTarget', 'Clear', 'Discard', 'GenMips', 'StreamOut', 'ResolveDst',
+     'CopyDst', 'CPUWrite', 'Resolve', 'Copy', 'All_RWResource'}
+    | {'%s_RWResource' % stage for stage in _USAGE_STAGES})
+
+#: The usages that make a resource a render target (the load-instead-of-clear rule keys off these).
+USAGE_TARGETS = frozenset({'ColorTarget', 'DepthStencilTarget'})
+
+#: How many resources a usage finding names before it counts the rest, for the same reason as
+#: DEAD_ALLOCATION_LIMIT: the finding is the group, not a wall of resource ids.
+USAGE_LIST_LIMIT = 8
+
+
+def usage_name(value: int) -> str:
+    """The engine's name for a usage value, or `usage(N)` -- the same fallback the driver prints, for a value
+    this table does not know (a newer engine's usage, and naming it would be a guess)."""
+    return USAGE_NAMES[value] if 0 <= value < len(USAGE_NAMES) else 'usage(%d)' % value
+
+
+def _usage_chain(resource: BundleResource) -> List[Tuple[int, FrozenSet[str]]]:
+    """A resource's usage as `(eid, {names})` per event, ascending.
+
+    Rows are one usage each, so an eid can carry several and the chain is a *set* per event: deduplicating
+    here is what keeps "the same buffer bound to eight slots" from reading as eight different uses. `[]`
+    means the list is empty (a resource no call touched) and `[(0, {'Unused'})]` means the engine did not
+    track it -- two different facts, and every caller below checks both.
+    """
+    per_event: Dict[int, set] = {}
+    for record in resource.get('usage', []):
+        # A bundle written with `--no-usage` puts a *string* here (`"(not collected: --no-usage)"`), which is
+        # why the callers are gated on the manifest and this skips it rather than trusting the shape.
+        if not isinstance(record, dict):
+            continue
+        per_event.setdefault(int(record.get('eid', 0) or 0), set()).add(
+            usage_name(int(record.get('usage', 0) or 0)))
+    return [(eid, frozenset(names)) for eid, names in sorted(per_event.items())]
+
+
+def _usage_judged(resource: BundleResource) -> Optional[List[Tuple[int, FrozenSet[str]]]]:
+    """The chain of a resource this family may judge, or None: textures and buffers only (a heap or a queue
+    is not an allocation the application reads and writes), and never a resource the engine did not track."""
+    if str(resource.get('kind')) not in ('texture', 'buffer'):
+        return None
+    chain = _usage_chain(resource)
+    if not chain or (len(chain) == 1 and chain[0][1] == frozenset(['Unused'])):
+        return None
+    return chain
+
+
+def _resource_label(resource: BundleResource) -> str:
+    """`res2207 "BufferedRT" (texture, 3104x3296x1 B10G11R11_UFloatPack32)`: enough to find it in the capture."""
+    name = ' '.join(str(resource.get('name', '')).split())
+    if str(resource.get('kind')) == 'texture':
+        detail = '%dx%dx%d %s' % (int(resource.get('width', 0) or 0), int(resource.get('height', 0) or 0),
+                                  int(resource.get('depth', 0) or 0), str(resource.get('format', '?')))
+    else:
+        detail = '%.2f MB' % (int(resource.get('bytes', 0) or 0) / 1048576.0)
+    return 'res%s%s (%s, %s)' % (_res_id(str(resource.get('resource', ''))),
+                                 ' "%s"' % name if name else '', str(resource.get('kind')), detail)
+
+
+def _usage_flag(detector: str, what: str, lines: List[str]) -> RedFlag:
+    """One finding from a group of resource lines, capped and rolled up like the dead-allocation list."""
+    return {
+        'detector': detector,
+        'what': what,
+        'evidence': lines[:USAGE_LIST_LIMIT] + (
+            ['%d more, not listed' % (len(lines) - USAGE_LIST_LIMIT)] if len(lines) > USAGE_LIST_LIMIT else []),
+        'certainty': 'question',
+        'unproven': True,
+    }
+
+
+def detect_read_before_write(bundle: BundleData) -> List[RedFlag]:
+    """A resource read with nothing in the frame writing it first (ROADMAP §1.1, route B; `question`).
+
+    "First" is a comparison of eids, and a write at the *same* eid does not count: one call can write and
+    read (the RW family is in both sets for exactly that reason), so only a strictly earlier write clears a
+    read. The finding is a question because the legitimate shapes are the common ones -- a static resource
+    (written by a previous frame, or by a call outside the capture), a CPU upload, a producer before the
+    capture's first event -- and the chain cannot tell them from a genuine ordering bug. Grouped by first-read
+    usage, because that is what the group is: "five textures are read by a pixel shader and never written" is
+    one thing to look at, not five. Measured on the Android capture: 6 resources, every one read and *never*
+    written in the frame -- two asset textures, an LUT, the font atlas, a sky cube and one allocator buffer,
+    which is what the legitimate case looks like.
+    """
+    groups: Dict[Tuple[str, str], List[str]] = {}
+    for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
+        chain = _usage_judged(resource)
+        if chain is None:
+            continue
+        first_read = next(((eid, names) for eid, names in chain if names & USAGE_READS), None)
+        if first_read is None or any(names & USAGE_WRITES for eid, names in chain if eid <= first_read[0]):
+            continue
+        first_write = next((eid for eid, names in chain if names & USAGE_WRITES), 0)
+        groups.setdefault((str(resource.get('kind')), ', '.join(sorted(first_read[1] & USAGE_READS))),
+                          []).append('%s: read at eid %d, first write %s'
+                                     % (_resource_label(resource), first_read[0],
+                                        'eid %d' % first_write if first_write else 'never in the frame'))
+
+    flags: List[RedFlag] = []
+    for key in sorted(groups):
+        flags.append(_usage_flag(
+            'read-before-write',
+            '%d %s(s) whose first use is a read (%s) that nothing in the frame writes first: a question, not '
+            'a verdict -- a static resource, a call outside the capture and a producer before its first event '
+            'all read the same way' % (len(groups[key]), key[0], key[1]),
+            groups[key]))
+    return flags
+
+
+def detect_write_never_read(bundle: BundleData) -> List[RedFlag]:
+    """A resource written with nothing afterwards reading it (ROADMAP §1.1, route B; `question`).
+
+    "Afterwards" is strict: only a read at a strictly later eid counts, or a copy's own source row would read
+    as a reader of what its destination just wrote. Grouped by the *kind* of last write, because that is what
+    each group means -- a `ResolveDst` nothing reads is a readback that never happened, a `CS_RWResource`
+    nothing reads is a dispatch whose output dies, a `CopyDst` nothing reads is a fill for nobody. The
+    question is what consumes the result, and the chain cannot see past the capture: a later frame and a CPU
+    readback after the frame look exactly like nothing. A colour or depth target carries one more reading --
+    a swapchain image that exists only to be presented looks the same, and a present is not a usage row --
+    which is why the target groups say so in their own words rather than calling anything dead.
+    """
+    groups: Dict[str, List[str]] = {}
+    for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
+        chain = _usage_judged(resource)
+        if chain is None:
+            continue
+        last_write = max((eid for eid, names in chain if names & USAGE_WRITES), default=0)
+        if not last_write or any(names & USAGE_READS for eid, names in chain if eid > last_write):
+            continue
+        written = ', '.join(sorted(next(names for eid, names in chain
+                                        if eid == last_write) & USAGE_WRITES))
+        groups.setdefault(written, []).append(
+            '%s: last write %s at eid %d, nothing after it reads the resource'
+            % (_resource_label(resource), written, last_write))
+
+    flags: List[RedFlag] = []
+    for key in sorted(groups):
+        presented = (' A swapchain image that exists only to be presented looks the same, and a present is '
+                     'not a usage row.' if key in ('ColorTarget', 'DepthStencilTarget') else '')
+        flags.append(_usage_flag(
+            'write-never-read',
+            '%d resource(s) whose last write is %s and which nothing afterwards reads.%s A question, not a '
+            'verdict: what consumes the result would be a later frame or a CPU readback after the capture, '
+            'and a usage list stops at the capture' % (len(groups[key]), key, presented),
+            groups[key]))
+    return flags
+
+
+def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
+    """A render target first used with nothing clearing, discarding or writing it (ROADMAP §1.1, route B).
+
+    A target's *contents* are not in the usage list, but its history is: when nothing cleared, discarded or
+    wrote the resource before the first event that binds it as a target, whatever that pass loads is what the
+    allocation happened to hold (or an earlier frame left there). Whether it matters is not decidable from a
+    bundle -- a pass that overwrites every pixel with blending off is fine, and blend and load state are not
+    in a bundle -- so the finding states the observation and names the missing state. Measured on the Android
+    capture: exactly one of four targets fires, and the other three each have a `Clear` or a `Discard` before
+    their first target event, which is what a correctly initialised target looks like.
+    """
+    flags: List[RedFlag] = []
+    for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
+        chain = _usage_judged(resource)
+        if chain is None:
+            continue
+        first_target = next(((eid, names) for eid, names in chain if names & USAGE_TARGETS), None)
+        if first_target is None:
+            continue
+        before = [(eid, names) for eid, names in chain if eid < first_target[0]]
+        if any(names & USAGE_WRITES for _eid, names in before):
+            continue
+        flags.append({
+            'detector': 'load-instead-of-clear',
+            'what': 'a render target is first used as %s at eid %d with nothing clearing, discarding or '
+                    'writing it before: whatever the pass loads is what the allocation held -- whether that '
+                    'matters needs blend and load state, which a bundle does not carry'
+                    % (', '.join(sorted(first_target[1] & USAGE_TARGETS)), first_target[0]),
+            'evidence': [_resource_label(resource),
+                         'before that: %s' % (' '.join('%d:%s' % (eid, '/'.join(sorted(names)))
+                                                       for eid, names in before) or 'nothing at all')],
+            'certainty': 'question',
+            'unproven': True,
+        })
+    return flags
+
+
+#: Marker chunk names, by the job they do. The end of a queue-level marker is `Queue_EndEvent`; the offline
+#: tool's own `MARKER_CHUNKS` lists the *beginnings* only, because that is all a marker *tree* needs.
+PUSH_MARKER_CHUNKS = ('PushMarker', 'Queue_BeginEvent')
+POP_MARKER_CHUNKS = ('PopMarker', 'Queue_EndEvent')
+
+#: How many unattributed draws are named before the rest are counted.
+UNATTRIBUTED_LIMIT = 10
+
+
+def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, str, bytes]]]:
+    """`(chunk index, name, payload)` for the chunks whose name is in `wanted`, or None if this tool cannot
+    name chunks at all.
+
+    The import is *inside* the function on purpose: `rdc_analysis` imports this module (the CLI dispatches
+    `cmd_report` through it and the tests call `R.cmd_report`), so a module-level import back would be a
+    cycle. These three detectors are the only thing here that needs the chunk stream, so the cycle is broken
+    once, in the one place they share.
+
+    The names come from the RenderDoc source tree. Without it every chunk is a number and a detector cannot
+    tell a marker from a draw -- None says that, and the caller reports the detector as *skipped* rather than
+    letting a report say "nothing found" about something it could not look at.
+    """
+    import rdc_analysis as analysis
+
+    _info, stream, _how = analysis.load_stream(path)
+    names = analysis.load_chunk_names()
+    if not names:
+        return None
+
+    found: List[Tuple[int, str, bytes]] = []
+    for index, chunk in enumerate(analysis.iter_chunks(stream), 1):
+        name = names.get(chunk['id'], '')
+        if name in wanted:
+            found.append((index, name, analysis.chunk_payload(stream, chunk)))
+    return found
+
+
+def detect_marker_balance(path: str) -> Optional[List[RedFlag]]:
+    """Markers that do not balance (ROADMAP §1.1, certain).
+
+    A `PopMarker` with nothing pushed, or pushes still open at the end of the stream. Evidence is the chunk
+    index, never an event id: the two are different spaces and the stream is all this detector can see
+    (README §9). Drawing a pass boundary from an unbalanced tree is how a report attributes work to the
+    wrong pass, so this is reported before anything tries to.
+    """
+    chunks = _named_chunks(path, PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS)
+    if chunks is None:
+        return None
+
+    flags: List[RedFlag] = []
+    depth = 0
+    extra_pops: List[int] = []
+    open_at: List[int] = []
+    for index, name, _payload in chunks:
+        if name in PUSH_MARKER_CHUNKS:
+            depth += 1
+            open_at.append(index)
+        elif depth > 0:
+            depth -= 1
+            open_at.pop()
+        else:
+            extra_pops.append(index)
+
+    if extra_pops:
+        flags.append({
+            'detector': 'marker-imbalance',
+            'what': '%d marker pop(s) with nothing pushed' % len(extra_pops),
+            'evidence': ['chunk %s' % ', '.join(str(index) for index in extra_pops[:UNATTRIBUTED_LIMIT])],
+            'certainty': 'certain',
+            'unproven': True,
+        })
+    if open_at:
+        flags.append({
+            'detector': 'marker-imbalance',
+            'what': '%d marker(s) never popped: the tree is still open where the stream ends' % len(open_at),
+            'evidence': ['chunk %s' % ', '.join(str(index) for index in open_at[:UNATTRIBUTED_LIMIT])],
+            'certainty': 'certain',
+            'unproven': True,
+        })
+    return flags
+
+
+def detect_unattributed_draws(path: str) -> Optional[List[RedFlag]]:
+    """Draws and dispatches outside any marker (ROADMAP §1.1, certain).
+
+    A hygiene note, not a bug: plenty of engines draw outside markers. It matters here because the report
+    attributes work per pass, and a draw with no marker has nothing to be attributed *to*.
+    """
+    import rdc_analysis as analysis
+
+    chunks = _named_chunks(path, PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS + tuple(analysis.DRAW_CHUNKS))
+    if chunks is None:
+        return None
+
+    depth = 0
+    unattributed: List[Tuple[int, str]] = []
+    for index, name, _payload in chunks:
+        if name in PUSH_MARKER_CHUNKS:
+            depth += 1
+        elif name in POP_MARKER_CHUNKS:
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            unattributed.append((index, name))
+
+    if not unattributed:
+        return []
+    counted: Dict[str, int] = {}
+    for _index, name in unattributed:
+        counted[name] = counted.get(name, 0) + 1
+    return [{
+        'detector': 'unattributed-draws',
+        'what': '%d draw(s) or dispatch(es) outside any marker -- a note, not a bug: there is no marker path '
+                'to attribute them to' % len(unattributed),
+        'evidence': ['%s: chunk %s' % (name, ', '.join(str(index) for index, other in unattributed
+                                                       if other == name)) [:160]
+                     for name in sorted(counted)],
+        'certainty': 'certain',
+        'unproven': True,
+    }]
+
+
+def detect_zero_work(path: str) -> Optional[List[RedFlag]]:
+    """Draws and dispatches that can only produce nothing (ROADMAP §1.1, certain).
+
+    Zero indices, zero vertices, zero instances or a zero dispatch dimension: the call is in the stream and
+    the GPU does nothing. The counts come from the same payload decoder `chunks`/`draws` use, so the fields
+    are read in one place only.
+    """
+    import rdc_analysis as analysis
+
+    wanted = ('List_DrawIndexedInstanced', 'List_DrawInstanced', 'List_Dispatch')
+    chunks = _named_chunks(path, wanted)
+    if chunks is None:
+        return None
+
+    flags: List[RedFlag] = []
+    for index, name, payload in chunks:
+        if len(payload) < 8:
+            continue
+        if name == 'List_DrawIndexedInstanced' and len(payload) >= 28:
+            indices, instances = analysis.u32(payload, 8), analysis.u32(payload, 12)
+            described = '%d indices, %d instance(s)' % (indices, instances)
+            empty = indices == 0 or instances == 0
+        elif name == 'List_DrawInstanced' and len(payload) >= 24:
+            vertices, instances = analysis.u32(payload, 8), analysis.u32(payload, 12)
+            described = '%d vertices, %d instance(s)' % (vertices, instances)
+            empty = vertices == 0 or instances == 0
+        elif name == 'List_Dispatch' and len(payload) >= 20:
+            groups = (analysis.u32(payload, 8), analysis.u32(payload, 12), analysis.u32(payload, 16))
+            described = 'dispatch %dx%dx%d' % groups
+            empty = 0 in groups
+        else:
+            continue
+        if empty:
+            flags.append({
+                'detector': 'zero-work',
+                'what': 'this call draws nothing: %s' % described,
+                'evidence': ['%s at chunk %d' % (name, index)],
+                'certainty': 'certain',
+                'unproven': True,
+            })
+    return flags
+
+
+#: `b0 s0` in a reflection row: the register and space a constant block is expected at. The `cbuffer[0]`
+#: form is what `shaders <eid>` writes and it is the only reflection row whose format is pinned down here
+#: by real output; the read-only and write-only resource rows are not parsed until a capture shows them.
+CONSTANT_BLOCK_ROW = re.compile(r'\bb(?P<reg>\d+)\s+s(?P<space>\d+)\b')
+
+#: A root parameter as `state` writes it: `rp2   reg=0 space=0 res1907`, `rp0   reg=0 space=0 heap298+0x21cda`
+#: for a table, or -- for one that is *not set to anything* -- `rp1   reg=0 space=0` and nothing more.
+ROOT_PARAMETER_ROW = re.compile(r'reg=(?P<reg>\d+)\s+space=(?P<space>\d+)(?:\s+(?P<target>\S+))?')
+
+
+def detect_unbound_root_parameters(bundle: BundleData) -> List[RedFlag]:
+    """A constant block the shader reads, at a root parameter that is not set to anything (ROADMAP §1.1).
+
+    The two halves come from one event's own documents: `shaders` says the stage reads a block at `bR sS`, and
+    `state` says what the root parameter at `reg=R space=S` holds -- nothing, when the row ends at the
+    register. Measured on the Android capture, where the driver's own note ("none bound as a root descriptor")
+    says the same thing from the other side, so this is a detector that agrees with the engine rather than
+    guessing at it.
+
+    `question`, not `certain`, for one reason: a shader register can also be served by *root constants*, which
+    are bound by value and print with no resource either. The root signature would say which it is, and a
+    bundle does not carry the signature's contents -- so the finding is the observation, and the other
+    possibility is named in it. A register with *no* root parameter row at all is not reported: a descriptor
+    table whose range covers that register looks exactly the same from here.
+    """
+    flags: List[RedFlag] = []
+    groups: Dict[Tuple[str, int, int], List[int]] = {}
+    for key in sorted(bundle['states']):
+        documents = bundle['states'][key]
+        state, shaders = documents.get('state'), documents.get('shaders')
+        if not isinstance(state, dict) or not isinstance(shaders, dict):
+            continue
+
+        unset: Dict[Tuple[int, int], bool] = {}
+        for row in state.get('rootParameters', []):
+            match = ROOT_PARAMETER_ROW.search(str(row))
+            if match:
+                unset[(int(match.group('reg')), int(match.group('space')))] = match.group('target') is None
+
+        for stage in shaders.get('stages', []):
+            for row in stage.get('constantBlocks', []):
+                block = CONSTANT_BLOCK_ROW.search(str(row))
+                if not block:
+                    continue
+                where = (int(block.group('reg')), int(block.group('space')))
+                if unset.get(where) is True:
+                    eid = int(state.get('eid', 0) or 0)
+                    groups.setdefault((str(stage.get('stage', '?')), where[0], where[1]), []).append(eid)
+
+    for key in sorted(groups):
+        eids = sorted(groups[key])
+        flags.append({
+            'detector': 'unbound-root-parameter',
+            'what': 'the shader reads a constant block at b%d s%d, and the root parameter there is not set to '
+                    'a resource -- root constants are the other way that register can be served, and the '
+                    'bundle does not say which' % (key[1], key[2]),
+            'evidence': ['%s stage, eid %d..%d' % (key[0], eids[0], eids[-1])],
+            'certainty': 'question',
+            'unproven': True,
+        })
+    return flags
+
+
+#: A signature row as the reflection writes it: `<SEMANTIC><index> reg<N>` — `SV_Position0 reg4`,
+#: `TEXCOORD9 reg3`, `TEXCOORD10_centroid0 reg0`. The semantic carries its index, and HLSL's interpolation
+#: modifier (`_centroid`, `_linear`, `_nointerpolation`) can be on either side or on both, which is why the
+#: comparison below tries the name with and without it rather than keeping a list of modifiers to strip.
+SIGNATURE_ROW = re.compile(r'^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*?)(?P<index>\d+)\s+reg\d+\s*$')
+
+
+def _semantic(row: Any) -> Optional[Tuple[str, int]]:
+    """`(name, index)` for a signature row, or None for a row this rule does not read."""
+    match = SIGNATURE_ROW.match(str(row))
+    if match is None:
+        return None
+    return match.group('name'), int(match.group('index'))
+
+
+def _semantic_matches(produced: Tuple[str, int], consumed: Tuple[str, int]) -> bool:
+    """Whether one side's semantic serves the other's, ignoring an interpolation suffix on either.
+
+    `TEXCOORD10_centroid0` and `TEXCOORD10` are the same semantic -- measured on `PC Renderer.rdc` at eid 700,
+    where the vertex shader emits `TEXCOORD10_centroid0` and the pixel shader reads exactly that, so the
+    suffix is not what distinguishes them. The suffix is only removed when the base name matches the other
+    side, so this can never invent a match that is not there.
+    """
+    if produced == consumed:
+        return True
+    for side, other in ((produced, consumed), (consumed, produced)):
+        base, _, _suffix = side[0].rpartition('_')
+        if base and (base, side[1]) == other:
+            return True
+    return False
+
+
+def detect_shader_io_mismatch(bundle: BundleData) -> List[RedFlag]:
+    """A pixel shader reading a semantic the vertex shader does not emit (ROADMAP §1.1, certain).
+
+    Both reflections are in the same document, so this needs no capture: D3D12 requires every PS input to be
+    produced by the VS, and the only exceptions are the `SV_` system values, which the rasteriser supplies
+    (`SV_IsFrontFace` in the measured case -- the one input of six that the vertex shader does not emit, and
+    the reason the rule ignores `SV_` on both sides). A vertex shader emitting *more* than the pixel shader
+    reads is legal and never reported.
+
+    A geometry, hull or domain shader between them can change the signature, so an event that has one is
+    skipped rather than reported: the rule compares adjacent stages, and those are not adjacent.
+    """
+    flags: List[RedFlag] = []
+    groups: Dict[Tuple[str, str, str], List[int]] = {}
+    for key in sorted(bundle['states']):
+        shaders = bundle['states'][key].get('shaders')
+        if not isinstance(shaders, dict):
+            continue
+        stages = {str(stage.get('stage')): stage for stage in shaders.get('stages', [])}
+        if 'vs' not in stages or 'ps' not in stages:
+            continue
+        if any(other in stages for other in ('gs', 'hs', 'ds')):
+            continue
+
+        produced = [row for row in (_semantic(r) for r in stages['vs'].get('outputSignature', []))
+                    if row is not None and not row[0].startswith('SV_')]
+        for row in stages['ps'].get('inputSignature', []):
+            consumed = _semantic(row)
+            if consumed is None or consumed[0].startswith('SV_'):
+                continue
+            if not any(_semantic_matches(one, consumed) for one in produced):
+                eid = int(shaders.get('eid', 0) or 0)
+                groups.setdefault((str(stages['vs'].get('entry', '?')),
+                                   str(stages['ps'].get('entry', '?')),
+                                   '%s%d' % (consumed[0], consumed[1])), []).append(eid)
+
+    for key in sorted(groups):
+        eids = sorted(groups[key])
+        flags.append({
+            'detector': 'shader-io-mismatch',
+            'what': 'the pixel shader reads %s and the vertex shader does not emit it -- D3D12 has no other '
+                    'source for it than the preceding stage' % key[2],
+            'evidence': ['vs %s -> ps %s, eid %d..%d' % (key[0], key[1], eids[0], eids[-1])],
+            'certainty': 'certain',
+            'unproven': True,
+        })
+    return flags
+
+
+def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List[RedFlag], List[DetectorRun]]:
     """Every finding, and what each detector did -- listed, so "clean" cannot be confused with "unchecked"."""
     flags: List[RedFlag] = []
     runs: List[DetectorRun] = []
@@ -595,12 +1130,51 @@ def detect_all(bundle: BundleData) -> Tuple[List[RedFlag], List[DetectorRun]]:
     flags.extend(detect_messages(bundle))
     runs.append({'detector': 'all-zero-constant-block', 'ran': True, 'why': ''})
     flags.extend(detect_zero_constant_blocks(bundle))
+    runs.append({'detector': 'unbound-root-parameter', 'ran': True, 'why': ''})
+    flags.extend(detect_unbound_root_parameters(bundle))
+    runs.append({'detector': 'shader-io-mismatch', 'ran': True, 'why': ''})
+    flags.extend(detect_shader_io_mismatch(bundle))
 
+    # Four detectors read the usage lists, so they share one gate: a bundle written with --no-usage carries
+    # `resourceUsage: (not collected...)` and each of them is *skipped with the reason* rather than reported
+    # clean. The three chain rules stay separate detectors (and separate rows of ROADMAP §1.1) rather than one
+    # pass, because each has its own certainty and each can be checked on its own.
     collected = str(bundle['manifest'].get('resourceUsage', '')) == 'collected'
-    runs.append({'detector': 'dead-allocation', 'ran': collected,
-                 'why': '' if collected else 'no usage lists in this bundle (written with --no-usage)'})
-    if collected:
-        flags.extend(detect_dead_allocations(bundle))
+    reason = '' if collected else 'no usage lists in this bundle (written with --no-usage)'
+    for detector, function in (('dead-allocation', detect_dead_allocations),
+                               ('read-before-write', detect_read_before_write),
+                               ('write-never-read', detect_write_never_read),
+                               ('load-instead-of-clear', detect_load_instead_of_clear)):
+        runs.append({'detector': detector, 'ran': collected, 'why': reason})
+        if collected:
+            flags.extend(function(bundle))
+
+    # The .rdc-side three: they need the chunk stream, so they need the capture path, and they need the
+    # RenderDoc source tree to name what they are looking at. Either being absent is a *skip* with the
+    # reason, never a clean report, because "no marker is unbalanced" and "I could not tell markers apart"
+    # are different answers and only one of them is worth anything.
+    for detector, function in (('marker-imbalance', detect_marker_balance),
+                               ('unattributed-draws', detect_unattributed_draws),
+                               ('zero-work', detect_zero_work)):
+        if not rdc_path:
+            runs.append({'detector': detector, 'ran': False, 'why': 'no capture path given'})
+            continue
+        try:
+            found = function(rdc_path)
+        except Exception as exc:
+            # A capture that moved, or that is not a capture: these detectors are the only part of a report
+            # that touches the file, and a report about a bundle must not die because the .rdc is elsewhere.
+            # The reason goes in the run list, which is where a reader looks for what was not checked.
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'the capture could not be read: %s' % exc})
+            continue
+        if found is None:
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'no chunk-name map: the RenderDoc source tree was not found '
+                                '(README §1.1)'})
+            continue
+        runs.append({'detector': detector, 'ran': True, 'why': ''})
+        flags.extend(found)
 
     # The findings keep the order their detector gave them -- "biggest first" is information, and a final
     # sort by evidence would throw it away (each detector sorts its own findings, so this is deterministic).
@@ -623,12 +1197,20 @@ def report_caveats() -> List[str]:
         'What a pass is *for* (shadow map, depth prepass, G-buffer, base pass, post-process, UI) is not '
         'inferred: the structure given is only the targets, the depth target and the call kind. Naming '
         'a purpose needs the engine schema table (ROADMAP §1.4).',
-        'Three detectors ran (debug messages, all-zero constant blocks, dead allocations), and every finding '
-        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §1.5). '
-        'The rest of the list is not checked at all (ROADMAP §1.1), because a bundle does not hold what it '
-        'needs -- call arguments (zero work), the descriptor writes (unbound descriptors, read-before-write), '
-        'the action list (marker imbalance, unattributed draws) or the pipeline state (depth logic, scissor, '
-        'MSAA). Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
+        'Eleven detectors run -- five over the bundle, three over the usage chain and three over the '
+        'capture\'s chunk stream -- and every finding is unproven: none of them has been checked against a '
+        'capture whose bug list is known (ROADMAP §1.5). What is not checked at all (ROADMAP §1.1): '
+        '"nothing bound through a descriptor table" and "binding kind mismatch" need the descriptor writes '
+        'followed through the stream (which in turn needs the event-id-to-chunk calibration, ROADMAP §2); '
+        '"dead compute" needs those plus the dispatch\'s UAV bindings; the signature-width half of "VS out is '
+        'not PS in", and the depth-test, scissor and stencil rows, need pipeline state a bundle does not '
+        'carry (a driver change); MSAA needs the ResolveSubresource payload read; and the two heuristics wait '
+        'on those. Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
+        'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
+        'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '
+        'next frame or by the CPU afterwards looks exactly like nothing ever reading the resource. A resource '
+        'whose only row is `eid 0, Unused` was not tracked by the engine and is never judged (101 of the 133 '
+        'resources in the measured capture).',
         'Counters are not folded per pass yet (ROADMAP §4). A bundle written with --with-counters '
         'carries the per-event results in counters.json.',
         'Blend, depth-test, stencil and raster state are not in the bundle, so the state given per pass '
@@ -791,6 +1373,9 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
         lines.append("| %d | `replay_dump state '%s' %d` · `replay_dump shaders '%s' %d` |"
                      % (entry['index'], _md(rdc), first, _md(rdc), first))
     lines.append('')
+    lines.append('A usage finding is checked the same way: `replay_dump usage \'%s\' <resId>` prints the same '
+                 'list the detectors read (the engine\'s own `GetUsage`).' % _md(rdc))
+    lines.append('')
     lines.append("Regenerate the bundle itself with `replay_dump dump '%s' <dir>`; run one replay at a "
                  'time (README §9).' % _md(rdc))
     lines.append('')
@@ -818,7 +1403,7 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     for entry in passes:
         _state_rollup(bundle, entry)
 
-    flags, detectors = detect_all(bundle)
+    flags, detectors = detect_all(bundle, path)
 
     doc: ReportDocument = {
         'reportVersion': REPORT_VERSION,

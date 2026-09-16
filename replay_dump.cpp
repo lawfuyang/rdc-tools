@@ -2285,8 +2285,8 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
         Field("bytes", (long long)buf->length);
 
       // The usage list is what lets the offline side ask "was this ever written, and by whom" without a
-      // device. The values are the engine's numeric `ResourceUsage`; the names for those values live in
-      // RenderDoc's headers, which the offline tool already reads out of the source tree.
+      // device. The values are the engine's numeric `ResourceUsage`; the offline tool's `rdc_report.py`
+      // carries the name table, taken from the enum's declaration order in RenderDoc's own header.
       if(opts.noUsage)
       {
         Field("usage", std::string("(not collected: --no-usage)"), true);

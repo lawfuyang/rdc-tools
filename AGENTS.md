@@ -91,6 +91,15 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `schema.h` hold the schema table — *data only*, because the printing, writing and checking need the tool's
   `Fail`/log plumbing. Split by what never changes together, not by size: the last split moved 474 lines of
   table out of the driver and 829 lines of analysis out of the tool, and touched no logic at all.
+- A capture path with a space in it (`PC Renderer.rdc`) needs its quotes **inside** the argument:
+  `Start-Process -ArgumentList` joins with spaces and does not quote, so `@('dump', $rdc)` arrives as
+  `renderdoc-src\PC` and the run dies in under a second with `cannot open ...\renderdoc-src\PC`. Write it as
+  `"`"$rdc`""` (or `'"' + $rdc + '"'`) — and read the driver's own stderr/log, which says exactly this. Two
+  harness scripts in `build/` have now hit it.
+- `dump`'s sweep cost is set by the id *range* it walks, and the range is capped by the capture's **chunk
+  count**, not by `--until` (the log prints `sweeping ids A..B for bound state, at most N id(s) (the file's
+  chunk count)`). For "look at a few events' state or reflection", use **`batch`** instead: one open capture,
+  many commands (~20 s for 26 commands) against minutes for a bundle sweep.
 - Every `--json` document carries `schemaVersion` (README §9, and §4.12 for the validator), and the schema for it lives in the
   driver's `kSchemas` table. A new document, or a new member on an existing one, updates that schema **and**
   the checked-in `schema/` folder in the same change (`replay_dump schema --out schema`, then

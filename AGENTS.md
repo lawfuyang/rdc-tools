@@ -69,7 +69,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   scope, `RENDERDOC_InitialiseReplay()` before opening, `RENDERDOC_ShutdownReplay()` on the way out — or it
   dies inside `OpenCapture` with no diagnostic at all. Its output is unbuffered on purpose, so a crash still
   leaves the output that was already produced, and `$RDC_REPLAY_DEBUG=1` traces each step on stderr.
-- Never assume an event id is a chunk index: `probe` is the authority (`REFERENCE` §9). The offline tool's
+- The state document's `rootParameters` array is rows, and the binding rules read them by shape: `rpN reg=R
+  space=S vis=<stages> <target>` (the parameter as set; `vis=` is absent in older bundles and then means every
+  stage), and, for a *set* table, `rpN <letter><reg> s<space> cat(N) type(N) <res…|none>` per resolved slot.
+  `cat` is the range's declared category and `type` is the heap slot's own descriptor type; the mismatch rule
+  compares those two and **never** the reflection's letter against a row of a different letter -- `b0` and
+  `t0` are separate register spaces, and that mistake cost ~60 false positives on a real capture.
+- Never assume an event id is a chunk index: `probe` is the authority (`REFERENCE.md` §9). The offline tool's
   chunk numbering matched the engine on the Unreal captures and not on the hobby-renderer one, and a wrong id
   silently returns an *empty* state rather than failing.
 - The driver must not specialise RenderDoc's function templates (`DoStringise<...>`). RenderDoc defines them in

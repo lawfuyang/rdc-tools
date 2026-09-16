@@ -472,7 +472,9 @@ class TestReportDetectors(BundleCase):
         self.assertIn('--no-usage', skipped['dead-allocation'])
         self.assertEqual([f for f in document['flags'] if f['detector'] == 'dead-allocation'], [],
                          'a detector that could not look must not report clean')
-        self.assertIn('Skipped: dead-allocation', self.markdown(bundle))
+        markdown = self.markdown(bundle)
+        self.assertIn('Skipped:', markdown)
+        self.assertIn('dead-allocation (', markdown)
 
     def test_a_constant_block_at_an_unset_root_parameter_is_a_finding(self):
         bundle = self.path('b')
@@ -499,6 +501,86 @@ class TestReportDetectors(BundleCase):
         self.assertEqual(flags[0]['evidence'], ['cs stage, eid 96..96'])
         self.assertEqual(flags[0]['certainty'], 'question',
                          'root constants can serve the register too, and a bundle cannot say which')
+
+    def test_nothing_bound_through_a_table_is_a_finding(self):
+        """The table half of the flagship row: the engine resolved the slot and it holds nothing.
+
+        `certain`, unlike the root-descriptor half above it, because there is no second explanation to weigh:
+        the row is the engine's own answer for that slot. Only rows from a parameter *visible* to the reading
+        stage are matched -- the fixture proves that with a ps-visible table and a cs shader.
+        """
+        def with_binding(name: str, parameter: str, slot: str, stage: str = 'cs') -> str:
+            bundle = self.path(name)
+            write_bundle(bundle, events=[event(96, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                         states={96: {
+                             'state': {'eid': 96, 'shaders': [], 'rootParameters': [parameter, slot]},
+                             'shaders': {'eid': 96, 'stages': [
+                                 {'stage': stage, 'resource': '2317', 'entry': 'Main',
+                                  'constantBlocks': [], 'readOnlyResources': ['MyTexture t0 s0 n1']}]}}})
+            return bundle
+
+        empty = self.flags(with_binding('empty', 'rp0   reg=0 space=0 vis=cs heap298+0x10',
+                                        'rp0   t0  s0   cat(3) none'), 'unbound-table-slot')
+        self.assertEqual(len(empty), 1)
+        self.assertIn('reads MyTexture at t0 s0 and the descriptor table bound there resolves the slot to '
+                      'nothing', empty[0]['what'])
+        self.assertEqual(empty[0]['evidence'], ['eid 96..96', 'rp0   t0  s0   cat(3) none'])
+        self.assertEqual(empty[0]['certainty'], 'certain')
+
+        filled = self.flags(with_binding('filled', 'rp0   reg=0 space=0 vis=cs heap298+0x10',
+                                         'rp0   t0  s0   cat(3) res2233'), 'unbound-table-slot')
+        self.assertEqual(filled, [], 'a populated slot is not a finding')
+
+        other_stage = self.flags(with_binding('ps', 'rp0   reg=0 space=0 vis=ps heap298+0x10',
+                                              'rp0   t0  s0   cat(3) none'), 'unbound-table-slot')
+        self.assertEqual(other_stage, [], 'the table is visible to ps and the shader reading it is cs')
+
+    def test_the_root_signature_and_the_heap_disagreeing_is_a_finding(self):
+        """The mismatch is between the range the signature declares and what the heap actually holds.
+
+        `cat(N)` (the range's category) and `type(N)` (the slot's own descriptor type) are the two sides, and
+        the engine's own `CategoryForDescriptorType` relates them. The first draft of this rule compared the
+        *reflection's* letter against a row of a *different* letter instead -- and a real capture produced
+        ~60 false positives with it, because `b0` and `t0` are separate register spaces: a `t` row says
+        nothing about `b`. That case is pinned here so it cannot come back.
+        """
+        def with_binding(name: str, slot: str, binding: str, key: str = 'readOnlyResources') -> str:
+            bundle = self.path(name)
+            stage = {'stage': 'ps', 'resource': '2317', 'entry': 'Main', 'constantBlocks': [],
+                     'readOnlyResources': [], 'readWriteResources': []}
+            stage[key] = [binding]
+            write_bundle(bundle, events=[event(96, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                         states={96: {
+                             'state': {'eid': 96, 'shaders': [],
+                                       'rootParameters': ['rp0   reg=0 space=0 vis=ps heap298+0x10', slot]},
+                             'shaders': {'eid': 96, 'stages': [stage]}}})
+            return bundle
+
+        mismatch = self.flags(with_binding('mismatch', 'rp0   b0  s0   cat(1) type(4) res342',
+                                           'cbuffer[0] $Globals b0 s0 80 bytes, 1 variables',
+                                           key='constantBlocks'), 'binding-kind-mismatch')
+        self.assertEqual(len(mismatch), 1, 'cat(1) is a CBV range and type(4) is an image')
+        self.assertIn('reads $Globals at b0 s0, and the range bound there is declared a constant block while '
+                      'the heap holds an image', mismatch[0]['what'])
+        self.assertEqual(mismatch[0]['evidence'], ['eid 96..96', 'rp0   b0  s0   cat(1) type(4) res342'])
+        self.assertEqual(mismatch[0]['certainty'], 'certain')
+
+        agree = self.flags(with_binding('agree', 'rp0   t0  s0   cat(3) type(4) res2233',
+                                        'MyTexture t0 s0 n1'), 'binding-kind-mismatch')
+        self.assertEqual(agree, [], 'an SRV range holding an image is the engine\'s own consistent pair')
+
+        space = self.flags(with_binding('space', 'rp0   t0  s0   cat(3) type(4) res2233',
+                                        'cbuffer[0] $Globals b0 s0 80 bytes, 1 variables',
+                                        key='constantBlocks'), 'binding-kind-mismatch')
+        self.assertEqual(space, [], 'a t row says nothing about b0: the register spaces are separate')
+
+        old_rows = self.flags(with_binding('old', 'rp0   t0  s0   cat(3) res2233', 'MyTexture t0 s0 n1'),
+                              'binding-kind-mismatch')
+        self.assertEqual(old_rows, [], 'a bundle without the type token has nothing to compare')
+
+        empty = self.flags(with_binding('empty', 'rp0   t0  s0   cat(3) type(0) none', 'MyTexture t0 s0 n1'),
+                           'binding-kind-mismatch')
+        self.assertEqual(empty, [], 'an empty slot is the other detector\'s finding, not a mismatch')
 
     def test_the_measured_vertex_and_pixel_signature_pair_does_not_fire(self):
         """The real rows from `PC Renderer.rdc` at eid 700, and the same window's rows with their widths.
@@ -625,10 +707,14 @@ class TestReportDetectors(BundleCase):
         self.assertEqual([flag['detector'] for flag in document['flags']], ['debug-message'])
         self.assertEqual([run['detector'] for run in document['detectors']],
                          ['debug-message', 'all-zero-constant-block', 'unbound-root-parameter',
-                          'shader-io-mismatch', 'dead-allocation', 'read-before-write',
-                          'write-never-read', 'load-instead-of-clear', 'marker-imbalance',
-                          'unattributed-draws', 'zero-work'],
+                          'unbound-table-slot', 'binding-kind-mismatch', 'shader-io-mismatch',
+                          'dead-allocation', 'read-before-write', 'write-never-read',
+                          'load-instead-of-clear', 'marker-imbalance', 'unattributed-draws', 'zero-work'],
                          'every detector is listed, whether it ran or was skipped')
+        runs = {run['detector']: run for run in self.document(bundle)['detectors']}
+        for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
+            self.assertFalse(runs[detector]['ran'], detector)
+            self.assertIn('no resolved descriptor tables', runs[detector]['why'], detector)
 
     def test_a_read_with_nothing_writing_it_first_is_a_question(self):
         """The legitimate shapes and a real ordering bug are the same rows, so this reports the observation.
@@ -788,18 +874,24 @@ class TestStreamDetectors(StreamCase):
         self.assertIn('dispatch 1x1x0', flags[1]['what'])
 
     def test_a_detector_that_could_not_look_says_so(self):
+        """Two families of detectors can be blocked, each with its own reason: the .rdc-side three need a
+        capture path, and the two binding rules need a bundle whose driver resolved descriptor tables."""
         bundle = self.path('b')
         write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
         _flags, runs = R.detect_all(R.load_bundle(bundle))
         skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
-        self.assertEqual(sorted(skipped), ['marker-imbalance', 'unattributed-draws', 'zero-work'])
-        self.assertTrue(all('no capture path given' in why for why in skipped.values()))
+        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work'):
+            self.assertIn('no capture path given', skipped[detector])
+        for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
+            self.assertIn('no resolved descriptor tables', skipped[detector])
 
         missing = self.path('nowhere.rdc')
         _flags, runs = R.detect_all(R.load_bundle(bundle), missing)
         skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
-        self.assertEqual(sorted(skipped), ['marker-imbalance', 'unattributed-draws', 'zero-work'])
-        self.assertTrue(all('could not be read' in why for why in skipped.values()))
+        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work'):
+            self.assertIn('could not be read', skipped[detector])
+        for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
+            self.assertIn('no resolved descriptor tables', skipped[detector])
 
 
 # =========================================================================== refusals

@@ -982,25 +982,140 @@ def detect_zero_work(path: str) -> Optional[List[RedFlag]]:
 #: by real output; the read-only and write-only resource rows are not parsed until a capture shows them.
 CONSTANT_BLOCK_ROW = re.compile(r'\bb(?P<reg>\d+)\s+s(?P<space>\d+)\b')
 
-#: A root parameter as `state` writes it: `rp2   reg=0 space=0 res1907`, `rp0   reg=0 space=0 heap298+0x21cda`
-#: for a table, or -- for one that is *not set to anything* -- `rp1   reg=0 space=0` and nothing more.
-ROOT_PARAMETER_ROW = re.compile(r'reg=(?P<reg>\d+)\s+space=(?P<space>\d+)(?:\s+(?P<target>\S+))?')
+#: A root parameter as `state` writes it: `rp2   reg=0 space=0 vis=ps res1907`,
+#: `rp0   reg=0 space=0 vis=cs heap298+0x21cde` for a table, or -- for one that is *not set to anything* --
+#: `rp1   reg=0 space=0 vis=ps` and nothing more. `vis=` is optional on purpose: a bundle written by an
+#: earlier driver has no visibility, and its rows are then taken as serving every stage, which is what the
+#: tool assumed before the token existed. The visibility is not decoration -- measured on `PC Renderer.rdc`
+#: at eid 640, the vertex and pixel shaders both declare `t0`..`t4` and each is served by its own table, so
+#: a row without it cannot be matched against the reflection.
+ROOT_PARAMETER_ROW = re.compile(r'^rp(?P<param>\d+)\s+reg=(?P<reg>\d+)\s+space=(?P<space>\d+)'
+                                r'(?:\s+vis=(?P<vis>[a-z+?]+))?(?:\s+(?P<target>\S+))?\s*$')
+
+#: A resolved table slot as `state` writes it since the driver resolves tables:
+#: `rp0   t3  s0   cat(3) type(4) res2233` — the parameter it came from, the register letter and number the
+#: range maps it to, the space, the range's *category* (`cat`) and the heap slot's own `DescriptorType`
+#: (`type`); `none` is an empty slot. The letter is the category, so the reflection can be matched by
+#: letter; `type` is what the heap actually holds, which is what the mismatch rule compares `cat` against.
+#: `type(N)` is optional: a bundle written by the driver before that token existed parses, and its rows are
+#: not compared (the comparison needs both numbers).
+TABLE_SLOT_ROW = re.compile(r'^rp(?P<param>\d+)\s+(?P<letter>[btsu])(?P<reg>\d+)\s+s(?P<space>\d+)\s+'
+                            r'cat\((?P<category>\d+)\)(?:\s+type\((?P<type>\d+)\))?\s+'
+                            r'(?P<resource>none|res\d+)\s*$')
+
+#: `DescriptorType` -> `DescriptorCategory`, mirroring the engine's own `CategoryForDescriptorType`
+#: (`renderdoc-src/renderdoc/api/replay/replay_enums.h`): a heap slot's type and the range's declared
+#: category are the two sides of the mismatch rule, and the engine's mapping is what relates them.
+CATEGORY_FOR_TYPE = {
+    0: 0,        # Unknown
+    1: 1,        # ConstantBuffer
+    2: 2,        # Sampler
+    3: 3,        # ImageSampler
+    4: 3,        # Image
+    5: 3,        # Buffer
+    6: 3,        # TypedBuffer
+    7: 4,        # ReadWriteImage
+    8: 4,        # ReadWriteTypedBuffer
+    9: 4,        # ReadWriteBuffer
+    10: 3,       # AccelerationStructure
+}
+
+#: A resource binding as the reflection writes it: `TransmittanceLutTexture t0 s0 n1`,
+#: `SkyAtmosphere.SkyViewLut u3 s0 n1`.
+RESOURCE_BINDING_ROW = re.compile(r'^\s*(?P<name>\S+)\s+(?P<letter>[btu])(?P<reg>\d+)\s+s(?P<space>\d+)\s+n\d+\s*$')
+
+#: What a register letter means in a finding's text (with the article, so sentences read as sentences).
+REGISTER_KINDS = {'b': 'a constant block', 's': 'a sampler', 't': 'a read-only resource',
+                  'u': 'a read-write resource'}
+
+#: The `DescriptorCategory` a register letter stands for, mirroring the driver's `RegisterLetter`.
+CATEGORY_FOR_LETTER = {'b': 1, 's': 2, 't': 3, 'u': 4}
+
+#: What a `DescriptorType` number means on a slot row, for finding text (the names come from the enum in
+#: `api/replay/replay_enums.h`; the engine's own stringiser is not reachable from either tool).
+DESCRIPTOR_TYPES = {0: 'nothing', 1: 'a constant buffer view', 2: 'a sampler',
+                    3: 'a combined image sampler', 4: 'an image', 5: 'a buffer', 6: 'a typed buffer',
+                    7: 'a read-write image', 8: 'a read-write typed buffer', 9: 'a read-write buffer',
+                    10: 'an acceleration structure'}
+
+
+def _table_bindings(state: Any) -> Tuple[Dict[int, Tuple[str, int, int, str]],
+                                         Dict[Tuple[int, int], List[Tuple[str, int, Optional[int], str, str]]]]:
+    """A state document's root parameters and its resolved table slots.
+
+    `parameters[param]` is `(visibility, reg, space, row)` -- visibility is the `vis=` text, or `'all'` when
+    the bundle predates the token. `slots[(reg, space)]` is every resolved slot row at that register, as
+    `(letter, param, type, resource, row)`, across *all* letters: the register locates a row, the letter is
+    what the reflection is matched against, and the type is what the mismatch rule compares the range's
+    category with (`None` when the bundle's rows predate the token).
+    """
+    parameters: Dict[int, Tuple[str, int, int, str]] = {}
+    slots: Dict[Tuple[int, int], List[Tuple[str, int, Optional[int], str, str]]] = {}
+    for row in state.get('rootParameters', []):
+        text = str(row)
+        slot = TABLE_SLOT_ROW.match(text)
+        if slot:
+            where = (int(slot.group('reg')), int(slot.group('space')))
+            kind = slot.group('type')
+            slots.setdefault(where, []).append((slot.group('letter'), int(slot.group('param')),
+                                                int(kind) if kind is not None else None,
+                                                slot.group('resource'), text))
+            continue
+        parameter = ROOT_PARAMETER_ROW.search(text)
+        if parameter:
+            parameters[int(parameter.group('param'))] = (parameter.group('vis') or 'all',
+                                                         int(parameter.group('reg')),
+                                                         int(parameter.group('space')), text)
+    return parameters, slots
+
+
+def _declared_bindings(stage: Any) -> List[Tuple[str, int, int, str]]:
+    """`(letter, reg, space, name)` for what a stage's reflection declares: a constant block reads `bR sS`
+    and is named `cbuffer[0] $Globals ...`, a resource reads `NAME tR sS nN` or `NAME uR sS nN`."""
+    declared: List[Tuple[str, int, int, str]] = []
+    for row in stage.get('constantBlocks', []):
+        block = CONSTANT_BLOCK_ROW.search(str(row))
+        if block:
+            parts = str(row).split()
+            declared.append(('b', int(block.group('reg')), int(block.group('space')),
+                             parts[1] if len(parts) > 1 else '?'))
+    for key in ('readOnlyResources', 'readWriteResources'):
+        for row in stage.get(key, []):
+            match = RESOURCE_BINDING_ROW.match(str(row))
+            if match:
+                declared.append((match.group('letter'), int(match.group('reg')),
+                                 int(match.group('space')), match.group('name')))
+    return declared
+
+
+def _slots_visible_to(parameters: Dict[int, Tuple[str, int, int, str]],
+                      slots: Dict[Tuple[int, int], List[Tuple[str, int, Optional[int], str, str]]],
+                      stage_name: str, reg: int, space: int) -> List[Tuple[str, str, str]]:
+    """The resolved slot rows at `(reg, space)` whose parameter is visible to this stage, as
+    `(letter, resource, row)`. `all` -- and a bundle with no `vis=` at all -- serves every stage."""
+    visible: List[Tuple[str, str, str]] = []
+    for letter, param, _kind, resource, row in slots.get((reg, space), []):
+        visibility = parameters.get(param, ('all', reg, space, ''))[0]
+        if visibility != 'all' and stage_name not in visibility.split('+'):
+            continue
+        visible.append((letter, resource, row))
+    return visible
 
 
 def detect_unbound_root_parameters(bundle: BundleData) -> List[RedFlag]:
-    """A constant block the shader reads, at a root parameter that is not set to anything (ROADMAP §1.1).
+    """A root parameter that is not set to anything (ROADMAP §1.1, the root-descriptor half).
 
-    The two halves come from one event's own documents: `shaders` says the stage reads a block at `bR sS`, and
-    `state` says what the root parameter at `reg=R space=S` holds -- nothing, when the row ends at the
-    register. Measured on the Android capture, where the driver's own note ("none bound as a root descriptor")
-    says the same thing from the other side, so this is a detector that agrees with the engine rather than
-    guessing at it.
+    `shaders` says the stage reads a block at `bR sS`, and `state` says what the root parameter at
+    `reg=R space=S` holds -- nothing, when the row ends at the register. Measured on the Android capture,
+    where the driver's own note ("none bound as a root descriptor") says the same thing from the other side,
+    so this is a detector that agrees with the engine rather than guessing at it.
 
-    `question`, not `certain`, for one reason: a shader register can also be served by *root constants*, which
-    are bound by value and print with no resource either. The root signature would say which it is, and a
-    bundle does not carry the signature's contents -- so the finding is the observation, and the other
+    `question`, not `certain`, for one reason: a shader register can also be served by *root constants*,
+    which are bound by value and print with no resource either. The root signature would say which it is, and
+    a bundle does not carry the signature's contents -- so the finding is the observation, and the other
     possibility is named in it. A register with *no* root parameter row at all is not reported: a descriptor
-    table whose range covers that register looks exactly the same from here.
+    table whose range covers that register looks exactly the same from here (and the table half below is what
+    covers that case).
     """
     flags: List[RedFlag] = []
     groups: Dict[Tuple[str, int, int], List[int]] = {}
@@ -1035,6 +1150,119 @@ def detect_unbound_root_parameters(bundle: BundleData) -> List[RedFlag]:
                     'bundle does not say which' % (key[1], key[2]),
             'evidence': ['%s stage, eid %d..%d' % (key[0], eids[0], eids[-1])],
             'certainty': 'question',
+            'unproven': True,
+        })
+    return flags
+
+
+def detect_unbound_table_slots(bundle: BundleData) -> List[RedFlag]:
+    """A descriptor table that resolves a register the shader reads to nothing (ROADMAP §1.1, the table half,
+    `certain`).
+
+    The driver resolves every *set* table's slots through the engine (`GetDescriptors`), so a row like
+    `rp0   t3  s0   cat(3) none` is the engine saying what is in that slot: nothing. A null descriptor reads
+    as zeros, so the stage reads zeros rather than data -- and unlike the root-descriptor half above there is
+    no second explanation to weigh, which is why this one is certain.
+
+    Only rows from a parameter *visible* to the reading stage are matched: measured at `PC Renderer.rdc`
+    eid 640, the vertex and pixel shaders both declare `t0`..`t4`, each served by its own table. A table that
+    was never set prints no slot rows at all, so this rule stays silent there and the half above keeps its
+    own, weaker finding instead.
+    """
+    flags: List[RedFlag] = []
+    empty: Dict[Tuple[str, str, int, int], Dict[str, Any]] = {}
+    for key in sorted(bundle['states']):
+        documents = bundle['states'][key]
+        state, shaders = documents.get('state'), documents.get('shaders')
+        if not isinstance(state, dict) or not isinstance(shaders, dict):
+            continue
+        parameters, slots = _table_bindings(state)
+        if not slots:
+            continue
+        for stage in shaders.get('stages', []):
+            stage_name = str(stage.get('stage', '?'))
+            eid = int(state.get('eid', 0) or 0)
+            for letter, reg, space, name in _declared_bindings(stage):
+                rows = _slots_visible_to(parameters, slots, stage_name, reg, space)
+                same = [one for one in rows if one[0] == letter]
+                if not same or any(one[1] != 'none' for one in same):
+                    continue
+                key2 = (stage_name, letter, reg, space)
+                entry = empty.setdefault(key2, {'eids': [], 'name': name, 'rows': []})
+                entry['eids'].append(eid)
+                entry['rows'] = sorted({one[2] for one in same})
+
+    for key in sorted(empty):
+        entry = empty[key]
+        eids = sorted(entry['eids'])
+        letter, reg, space = key[1], key[2], key[3]
+        flags.append({
+            'detector': 'unbound-table-slot',
+            'what': 'the %s stage reads %s at %s%d s%d and the descriptor table bound there resolves the '
+                    'slot to nothing -- a null descriptor, so the read yields zeros rather than data'
+                    % (key[0], entry['name'], letter, reg, space),
+            'evidence': ['eid %d..%d' % (eids[0], eids[-1])] + entry['rows'],
+            'certainty': 'certain',
+            'unproven': True,
+        })
+    return flags
+
+
+def detect_binding_kind_mismatch(bundle: BundleData) -> List[RedFlag]:
+    """The root signature and the descriptor heap disagree about a slot (ROADMAP §1.1, certain).
+
+    Every resolved slot row carries two numbers, and they are different statements: `cat(N)` is the
+    *range's* category -- what the root signature declares at that register -- and `type(N)` is the heap
+    slot's own `DescriptorType`, what was actually written there. `CategoryForDescriptorType` relates them,
+    so a slot the signature declares a constant buffer and the heap holds an image in is decidable from the
+    row alone, with the engine as the source of both sides.
+
+    One reading of the roadmap row needs a fact a bundle does not carry: whether the shader declared a
+    texture or a buffer (the reflection rows give a name, a register and a space, and nothing else), so a
+    "resource of the wrong type in the right register space" is *not* reported. And a `t` register is never
+    served by a `b` range -- D3D12 numbers those spaces separately -- so matching the reflection's letter
+    against a *different* letter's row is not a mismatch at all: that was the first draft of this rule, and
+    a real capture's 60-odd false positives killed it. What is compared here is range against heap, for the
+    registers the reflection actually reads (a mismatch where nothing is read is not this report's business).
+    """
+    flags: List[RedFlag] = []
+    groups: Dict[Tuple[str, str, int, int, int, int], Dict[str, Any]] = {}
+    for key in sorted(bundle['states']):
+        documents = bundle['states'][key]
+        state, shaders = documents.get('state'), documents.get('shaders')
+        if not isinstance(state, dict) or not isinstance(shaders, dict):
+            continue
+        parameters, slots = _table_bindings(state)
+        for stage in shaders.get('stages', []):
+            stage_name = str(stage.get('stage', '?'))
+            eid = int(state.get('eid', 0) or 0)
+            for letter, reg, space, name in _declared_bindings(stage):
+                for row_letter, param, kind, resource, row in slots.get((reg, space), []):
+                    if row_letter != letter or kind is None or resource == 'none':
+                        continue                    # another register space, no type token, or an empty slot
+                    visibility = parameters.get(param, ('all', reg, space, ''))[0]
+                    if visibility != 'all' and stage_name not in visibility.split('+'):
+                        continue
+                    declared, held = CATEGORY_FOR_LETTER[letter], CATEGORY_FOR_TYPE.get(kind, 0)
+                    if held == 0 or held == declared:
+                        continue                    # nothing there, or the two agree
+                    key2 = (stage_name, letter, reg, space, declared, kind)
+                    entry = groups.setdefault(key2, {'eids': [], 'name': name, 'rows': set()})
+                    entry['eids'].append(eid)
+                    entry['rows'].add(row)
+
+    for key in sorted(groups):
+        entry = groups[key]
+        eids = sorted(entry['eids'])
+        stage_name, letter, reg, space, declared, kind = key
+        flags.append({
+            'detector': 'binding-kind-mismatch',
+            'what': 'the %s stage reads %s at %s%d s%d, and the range bound there is declared %s while the '
+                    'heap holds %s -- the root signature and the descriptor disagree'
+                    % (stage_name, entry['name'], letter, reg, space,
+                       REGISTER_KINDS.get(letter, letter), DESCRIPTOR_TYPES.get(kind, str(kind))),
+            'evidence': ['eid %d..%d' % (eids[0], eids[-1])] + sorted(entry['rows']),
+            'certainty': 'certain',
             'unproven': True,
         })
     return flags
@@ -1179,6 +1407,20 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     flags.extend(detect_zero_constant_blocks(bundle))
     runs.append({'detector': 'unbound-root-parameter', 'ran': True, 'why': ''})
     flags.extend(detect_unbound_root_parameters(bundle))
+
+    # The two rules that read *resolved* table slots share a gate: a bundle from a driver that did not resolve
+    # tables has nothing for them to look at, and "no table binds anything wrongly" and "I could not look" are
+    # different answers -- the run list is where that difference lives. The root-descriptor half above needs no
+    # table rows at all, which is why it is not gated with them.
+    resolved = any(TABLE_SLOT_ROW.match(str(row))
+                   for documents in bundle['states'].values()
+                   for row in (documents.get('state') or {}).get('rootParameters', []))
+    why = '' if resolved else 'no resolved descriptor tables in this bundle (written by an older driver)'
+    for detector, function in (('unbound-table-slot', detect_unbound_table_slots),
+                               ('binding-kind-mismatch', detect_binding_kind_mismatch)):
+        runs.append({'detector': detector, 'ran': resolved, 'why': why})
+        if resolved:
+            flags.extend(function(bundle))
     runs.append({'detector': 'shader-io-mismatch', 'ran': True, 'why': ''})
     flags.extend(detect_shader_io_mismatch(bundle))
 
@@ -1244,16 +1486,17 @@ def report_caveats() -> List[str]:
         'What a pass is *for* (shadow map, depth prepass, G-buffer, base pass, post-process, UI) is not '
         'inferred: the structure given is only the targets, the depth target and the call kind. Naming '
         'a purpose needs the engine schema table (ROADMAP §1.4).',
-        'Eleven detectors run -- five over the bundle, three over the usage chain and three over the '
-        'capture\'s chunk stream -- and every finding is unproven: none of them has been checked against a '
-        'capture whose bug list is known (ROADMAP §1.5). What is not checked at all (ROADMAP §1.1): '
-        '"nothing bound through a descriptor table" and "binding kind mismatch" need the descriptor writes '
-        'followed through the stream (which in turn needs the event-id-to-chunk calibration, ROADMAP §2); '
-        '"dead compute" needs those plus the dispatch\'s UAV bindings; the depth-test, scissor and stencil rows '
-        'need pipeline state a bundle does not carry (a driver change); MSAA needs the ResolveSubresource '
-        'payload read, and none of the captures here carries a multisampled resource or a resolve at all; the '
-        'component *type* of a signature element (float against uint) is not in the reflection rows, so a '
-        'type-level mismatch is not checked even though the width is; and the two heuristics wait on those. '
+        'Thirteen detectors run -- seven over the bundle, three over the usage chain and three over the capture\'s '
+        'chunk stream -- and every finding is unproven: none of them has been checked against a capture whose '
+        'bug list is known (ROADMAP §1.5). What is not checked at all (ROADMAP §1.1): "dead compute" needs the '
+        'read/write history folded per dispatch, which is a rule to write rather than evidence to find; the '
+        'depth-test, scissor and stencil rows need pipeline state a bundle does not carry (a driver change); '
+        'MSAA needs the ResolveSubresource payload read, and none of the captures here carries a multisampled '
+        'resource or a resolve at all; and the two heuristics wait on those. Two things the binding rules '
+        'deliberately do not claim: the *resource type* a reflection row declares (texture against buffer -- '
+        'the row names a binding, not its type), and a range/heap disagreement at a register no shader reads. '
+        'A bundle whose driver did not resolve descriptor tables carries no slot rows, and those two rules are '
+        'then reported as not looked at rather than as clean.',
         'Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
         'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '

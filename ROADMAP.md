@@ -142,24 +142,33 @@ read and *never* written in the frame — assets, an LUT, the font atlas, an all
 the legitimate case looks like), 15 write-never-read in six groups keyed by the *kind* of last write, and 1 of
 4 targets firing load-instead-of-clear (the other three each have a `Clear` or a `Discard` before their first
 target event).
-**The route with a measurement behind it, not just a guess.** The *table* half: a table's state row prints
-`heap298+0x21cda`, which is not a descriptor index (0x21cda, 0x19, 0x1 are not multiples of 32), and the
-engine's own pipe state does not carry one either — `api/replay/d3d12_pipestate.h` defines
-`D3D12RootTableRange` (a range's `tableByteOffset`, `count`), not the bound handle. The only thing that does
-carry the index is the command payload, which the offline decoder already reads correctly as
-`(heapId, index)` (`List_Set*RootDescriptorTable`). So the route is the *report* following those payloads —
-not a driver change: nothing in the pipe state could be printed even if it wanted to. And that route runs
-through §2's first item: relating a table assignment (per command list, chunk-numbered) to a reflection row
-(per engine event id) is exactly the *engine event ids in the driver's own output* calibration, so this row is
-downstream of that one rather than independent of it. **From the capture's chunk stream**: marker
+**The flagship row's table half, and how it actually landed.** The measurement first: a table's state row
+prints `heap298+0x21cde`, the engine's own pipe state carries no descriptor index (`api/replay/d3d12_pipestate.h`
+defines `D3D12RootTableRange` — a range's `tableByteOffset`, `count` — and not the bound handle), and the
+command payloads that do carry `(heapId, index)` are chunk-numbered while the reflection is per engine event
+id — so the route this section first named was "follow the payloads, after §2's calibration". **It turned out
+not to be needed: the engine can resolve its own table.** `IReplayController::GetDescriptors` takes the store
+and the ranges (which carry `baseRegister`, `count` and `tableByteOffset`), so the driver now prints each *set*
+table's slots — `rp0   t3  s0   cat(3) type(4) res2233`, the *range's* category and the *heap slot's own*
+descriptor type — with `vis=` on the parameter row, because measured at `PC Renderer.rdc` eid 640 the vertex
+and pixel shaders both declare `t0`..`t4` and each is served by its own table. Two rules read those rows: a
+slot the shader reads that resolves to `none` (**nothing bound through a table**, `certain` — the engine's own
+answer rather than an inference) and a slot whose declared range and heap type disagree (`certain`). The first
+draft of the second rule compared the *reflection's* letter against a row of a *different* letter — 60-odd
+false positives on a real capture, because `b0` and `t0` are separate register spaces — which is why what is
+compared now is range against heap, and why "the right register space holding the wrong resource *type*" is
+not claimed at all: a reflection row names a binding, and not its type. Measured: the Android window has one
+genuine disagreement (`cat(3) type(7)`, a UAV descriptor in an SRV range) and the PC window none.
+**From the capture's chunk stream**: marker
 imbalance (a pop with nothing pushed, or markers still open at the end), unattributed draws (a hygiene note,
 counted by chunk), and zero work (0 indices/vertices/instances/groups, read from the same payload decoder
 `draws` uses). `report` prints them under **Red flags**, each with its evidence, and every finding is marked
 *unproven* until a capture with a known bug list confirms it (§1.5). A detector that could not look — no usage
 lists with `--no-usage`, no chunk-name map without the RenderDoc source tree, a capture that has moved — is
-reported as *skipped with the reason*, never as clean. Measured: eleven detectors ran on the Android capture
+reported as *skipped with the reason*, never as clean. Measured: twelve detectors ran on the Android capture
 and found 21 all-zero constant blocks (18 of them the "no root descriptor is bound" case), 14 unbound root
-parameters, and the usage-chain findings above.
+parameters, and the usage-chain findings above; over the windows re-dumped for the table work, the two
+binding rules add one finding — a genuine `cat(3) type(7)` disagreement — and the PC capture none.
 
 The rows below are what is left, and they are not independent items: each group waits on **one** piece of
 evidence, and *which* piece decides whether the work is a rule, a calibration or a driver change — so the
@@ -167,22 +176,19 @@ route is named first and the rows follow it:
 
 | Route | Rows | The one thing needed |
 |---|---|---|
-| **A — the descriptor index** | nothing bound *through a table*; binding kind mismatch | the report following `List_Set*RootDescriptorTable` payloads (the decoder already reads `(heapId, index)`, and the descriptor *kind* is in the same heap map) — which needs §2's eid↔chunk calibration. No driver change is possible: measured, the engine's pipe state carries `D3D12RootTableRange`, not the bound handle |
-| **B — the usage chain** | dead compute (the other three — read before write, write never read, load instead of clear — are **landed**) | the dispatch's *UAV bindings*, which is why this last one also wants route A: the usage chain says what a resource's history is, but not which dispatch wrote it |
-| **C — pipeline state a bundle does not carry** | depth logic; empty scissor / degenerate viewport; stencil without a writer; blend in an opaque pass (this one also wants §2's marker names) | a driver change that emits the state — the biggest group. Closest of them is **MSAA**: `samples` is in the bundle and `ResolveSubresource` is nameable from the stream, but the payload is not decoded yet, so it needs one measurement first — and measured, none of the three captures to hand carries a multisampled resource or a resolve at all, so that row would ship fixture-only evidence |
-| **D — heuristics** | format/units suspicion; the name half of blend-in-opaque | the component *type* (not in the signature rows — the count is, and it landed) plus the read/write chain of route B: a heuristic is worth writing once its inputs are facts |
+| **A — nothing needed but the rule** | dead compute | both halves of its evidence are in the bundle now: the dispatch's *UAV bindings* come from route-A-style table resolution and the reflection's `uR sS` rows, and the read/write history is the usage chain. This is the one row with no blocker left, so it is next |
+| **B — pipeline state a bundle does not carry** | depth logic; empty scissor / degenerate viewport; stencil without a writer; blend in an opaque pass (this one also wants §2's marker names) | a driver change that emits the state — the biggest group. Closest of them is **MSAA**: `samples` is in the bundle and `ResolveSubresource` is nameable from the stream, but the payload is not decoded yet, so it needs one measurement first — and measured, none of the three captures to hand carries a multisampled resource or a resolve at all, so that row would ship fixture-only evidence |
+| **C — heuristics** | format/units suspicion; the name half of blend-in-opaque | the component *type* (not in the signature rows — the count is, and it landed) plus the read/write chain of route A: a heuristic is worth writing once its inputs are facts |
 
 | Detector | What it means | Evidence | Certainty | Route |
 |---|---|---|---|---|
-| Nothing bound where the reflection expects something — **through a table** | the `bR sS` the shader reads is served by a descriptor table whose slot the capture never wrote | the descriptor writes followed through the stream — the bundle does not carry a descriptor *index* yet | certain, once the index is there | A |
-| Binding kind mismatch | an SRV bound where the reflection wants a CBV/UAV, or register/space disagreement | root parameters + reflection | certain | A |
-| Dead compute | a dispatch whose UAV output nothing reads | usage chain + the dispatch's UAV bindings | medium | B (and A) |
-| Depth logic | depth write on with depth test off (or a depth test with no depth buffer bound) | pipeline state | certain | C |
-| Empty scissor / degenerate viewport | draws that can only produce nothing | viewport/scissor state | certain | C |
-| Stencil without a writer | stencil test enabled where nothing wrote stencil in the frame | state + earlier passes | medium | C |
-| Blend in an opaque pass | blending enabled where the pass name says base/GBuffer/depth | state + marker names | `[heuristic]` | C + D |
-| Mismatched MSAA | samples > 1 with no resolve before present, or a resolve of the wrong subresource | texture descriptions + `ResolveSubresource` events (none of the captures here has either) | certain, once the payload is read | C |
-| Format/units suspicion | a float/HDR shader output written to an 8-bit `_UNORM` target, or sRGB/linear mismatch between write and read | RT format + PS output signature + the RT's later sampling | `[heuristic]` | D |
+| Dead compute | a dispatch whose UAV output nothing reads | usage chain + the dispatch's UAV bindings | medium | A |
+| Depth logic | depth write on with depth test off (or a depth test with no depth buffer bound) | pipeline state | certain | B |
+| Empty scissor / degenerate viewport | draws that can only produce nothing | viewport/scissor state | certain | B |
+| Stencil without a writer | stencil test enabled where nothing wrote stencil in the frame | state + earlier passes | medium | B |
+| Blend in an opaque pass | blending enabled where the pass name says base/GBuffer/depth | state + marker names | `[heuristic]` | B + C |
+| Mismatched MSAA | samples > 1 with no resolve before present, or a resolve of the wrong subresource | texture descriptions + `ResolveSubresource` events (none of the captures here has either) | certain, once the payload is read | B |
+| Format/units suspicion | a float/HDR shader output written to an 8-bit `_UNORM` target, or sRGB/linear mismatch between write and read | RT format + PS output signature + the RT's later sampling | `[heuristic]` | C |
 | Peak vs total memory | what the frame holds, what it never reads, and what could alias | resource table + lifetimes | advisory | — (§5's report, not a detector) |
 
 ### 1.2 Notable passes and notable resources
@@ -502,12 +508,13 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, REFERENCE §4.11)**
-1. **The remaining detectors (§1.1)** — eleven are landed (five over the bundle, three over the usage chain,
-   three over the chunk stream, each with a fixture that fires it), and the *VS out is not PS in* row is
-   complete, both halves; the rows that remain group by the one piece of evidence that unblocks them (the route
-   table there, four routes left): `dead compute` is route B's last row and also wants A; A waits on §2's
-   eid↔chunk calibration; C is a driver change that emits the pipeline state; D comes last, once its inputs are
-   facts.
+1. **The remaining detectors (§1.1)** — thirteen rows are landed (twelve detectors: six over the bundle, three
+   over the usage chain, three over the chunk stream, each with a fixture that fires it), including the
+   flagship *nothing bound where the reflection expects something* in all three of its halves and *binding
+   kind mismatch*; what is left is eight rows in three groups (the route table there): `dead compute` needs
+   nothing but the rule, B is a driver change that emits the pipeline state, C waits until its inputs are
+   facts. §2's eid↔chunk calibration is no longer on the path of any detector — the engine resolves its own
+   descriptor tables.
 2. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
    own words is the acceptance case for all of the above, and the table is what lets the report name a pass
    instead of describing its state.

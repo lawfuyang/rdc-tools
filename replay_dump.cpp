@@ -562,7 +562,47 @@ static const char *StageName(ShaderStage stage)
   }
 }
 
-//: The bound shader of one stage, out of the D3D12 pipeline state. The matching `PipeState`
+//: The register letter D3D12 and the reflection both use for a descriptor category: `b` for a constant
+//: block, `s` for a sampler, `t` for a read-only resource, `u` for a read-write one. The table-slot rows
+//: carry it so they can be read -- and matched by the offline side -- against the reflection's own rows
+//: (`cbuffer[0] $Globals b0 s0 ...`, `SkyViewLut t3 s0 n1`).
+static char RegisterLetter(DescriptorCategory category)
+{
+  switch(category)
+  {
+    case DescriptorCategory::ConstantBlock: return 'b';
+    case DescriptorCategory::Sampler: return 's';
+    case DescriptorCategory::ReadOnlyResource: return 't';
+    case DescriptorCategory::ReadWriteResource: return 'u';
+    default: return '?';
+  }
+}
+
+//: The stages a root parameter is visible to, in the stage letters the rest of the output uses (`vs`, `ps`,
+//: ...), or `all`. It is on the parameter row because the same register can mean different things to
+//: different stages -- measured on `PC Renderer.rdc` at eid 640, whose vertex and pixel shaders *both*
+//: declare t0..t4, each served by its own table -- so a row without this cannot be matched against the
+//: reflection, and an offline rule that guessed would compare a pixel binding against a vertex table.
+static std::string VisibilityText(ShaderStageMask mask)
+{
+  if(mask == ShaderStageMask::All)
+    return "all";
+
+  static const ShaderStage stages[] = {ShaderStage::Vertex, ShaderStage::Hull,   ShaderStage::Domain,
+                                       ShaderStage::Geometry, ShaderStage::Pixel, ShaderStage::Compute,
+                                       ShaderStage::Task,   ShaderStage::Mesh};
+  const uint32_t bits = (uint32_t)mask;
+  std::string text;
+  for(ShaderStage stage : stages)
+  {
+    if((bits & (1u << (uint32_t)stage)) == 0)
+      continue;
+    if(!text.empty())
+      text += '+';
+    text += StageName(stage);
+  }
+  return text.empty() ? "?" : text;
+}
 //: accessors exist but are not exported from the DLL, so the state struct is the way in -- and the
 //: reflection is then fetched through the virtual controller API.
 static const D3D12Pipe::Shader *StageShader(const D3D12Pipe::State *d3d12, ShaderStage stage)
@@ -1021,7 +1061,47 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
         detail = Fmt("heap%s+0x%x", IdText(rp.heap).c_str(), rp.heapByteOffset);
       else if(!rp.constants.empty())
         detail = Fmt("%d words", (int)rp.constants.size() / 4);
-      Row(Fmt("rp%-3d reg=%u space=%u %s", i, rp.reg, rp.space, detail.c_str()));
+      Row(Fmt("rp%-3d reg=%u space=%u vis=%s %s", i, rp.reg, rp.space,
+              VisibilityText(rp.visibility).c_str(), detail.c_str()));
+
+      // A *set* table's contents, slot by slot: what the heap holds where each declared range points, so
+      // the offline side can compare a slot against the register the reflection says the shader reads.
+      // Nothing in the pipe state carries a descriptor index and the command payloads live in a different
+      // numbering than the engine's event ids -- but the engine can resolve its own table, which is both
+      // simpler and exact: `GetDescriptors` looks slots up by the same descriptor offsets the ranges are
+      // expressed in (measured: `heapByteOffset` is the root element's offset and `tableByteOffset` is
+      // D3D12's `OffsetInDescriptorsFromTableStart`, both in descriptors, not bytes).
+      //
+      // Only when the parameter was set: a table that was never set prints its parameter row with no
+      // detail, and inventing `none` for every register it declares would bury the stronger fact -- that
+      // the parameter itself is unset -- under a hundred null slots.
+      if(rp.heap != ResourceId::Null())
+      {
+        for(const D3D12Pipe::RootTableRange &range : rp.tableRanges)
+        {
+          rdcarray<DescriptorRange> request;
+          DescriptorRange ask;
+          ask.offset = rp.heapByteOffset + range.tableByteOffset;
+          ask.descriptorSize = 32;                   // D3D12 descriptors are 32 bytes (the heap path ignores this)
+          ask.count = range.count;
+          request.push_back(ask);
+
+          const rdcarray<Descriptor> contents = ctrl->GetDescriptors(rp.heap, request);
+          for(uint32_t k = 0; k < range.count; k++)
+          {
+            const bool present = k < contents.size() && contents[k].resource != ResourceId::Null();
+            // Two kinds per row, and they are different facts: `cat(N)` is the range's *category* from the
+            // root signature (what the binding declares), `type(N)` is the heap slot's own `DescriptorType`
+            // (what was actually written there). The engine has `CategoryForDescriptorType` to relate them,
+            // so a disagreement -- a CBV range whose slot holds an SRV descriptor -- is decidable offline
+            // rather than a guess.
+            const DescriptorType kind = k < contents.size() ? contents[k].type : DescriptorType::Unknown;
+            Row(Fmt("rp%-3d %c%-2u s%-3u cat(%u) type(%u) %s", i, RegisterLetter(range.category),
+                    range.baseRegister + k, range.space, (unsigned)range.category, (unsigned)kind,
+                    present ? Fmt("res%s", IdText(contents[k].resource).c_str()).c_str() : "none"));
+          }
+        }
+      }
     }
     ArrayClose();
   }

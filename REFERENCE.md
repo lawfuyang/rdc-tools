@@ -422,9 +422,10 @@ bundles written by hand, which is what keeps the analysis honest without a captu
 
 The **detectors** that run today are the ones the evidence can prove. From the bundle: the engine's own debug
 messages, constant blocks whose every value is zero (including the "no descriptor is bound for this block"
-case), constant blocks whose register a root parameter is not set for at all (the root-descriptor half of
-ROADMAP §1.1's *nothing bound where the reflection expects something* — the table half needs a descriptor
-index the bundle does not carry yet), pixel inputs the vertex shader does not emit (*VS out ≠ PS in*, ignoring
+case), constant blocks whose register a root parameter is not set for at all, and — from the descriptor tables
+the driver resolves through the engine — registers whose slot holds nothing or whose declared range and heap
+type disagree (ROADMAP §1.1's *nothing bound where the reflection expects something*, in all three of its
+halves, and *binding kind mismatch*), pixel inputs the vertex shader does not emit (*VS out ≠ PS in*, ignoring
 the `SV_` system values and interpolation suffixes — and, from the engine's component counts in the reflection
 rows, an input that reads *wider* than the vertex shader writes), and textures or buffers no call in the frame
 uses. From
@@ -438,9 +439,10 @@ that could not look — no usage lists with `--no-usage`, no chunk-name map with
 a capture that has moved — is reported as *skipped* with the reason, because "clean" and "not checked" are
 different answers, and a bundle with no findings says so without implying the frame is fine.
 
-What it does **not** do yet (ROADMAP §1): the remaining detectors — they wait on the descriptor index (ROADMAP
-§2) and on the pipeline state a bundle does not carry (a driver change) — plus ranked notables,
-recommendations, and the interpretation of engine names. Passes are therefore *state-derived*, not named — a
+What it does **not** do yet (ROADMAP §1): the remaining detectors — `dead compute` needs a rule rather than
+evidence (its inputs are all in the bundle now) and the depth-test, scissor and stencil rows need pipeline
+state a bundle does not carry (a driver change) — plus ranked notables, recommendations, and the
+interpretation of engine names. Passes are therefore *state-derived*, not named — a
 run of events that agree on call kind and
 render targets, or on pipeline and shaders for a dispatch — and the report says so in its own words rather than
 describing a pass as something it has not established.
@@ -711,11 +713,21 @@ half (and a reader) can work without a device. It writes:
 | `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash |
 | `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints |
 | `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant block of every bound stage, at the state events |
-| `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it |
-| `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |
+| `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it || `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |
 | `counters.json` | with `--with-counters`: eid, counter, value |
 | `rt/<eid>_<slot>.png` | with `--with-images`: the bound render targets at the state events, through the engine's encoder |
 | `textures/<resId>.png` | with `--textures`: every texture decoded, full size — the engine decodes but does not resize |
+
+The state document's `rootParameters` array is rows, not objects, and three shapes matter to the offline
+rules: `rpN reg=R space=S vis=<stages> <target>` is the parameter as set (`vis=` names the stages it is
+visible to — measured, a base-pass draw's vertex and pixel shaders both declare `t0`..`t4`, each served by its
+own table — and is absent in bundles written by older drivers, which read as visible to every stage);
+`rpN <letter><reg> s<space> cat(N) type(N) <res…|none>` is one *resolved* table slot, printed since the driver
+started asking the engine (`GetDescriptors`) what each set table holds: `letter` is the range's register space,
+`cat(N)` the range's declared category, `type(N)` the heap slot's own descriptor type, and `none` an empty
+slot. The offline rules compare `cat` against `type` (through `CategoryForDescriptorType`) and match the
+reflection by the letter — never one letter against another letter's register, because `b0` and `t0` are
+separate register spaces: that mistake produced ~60 false positives before a real capture caught it.
 
 Flags: `--since <eid>` · `--until <eid>` · `--max-events N` (bounds the *sweep* as well as the writing) ·
 `--events 270,452` (force state files for those ids) · `--with-images` · `--with-counters` · `--textures` ·

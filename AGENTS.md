@@ -84,6 +84,11 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   last must say so with its `last` argument. After changing any command, validate:
   `build\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
   the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
+- The frame report (`report`, README §4.11) is deterministic *by contract*: byte-stable for a fixed bundle —
+  sorted tables, no timestamps, no paths in the prose — because that is what lets two runs be diffed and
+  `tests/test_rdc_report.py` pin the document. A change that alters those bytes is deliberate or it is a bug.
+  Its "what this report cannot tell you" section names what is not implemented yet (ROADMAP §1): whatever lands
+  there must update that section in the same change, or the report starts lying about its own coverage.
 - The writer's separator state nests with the arrays: `ArrayOpen` saves the enclosing array's `g_firstRow` and
   `ArrayClose` restores it. Without that, an *empty* nested array leaves the enclosing one looking like it had
   just started, the next item is written with no comma, and the document does not parse — which is exactly how

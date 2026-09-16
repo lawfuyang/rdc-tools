@@ -93,69 +93,23 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ---
 
-## 1. P0 — Executive summary: one `.md` that explains a frame
+## 1. P0 — Executive summary: what still has to go into it
 
-**What.** `python rdc_analysis.py report <capture.rdc> --out <dir>` produces `report.md` (plus
-`report.json` and, with `--html`, one self-contained page) that describes a frame end to end: what the frame
-is, what every major pass does, which passes and resources matter, what looks wrong, what to look at next — and
-what it could not determine. Every claim in it carries the event id and resource id that proves it, and the
-appendix lists the commands that reproduce each one, so a reader can check the report rather than trust it.
+**Landed** (README §4.11, `report <rdc> <bundleDir>`): the command, the bundle interface (versioned, hashed,
+and stated in the report's provenance), state-derived pass reconstruction with a reason per boundary, the
+per-pass roll-ups (work, targets, structure, shaders, constant blocks, resources first used), the deterministic
+Markdown report and its JSON twin, and the appendix that reproduces every claim. The tests are in
+`tests/test_rdc_report.py` — fixture bundles, no GPU, no capture.
 
-**Why.** Everything the two tools can say is already reachable, but only one question at a time and only for
-someone who knows which question to ask. The frame-level "what is going on here, and what is suspicious" is the
-work actually being done by hand today, over a dozen commands, and it is the same work every time. It is also
-the only way the expensive part (a replay session) is paid once for a whole frame instead of once per question:
-today a 14-command pass is 28 process starts and ~3.5 minutes (README §9), and the open dominates.
+**What remains is what makes it *useful*.** The skeleton says what the frame *is*; nothing in it yet says what
+is *wrong*, what to look at first, or what any of it is called in the engine's own vocabulary — and that gap is
+the reason the report exists: the frame-level "what is going on here, and what is suspicious" is the work being
+done by hand today, over a dozen commands, and it is the same work every time. Every item below is offline code
+over a bundle, which is what keeps it testable from fixtures (§7) rather than from a capture. The report's own
+"what this report cannot tell you" section lists each of them as absent, so a reader is never misled about what
+they are looking at — and each item that lands has to keep that section true.
 
-**How — three stages, each independently useful.**
-
-1. **Extract** — `replay_dump dump <rdc> --out <dir>` writes a *bundle*: one capture, one replay session, plain
-   JSON/PNG files on disk (the bundle, README §9). The driver stays a data source: it answers, it does not judge.
-2. **Analyse** — the offline tool reads the bundle (and the `.rdc` itself for the chunk stream, the resource
-   table and the descriptor writes) and derives the pass structure, the per-pass roll-ups, the ranked lists and
-   the red flags. All of this is pure functions over files, so it runs in milliseconds and is unit-testable
-   without a GPU (§7).
-3. **Present** — a deterministic Markdown report + its JSON twin + an optional HTML page. Deterministic means
-   byte-stable for a fixed bundle: stable ordering everywhere (eids ascending, tables sorted by a stated key),
-   no timestamps, no absolute paths in the prose — so two runs diff cleanly and a golden test can pin it (§7).
-
-### 1.1 The bundle is the interface
-
-Everything downstream depends on the bundle's shape, so it is versioned (`bundleVersion`) and hashed
-(per-file SHA-256 in a manifest) — a report can then state exactly what it read, and refuse to guess if a file
-is missing or was written by a different driver version. The contents are the bundle's (README §9); the report
-needs all of them, but
-must degrade gracefully when `--with-images` or `--with-counters` was not used: it says "no images in this
-bundle" rather than inventing a visual section.
-
-### 1.2 Pass reconstruction
-
-Passes are *derived*, never assumed, and each boundary states why it is a boundary:
-
-| Boundary because | Evidence |
-|---|---|
-| a marker begins/ends | the action list's `BeginEvent`/`EndEvent` pairs (marker path, nested) |
-| the render targets change | RT set + depth target per event (ids, formats) |
-| the command list changes | `ExecuteCommandLists` groupings in the action list, plus the eid order |
-| a compute dispatch follows draws (or the reverse) | call kind per event |
-| `BeginRenderPass`/`EndRenderPass` | the call itself, where the capture has it (D3D12 render passes) |
-
-Nested markers become a path (`Frame/Shadow/Split0`), which is what the report names passes by — *not* by eid or
-index, so the same names survive a re-capture. Draws outside any marker are reported as such (`<unmarked>`,
-counted), because the summary cannot attribute them and must say so.
-
-### 1.3 Per-pass roll-up
-
-Per pass: first/last eid · draws, dispatches, vertex/index counts fed in, primitives out (topology-aware) ·
-RT set with ids, formats and dimensions · depth target and its clear state · the first clear/copy events that
-touch those targets · blend, depth-test and raster state in one line each · shaders per stage (id, entry point,
-container hash, and the *names* of the constant blocks they read, from the reflection) · the key named values for
-blocks the engine schema recognises (§1.7) · resources first touched by this pass · cost (counters if the bundle
-has them, else blank) · the inferred *purpose* (shadow map, depth prepass, G-buffer, base pass, lighting,
-post-process, UI — inferred from state like "depth-only, no colour target" or "full-screen triangle, one texture
-in, no depth", and always labelled inferred).
-
-### 1.4 Detectors — the red flags
+### 1.1 Detectors — the red flags
 
 Each detector states what it means, what proves it, and how certain it is. A row that has never fired on a
 labelled capture is marked *unproven* (§7) rather than quietly shipped; heuristics that key off names carry
@@ -184,7 +138,7 @@ labelled capture is marked *unproven* (§7) rather than quietly shipped; heurist
 | Dead compute | a dispatch whose UAV output nothing reads | usage chain | medium |
 | Peak vs total memory | what the frame holds, what it never reads, and what could alias (§5, the memory and aliasing report) | resource table + lifetimes | advisory |
 
-### 1.5 Notable passes and notable resources
+### 1.2 Notable passes and notable resources
 
 Notability is *stated as a rule*, so a reader can disagree with the ranking: passes are ranked by primitives,
 draw count, RT footprint, resource churn, and counter cost when available; also listed whenever they are odd —
@@ -193,7 +147,7 @@ resource. Resources are ranked by bytes, by how many passes read them, and by "n
 carries the largest RTs, the formats that need special handling (float/HDR, compressed), and the ones the report
 could not decode (say so, do not skip silently).
 
-### 1.6 The report's shape
+### 1.3 The report's shape
 
 Header and provenance (capture hash, API, driver, RenderDoc version, bundle manifest, what was and was not
 analysed) · the frame at a glance · the pipeline map (ordered pass list + a Mermaid graph of pass → RT edges) ·
@@ -203,16 +157,16 @@ reflection, unresolved bindless descriptors, no counters, no shader debug info, 
 the fact that the frame was replayed on this machine's GPU rather than the device that recorded it) · the
 appendix of reproduction commands.
 
-### 1.7 The engine schema table
+### 1.4 The engine schema table
 
 Names like `MobileBasePass`, `IndirectLightingCache` and `Material` are Unreal's, and the summary can only
 speak that vocabulary if it is written down. A small, extendable table (`schemas/*.json`) maps a known engine's
 constant-block, semantic and marker names onto concepts (`base pass`, `GI cache`, `light`, `material`,
 `shadow pass`). Everything derived from it is labelled as name-based; a capture from an unknown engine simply
 gets no interpretation rather than a wrong one. This is also where the project's original question finally gets
-an answer in one place: the mobile-vs-PC GI investigation is the acceptance case for §1 as a whole (§1.8).
+an answer in one place: the mobile-vs-PC GI investigation is the acceptance case for §1 as a whole (§1.5).
 
-### 1.8 Acceptance gates
+### 1.5 Acceptance gates
 
 * Runs on all three captures in this project, in seconds once the bundle exists, with no unhandled exception and
   no warning on stderr.
@@ -503,29 +457,29 @@ never silent ones).
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — the frame-level answer (its input already exists: `dump` writes the bundle, README §9)**
-1. **`report` skeleton (§1.1–1.3)** — bundle in, pass structure and per-pass roll-ups out, deterministic
-   Markdown, fixture-tested.
-2. **`--json` schema (§2) + the driver `selftest` (§7)** — the contract the bundle and every later feature
-   depends on, while the ink is still wet.
-3. **Detectors, ranked by evidence (§1.4)** — start with the certain ones (unbound descriptors, zero work,
-   mismatch checks) and only then the heuristics; each lands with a fixture.
-4. **The engine schema table and the pilot (§1.7–1.8)** — the mobile-vs-PC GI question answered in the report's
-   own words is the acceptance case for all of the above.
+**Phase 1 — the frame-level answer (its skeleton is landed: `report`, README §4.11)**
+1. **`--json` schema (§2) + the driver `selftest` (§7)** — the report and every later feature read the bundle,
+   so pin its contract while the ink is still wet.
+2. **Detectors, ranked by evidence (§1.1)** — start with the certain ones (unbound descriptors, zero work,
+   mismatch checks) and only then the heuristics; each lands with a fixture that fires it.
+3. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
+   own words is the acceptance case for all of the above, and the table is what lets the report name a pass
+   instead of describing its state.
 
 **Phase 2 — exploration and experiments**
-5. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
+4. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
    navigable; ~2 days for all four.
-6. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
+5. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
-7. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
-8. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
-9. **Dependency graph, memory/aliasing report (§5)** — the evidence behind the remaining detectors.
+6. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
+7. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
+8. **Dependency graph, memory/aliasing report (§5)** — the evidence behind the remaining detectors.
 
 **Phase 3 — comparisons and the long tail**
-10. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
-11. **Golden outputs and the corpus (§7)** — the regression net under everything above.
-12. **Bundled chunk names (§5, = §10.1)** — ~2 h, removes the last environment dependency and closes the last
+9. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
+10. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
+    be trusted rather than hoped for.
+11. **Bundled chunk names (§5, = §10.1)** — ~2 h, removes the last environment dependency and closes the last
     README §8 bullet that is not replay's job.
-13. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
-14. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.
+12. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
+13. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.

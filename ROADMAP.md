@@ -4,6 +4,9 @@ Features that are **not implemented yet** in `rdc_analysis.py` or in its replay 
 README §9), in rough priority order. Each item says what it is, why it is wanted, how it would be built, and
 what blocks it.
 
+Landed items are **removed** from this file rather than marked done: their reference moves to `README.md` (or to
+the code), and the remaining sections are renumbered with every cross-reference updated in the same change.
+
 Legend: **P0** = do next / unblocks current work · **P1** = high value, moderate effort · **P2** = useful,
 opportunistic · **P3** = nice-to-have.
 
@@ -13,7 +16,7 @@ opportunistic · **P3** = nice-to-have.
 descriptor writes. `replay_dump.exe` asks the **engine**: names, values, decoded textures, geometry, the
 rendered image (README §9). Anything that spans the two is written here as a **pipeline** item, and the split
 inside it follows the same line — the driver *extracts* what only the engine knows, the offline tool
-*analyses and presents* it, because that half must be testable without a GPU, a capture or a driver (§8).
+*analyses and presents* it, because that half must be testable without a GPU, a capture or a driver (§7).
 
 ### What is deliberately *not* on this list
 
@@ -39,10 +42,10 @@ or `ShaderReflection` answers exactly. What is left is deliberately offline: the
 **The executive summary (§1) is the one exception, and it does not break the rule.** It adds no new extraction:
 it consumes what `replay_dump` and the offline parser already produce, and adds analysis, ranking and
 presentation on top. Every *detector* in it is offline code over a bundle of engine answers, which is what makes
-it testable from fixtures and diffable between runs (§8) — the analysis is the part that must be verifiable, and
+it testable from fixtures and diffable between runs (§7) — the analysis is the part that must be verifiable, and
 the verifiable place for it is Python with the existing suite.
 
-The **D3D12 harness** (§9.5) absorbs nothing: it exists for the one question replay cannot answer — what a
+The **D3D12 harness** (§8.5) absorbs nothing: it exists for the one question replay cannot answer — what a
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
@@ -50,8 +53,9 @@ Current state for reference: the offline tool parses the `.rdc` container, decom
 SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the resource table
 (id → kind/size/name, README §4.9), the descriptor heaps (§4.10) and the root signatures (§3.4), inventories the
 DXBC/DXIL containers, and can check its own parse (`verify`). 22 commands, see `README.md`. The replay driver
-(README §9) adds 13 more (`info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
-`debug`, `usage`, `probe`, `batch`) that ask the engine for what no file read can answer. Since 2026-09-15 the
+(README §9) adds 15 more (`info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
+`debug`, `usage`, `probe`, `batch`, and the bundle pair `dump` + `bundle-verify`) that ask the engine for what no
+file read can answer — including the bundle the report generator reads. Since 2026-09-15 the
 offline tool also has a hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
 `build/` folder. `AGENTS.md` holds the coding rules, README §4.6/§4.7 how to run both. That suite is the safety
@@ -106,20 +110,21 @@ today a 14-command pass is 28 process starts and ~3.5 minutes (README §9), and 
 **How — three stages, each independently useful.**
 
 1. **Extract** — `replay_dump dump <rdc> --out <dir>` writes a *bundle*: one capture, one replay session, plain
-   JSON/PNG files on disk (§2). The driver stays a data source: it answers, it does not judge.
+   JSON/PNG files on disk (the bundle, README §9). The driver stays a data source: it answers, it does not judge.
 2. **Analyse** — the offline tool reads the bundle (and the `.rdc` itself for the chunk stream, the resource
    table and the descriptor writes) and derives the pass structure, the per-pass roll-ups, the ranked lists and
    the red flags. All of this is pure functions over files, so it runs in milliseconds and is unit-testable
-   without a GPU (§8).
+   without a GPU (§7).
 3. **Present** — a deterministic Markdown report + its JSON twin + an optional HTML page. Deterministic means
    byte-stable for a fixed bundle: stable ordering everywhere (eids ascending, tables sorted by a stated key),
-   no timestamps, no absolute paths in the prose — so two runs diff cleanly and a golden test can pin it (§8).
+   no timestamps, no absolute paths in the prose — so two runs diff cleanly and a golden test can pin it (§7).
 
 ### 1.1 The bundle is the interface
 
 Everything downstream depends on the bundle's shape, so it is versioned (`bundleVersion`) and hashed
 (per-file SHA-256 in a manifest) — a report can then state exactly what it read, and refuse to guess if a file
-is missing or was written by a different driver version. Contents are §2's; the summary needs all of them, but
+is missing or was written by a different driver version. The contents are the bundle's (README §9); the report
+needs all of them, but
 must degrade gracefully when `--with-images` or `--with-counters` was not used: it says "no images in this
 bundle" rather than inventing a visual section.
 
@@ -153,7 +158,7 @@ in, no depth", and always labelled inferred).
 ### 1.4 Detectors — the red flags
 
 Each detector states what it means, what proves it, and how certain it is. A row that has never fired on a
-labelled capture is marked *unproven* (§8) rather than quietly shipped; heuristics that key off names carry
+labelled capture is marked *unproven* (§7) rather than quietly shipped; heuristics that key off names carry
 `[heuristic]` in their output. This is the list as designed (subject to being narrowed by evidence):
 
 | Detector | What it means | Evidence | Certainty |
@@ -177,7 +182,7 @@ labelled capture is marked *unproven* (§8) rather than quietly shipped; heurist
 | Unattributed draws | draws outside any marker (a hygiene note, not a bug) | action list | certain |
 | Stencil without a writer | stencil test enabled where nothing wrote stencil in the frame | state + earlier passes | medium |
 | Dead compute | a dispatch whose UAV output nothing reads | usage chain | medium |
-| Peak vs total memory | what the frame holds, what it never reads, and what could alias (§6, the memory and aliasing report) | resource table + lifetimes | advisory |
+| Peak vs total memory | what the frame holds, what it never reads, and what could alias (§5, the memory and aliasing report) | resource table + lifetimes | advisory |
 
 ### 1.5 Notable passes and notable resources
 
@@ -211,7 +216,7 @@ an answer in one place: the mobile-vs-PC GI investigation is the acceptance case
 
 * Runs on all three captures in this project, in seconds once the bundle exists, with no unhandled exception and
   no warning on stderr.
-* **Golden and deterministic**: a fixed bundle yields a byte-identical `report.md` (§8), and the JSON twin is
+* **Golden and deterministic**: a fixed bundle yields a byte-identical `report.md` (§7), and the JSON twin is
   schema-valid.
 * **Testable without a GPU**: fixture bundles in `tests/` cover every detector and every report section; the
   suite grows the way the offline tool's does (`selftest`), and every detector added later lands with a fixture
@@ -219,53 +224,23 @@ an answer in one place: the mobile-vs-PC GI investigation is the acceptance case
 * **No claim without evidence**: a test walks the report's rows and fails if any claim is missing its eid/resId
   (the same rule the tool applies to itself — never invent a name, never print a bare index where a name is
   known).
-* **Honest coverage**: every detector row is either demonstrated on a labelled capture in the corpus (§8, the
+* **Honest coverage**: every detector row is either demonstrated on a labelled capture in the corpus (§7, the
   capture corpus) or marked *unproven* in the report itself.
 * **The pilot**: the summary explains the mobile-vs-PC GI difference in the words of the schema table — which
   pass, which cbuffer, which value — and a reader can follow its appendix commands and see the same thing.
 
-**Effort.** ~2 weeks phased: bundle + driver `dump` (2–3 d, §2), pass reconstruction and roll-ups (2 d),
+**Effort.** ~10 days phased, now that the bundle it reads is landed: pass reconstruction and roll-ups (2 d),
 detectors (2–3 d, the value is in getting them *right* rather than numerous), report + fixtures + gates (2 d),
 schema table and the pilot (2 d).
 
 **Blockers.** Bundle size on the 1.4 GB capture (mitigated by `--since`/`--until`/`--max-events` and by storing
-full state only for distinct PSOs plus pass boundaries, §2); counters are hardware/driver dependent and slow;
+full state only for distinct PSOs plus pass boundaries, README §9); counters are hardware/driver dependent and slow;
 some formats cannot be decoded; shader debug info is usually absent from captured shaders; and a capture is
-replayed on *this* machine's GPU, so device-specific behaviour is out of reach (§9, remote replay).
+replayed on *this* machine's GPU, so device-specific behaviour is out of reach (§8, remote replay).
 
 ---
 
-## 2. P0/P1 — The bundle producer: `replay_dump dump <rdc> --out <dir>`
-
-The driver half of §1, and useful on its own: it turns "a frame" into files a human or a script can read.
-(Not the offline tool's `dump`, which hexdumps one raw range of the stream — README §4.2 — and not the offline
-`summary`, which is the structural histogram; the three names are close enough to say so once.)
-
-| File | Content |
-|---|---|
-| `manifest.json` | bundle version, driver + RenderDoc version, capture path/hash, flags used, per-file SHA-256, what was skipped and why |
-| `capture.json` | API properties, driver, GPU, capture metadata, resolution, frame number, file size, feature flags (`pixelHistory`, `shaderDebugging`, counter availability) |
-| `events.json` | one record per event: eid, marker path, call kind, counts (verts/instances/groups), RT set + depth target with formats, PSO id, shader ids per stage, viewport/scissor, topology, index count and format, the `rpN`/table bindings summary, and a state hash so "did anything change" is one comparison |
-| `states/<eid>.json` | full `state` + reflection for the events that matter: first draw of every pass, every distinct PSO, every event a detector flags, plus whatever `--events <list>` adds |
-| `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant buffer the reflection names, with the buffer id and offset it was read from |
-| `resources.json` | every resource: id, kind, `SetName` name, dimensions/format/bytes, first and last event that touches it, usage list, whether it is ever read, ever written |
-| `textures/<resId>.png` | decoded thumbnails (mip chain down to a few hundred pixels, not full size) + a manifest of what each is |
-| `rt/<eid>_<slot>.png` | optional (`--with-images`): the rendered image at pass boundaries, and at both ends of any pass the driver can tell is interesting (`--image-events <list>`) |
-| `messages.json` | debug messages: severity, eid, text, plus a per-message-hash count |
-| `counters.json` | optional (`--with-counters`): the per-event counter results the engine returns (see §5, per-pass counters, for why per-pass means folding this) |
-
-Flags: `--since <eid>` / `--until <eid>` (a range of the frame), `--marks <substring>` (only passes matching),
-`--max-events N`, `--with-images`, `--with-counters`, `--thumbnails`, `--overwrite`. The dump takes the same
-"one open, many answers" economics as `batch` (README §9) and writes incrementally, so a crash still leaves a
-partial bundle with a manifest that says it is partial — and the summary must treat a partial bundle as partial,
-not as a frame with no exceptions.
-
-Also worth having here, cheap: `replay_dump bundle-verify <dir>` (manifest hashes + JSON schema, no GPU needed)
-so a bundle can be checked before it is analysed or archived.
-
----
-
-## 3. P1 — Replay driver: finding your way around a frame
+## 2. P1 — Replay driver: finding your way around a frame
 
 * **Engine event ids in the driver's own output** — today `draws` numbers the structured file's command-list
   chunks, which is *not* the engine's event id: on the hobby capture the first draw is chunk 316 while the first
@@ -303,15 +278,15 @@ so a bundle can be checked before it is analysed or archived.
   baseline pass. Cost: a real ABI (handles, error returns, no C++ types crossing), which is why the bundle comes
   first. (~2–3 d)
 * **`sweep <dir> [--out <root>]`** — run a command set (or a `dump`) over every `.rdc` in a folder, writing one
-  bundle per capture with a combined index: what makes a corpus (§8, the capture corpus) usable rather than
+  bundle per capture with a combined index: what makes a corpus (§7, the capture corpus) usable rather than
   heroic. (~4 h)
 
-## 4. P1 — Replay driver: experiments on the frame (the "what if" tools)
+## 3. P1 — Replay driver: experiments on the frame (the "what if" tools)
 
 * **Shader patching and differential replay** — `BuildTargetShader` compiles an edited shader (HLSL or the
   capture's own assembly), `ReplaceResource` substitutes it for the original, `Replay()` re-runs the draw, and
   `CreateOutput` gives the image. That turns "is this branch the problem" into an experiment: force the return
-  value, disable a feature, substitute a flat texture — and diff the two renders (§5, render-target contact
+  value, disable a feature, substitute a flat texture — and diff the two renders (§4, render-target contact
   sheets, is where the comparison lives). This is the
   single highest-value item in this section: it answers questions about *that draw* without re-capturing the
   application. (~2–3 d)
@@ -337,12 +312,12 @@ so a bundle can be checked before it is analysed or archived.
   pictures for free — wireframe for topology, quad overdraw for a fragment-cost hunch. (~half a day once the
   display path is shared, which it nearly is)
 
-## 5. P1/P2 — Replay driver: the frame's pictures, counters and geometry
+## 4. P1/P2 — Replay driver: the frame's pictures, counters and geometry
 
 * **Render-target contact sheets** — `image --every-pass <outdir>` (and `--every N`) writes one PNG per pass
   boundary plus a montage and an index Markdown; `image --diff <a.bmp> <b.bmp> --out <heat.png>` compares two
   renders (absolute difference plus a perceptual hash, so "did this actually change the picture" is one number).
-  This is the visual half of the summary and the payoff for §4's experiments. (~1 d)
+  This is the visual half of the summary and the payoff for §3's experiments. (~1 d)
 * **Per-pass counters** — `FetchCounters(counters)` returns results per event (`CounterResult.eventId`); there is
   no event-range parameter, so per-pass means folding the per-event list client-side between a pass's first and
   last eid. New command `counters --per-pass [--passes <path>]`, printing a table and the top-N cost passes, for
@@ -363,7 +338,7 @@ so a bundle can be checked before it is analysed or archived.
   decoded". Also the RT-format audit the summary needs: which targets are UNORM/sRGB/float, and what the shader
   wrote into them. (~half a day)
 
-## 6. P1/P2 — Offline analysis: what the file knows that the frame does not
+## 5. P1/P2 — Offline analysis: what the file knows that the frame does not
 
 * **Dependency graph from the chunk stream** — who wrote what and who read it, from the descriptor writes and
   draw state the offline parser already decodes: a `deps` command emitting DOT/Mermaid plus a table, with
@@ -389,13 +364,13 @@ so a bundle can be checked before it is analysed or archived.
   so the tool still prints readable names when the `renderdoc-src` copy is absent or when analysing captures made
   by a different RenderDoc version. Keep `renderdoc-src` as the preferred source, the table as fallback. (~2 h)
 
-## 7. P2 — A/B: two captures, one answer
+## 6. P2 — A/B: two captures, one answer
 
 * **`replaydiff <a.rdc> <b.rdc>`** — replay both, align by marker path (falling back to call order and the
   resource names present in both), then diff effective state, named cbuffer values, shader hashes, pass structure
   and — with `--with-images` — the renders of the passes with a matching name. The report is a table: which
   passes exist in one and not the other, which values moved, which images changed by more than a threshold. The
-  offline `diff` (§6, the structural capture diff) compares the *file*; this compares what the *engine saw*,
+  offline `diff` (§5, the structural capture diff) compares the *file*; this compares what the *engine saw*,
   including values that come from
   memory rather than the stream. (~2–3 d)
 * **Pass-list diff by path** — the cheap half of the same idea, offline: the marker trees of two captures side by
@@ -403,11 +378,11 @@ so a bundle can be checked before it is analysed or archived.
   indices do not. (~4 h)
 * **Image comparison** — absolute difference, mean/max delta, a perceptual hash and a heat-map PNG, so an A/B
   pair can be judged in one glance (and so a *regression* test can be "this render did not change"). (~half a day)
-* **Golden A/B** — store a bundle per capture in the corpus (§8, the capture corpus) and make "the same capture,
+* **Golden A/B** — store a bundle per capture in the corpus (§7, the capture corpus) and make "the same capture,
   two builds of the tools" a diffable artefact: the regression net for the analy**ser**, where the goldens above
   are the net for the parsers. (~4 h)
 
-## 8. P2 — Verification, regression and the bug atlas
+## 7. P2 — Verification, regression and the bug atlas
 
 * **Golden output files for both tools** — snapshot `summary`/`draws`/`rootsig`/`dxbc` output per capture (offline)
   and the driver's `state`/`shaders`/`cb` text output per eid, and diff on every run: a decoder or writer change
@@ -419,7 +394,7 @@ so a bundle can be checked before it is analysed or archived.
   section without a capture, a GPU or the driver. This is what makes §1 testable in CI and what keeps its
   heuristics from being unfalsifiable. (~1 d, and it grows with every detector)
 * **Schema validation everywhere** — validate the driver's `--json` output and the bundle's files against the
-  published schemas (§3), in the harness and in the offline tests. (~4 h)
+  published schemas (§2), in the harness and in the offline tests. (~4 h)
 * **The capture corpus with labelled expectations** — a `captures/` index (path, provenance, API, engine, size,
   what is known to be wrong with it) and a `*.expect.json` per capture: "this frame has an unbound `rp7`, a dead
   4 MB UAV, a marker imbalance" — and the detectors must fire. Unlabelled captures are still useful (no crash,
@@ -436,7 +411,7 @@ so a bundle can be checked before it is analysed or archived.
   separator, `last`) as hermetic unit tests in the same spirit as the offline suite; plus `--json` output checked
   against the schema. (~half a day)
 
-## 9. P2/P3 — Beyond the local desktop
+## 8. P2/P3 — Beyond the local desktop
 
 * **Remote replay** — capture on a phone, replay where the driver lives: RenderDoc's remote server plus
   `ReplayOptions`, so a mobile capture is replayed by the mobile driver on the device (real counters, real driver
@@ -451,12 +426,12 @@ so a bundle can be checked before it is analysed or archived.
 * **Other APIs' names** — the offline tool's chunk-name loader already takes a driver (`load_chunk_names(driver=...)`);
   expose it, and accept that a Vulkan capture's chunks will be read by the same code with different enums. The
   replay driver is API-agnostic already; the analysis is where the D3D12 assumptions live. (~1 d, plus evidence)
-* **D3D12 harness** (§1's predecessor, kept for completeness) — see §9.5 below.
+* **D3D12 harness** (§1's predecessor, kept for completeness) — see §8.5 below.
 * **Upstream** — the chunk-level findings (event ids vs chunk indices, what `InitialContents` really holds, the
   crash-handle server, the `TextureSave`/`GetTextureData` subresource split) are the kind of thing RenderDoc's
   own docs and tools benefit from. Not a work item, a standing intention: file them as they are confirmed.
 
-### 9.5 The D3D12 harness (only for *synthetic inputs*)
+### 8.5 The D3D12 harness (only for *synthetic inputs*)
 
 **What.** A minimal standalone D3D12 program that creates its own device/PSO/buffers and runs a shader (the
 DXIL extracted by `dump-shaders`) with constants that we choose.
@@ -492,17 +467,17 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 
 **Effort.** ~2–3 days for a single-purpose harness; scope it to one shader at a time.
 
-## 10. P3 — Robustness and scope
+## 9. P3 — Robustness and scope
 
 * **Zstd without the dependency** — either vendor a decoder or fail with a clear message (today it needs
   `pip install zstandard`). (~4 h)
 * **Memory-mapped stream access** — avoid holding ~1.5 GB in RAM for the largest captures. (~4 h)
 * **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
   (~1 h)
-* **Format coverage in the offline view** — the same audit §5's format coverage does for the engine's textures,
+* **Format coverage in the offline view** — the same audit §4's format coverage does for the engine's textures,
   for the file's payloads: what was decoded, what was skipped, and why. (~2 h)
 
-## 11. Clear README §8 ("Pitfalls and known limitations")
+## 10. Clear README §8 ("Pitfalls and known limitations")
 
 One entry per bullet in README §8 that is *not* left to replay (see the note at the top), with the change that
 closes it and the gate that proves it is closed.
@@ -514,44 +489,43 @@ never silent ones).
 
 | # | README §8 bullet | Plan | Priority | Effort |
 |---|---|---|---|---|
-| 11.1 | Chunk names need `renderdoc-src` | §6 bundled chunk-name table | P2 | ~2 h |
+| 10.1 | Chunk names need `renderdoc-src` | §5 bundled chunk-name table | P2 | ~2 h |
 
 ### Acceptance gates
 
-* **11.1** (§6 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
+* **10.1** (§5 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
   newer than the tree; the table is generated by a checked-in script and carries its RenderDoc version; the
   §1.1 warning becomes "using bundled names for RenderDoc X".
 
 ---
 
-## 12. Suggested order
+## 11. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — the frame-level answer (this is the headline, and it is why the bundle comes first)**
-1. **`replay_dump dump` (§2)** — the bundle producer: the expensive replay turned into files, once per frame.
-2. **`report` skeleton (§1.1–1.3)** — bundle in, pass structure and per-pass roll-ups out, deterministic
+**Phase 1 — the frame-level answer (its input already exists: `dump` writes the bundle, README §9)**
+1. **`report` skeleton (§1.1–1.3)** — bundle in, pass structure and per-pass roll-ups out, deterministic
    Markdown, fixture-tested.
-3. **`--json` schema (§3) + the driver `selftest` (§8)** — the contract the bundle and every later feature
+2. **`--json` schema (§2) + the driver `selftest` (§7)** — the contract the bundle and every later feature
    depends on, while the ink is still wet.
-4. **Detectors, ranked by evidence (§1.4)** — start with the certain ones (unbound descriptors, zero work,
+3. **Detectors, ranked by evidence (§1.4)** — start with the certain ones (unbound descriptors, zero work,
    mismatch checks) and only then the heuristics; each lands with a fixture.
-5. **The engine schema table and the pilot (§1.7–1.8)** — the mobile-vs-PC GI question answered in the report's
+4. **The engine schema table and the pilot (§1.7–1.8)** — the mobile-vs-PC GI question answered in the report's
    own words is the acceptance case for all of the above.
 
 **Phase 2 — exploration and experiments**
-6. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§3)** — the cheap commands that make a frame
+5. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
    navigable; ~2 days for all four.
-7. **Shader patching + differential replay, and RT contact sheets (§4, §5)** — the "what if" pair, and the
+6. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
-8. **Pixel history (§4)** — "why is this pixel this colour", gated on the capture supporting it.
-9. **Cross-checks + per-pass counters (§4, §5)** — the deterministic bugs and the cost column.
-10. **Dependency graph, memory/aliasing report (§6)** — the evidence behind the remaining detectors.
+7. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
+8. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
+9. **Dependency graph, memory/aliasing report (§5)** — the evidence behind the remaining detectors.
 
 **Phase 3 — comparisons and the long tail**
-11. **A/B: `replaydiff`, pass-list diff, image comparison (§7)** — the mobile-vs-PC workflow done properly.
-12. **Golden outputs and the corpus (§8)** — the regression net under everything above.
-13. **Bundled chunk names (§6, = §11.1)** — ~2 h, removes the last environment dependency and closes the last
+10. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
+11. **Golden outputs and the corpus (§7)** — the regression net under everything above.
+12. **Bundled chunk names (§5, = §10.1)** — ~2 h, removes the last environment dependency and closes the last
     README §8 bullet that is not replay's job.
-14. **Remote replay (§9)** — the honest fix for the desktop-GPU caveat, when a device is available.
-15. **The D3D12 harness (§9.5)** — only when a shader must be run with inputs the capture does not contain.
+13. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
+14. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.

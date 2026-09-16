@@ -84,6 +84,11 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   last must say so with its `last` argument. After changing any command, validate:
   `build\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
   the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
+- The writer's separator state nests with the arrays: `ArrayOpen` saves the enclosing array's `g_firstRow` and
+  `ArrayClose` restores it. Without that, an *empty* nested array leaves the enclosing one looking like it had
+  just started, the next item is written with no comma, and the document does not parse — which is exactly how
+  `states/<eid>.shaders.json` came out invalid for the hobby capture (a stage whose signature arrays were
+  empty). Validate a writer change with a parse **and** a duplicate-key check.
 - Undefined behaviour and IFNDR are treated as bugs here: no `memcpy` out of a class without a
   `static_assert` that it is trivially copyable and the right size, no signed overflow in size arithmetic
   (compute in `size_t` and check the product), no out-of-range `static_cast` to an enum without a fixed

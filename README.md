@@ -303,7 +303,7 @@ which replay does not expose.
 | Command | Arguments | Output |
 |---|---|---|
 | `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §9.5) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §8.5) |
 
 ### 4.5 Chunk level
 
@@ -752,8 +752,44 @@ one's job is what reading the file cannot answer at all.
 | `counters <rdc>` / `debug <rdc>` | GPU counters / debug messages |
 | `usage <rdc> <resId or name>` | every event that touches a resource |
 | `probe <rdc> [maxEid]` | which event ids the engine actually has — see below |
+| `dump <rdc> [outDir=bundle]` | the whole frame to disk as a *bundle* for the offline tool — see below |
+| `bundle-verify <dir>` | re-hash a bundle's files against its manifest (no device, no DLL) |
 
 `--json` works on every command.
+
+**The bundle — `dump` and `bundle-verify`.** `dump` is one replay session turned into files, so the offline
+half (and a reader) can work without a device. It writes:
+
+| File | Content |
+|---|---|
+| `manifest.json` | bundle version, driver and RenderDoc version, the capture's absolute path, byte count and SHA-256, the flags used, the scan result, every written file with its size and hash, and a `notInThisBundle` list saying what it cannot contain and why |
+| `capture.json` | the capture header: API, driver, machine, feature flags (`shaderDebugging`, `pixelHistory`), counts, file size |
+| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash |
+| `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints |
+| `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant block of every bound stage, at the state events |
+| `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it |
+| `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |
+| `counters.json` | with `--with-counters`: eid, counter, value |
+| `rt/<eid>_<slot>.png` | with `--with-images`: the bound render targets at the state events, through the engine's encoder |
+| `textures/<resId>.png` | with `--textures`: every texture decoded, full size — the engine decodes but does not resize |
+
+Flags: `--since <eid>` · `--until <eid>` · `--max-events N` (bounds the *sweep* as well as the writing) ·
+`--events 270,452` (force state files for those ids) · `--with-images` · `--with-counters` · `--textures` ·
+`--no-usage` (skip the usage lists, the slow part) · `--overwrite`. `bundle-verify <dir>` re-hashes everything
+the manifest lists and exits 1 on a missing, resized or changed file; it needs no device, no DLL and no
+capture, so a bundle from another machine can be checked before it is trusted. Files are written as they are
+produced and the manifest is written last, so a crash leaves a bundle *without* a manifest — visibly
+incomplete rather than silently partial.
+
+**What a bundle cannot contain, and why.** Three items are one limitation: the replay API exposes no *action
+list*, so the driver cannot ask the engine what a given id *was*. A bundle therefore has no call kind
+(draw/copy/clear/marker), no per-event triangle or thread counts, and no marker or pass names — an id is only
+an id with bound state. Those ids come from `probe`'s rule (a root signature or a bound shader), the sweep
+stops when a run of ids has nothing bound, and it is bounded by the file's chunk count, because ids past the
+frame's last event *clamp* to it rather than coming back empty (measured: `probe 4500` reports 4405 ids with
+state on a capture whose structured file has 723 chunks). All of it is written into the bundle's own
+`notInThisBundle` list, so a reader does not conclude that the frame had no copies. Deriving the engine's ids
+from the file is the open item in `ROADMAP.md` §3.
 
 **Three things a replay host must do**, and the reason this file has a long comment about them: put
 `REPLAY_PROGRAM_MARKER()` at file scope, call `RENDERDOC_InitialiseReplay()` before opening anything,
@@ -845,18 +881,18 @@ not exist yet, everything else runs today.
   `chunks`, `chunk`, `draws`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`, `dxbc`,
   `dump-chunk`, `dump-shaders`, `cache`, `selftest` (README §4).
 * **Driver today** — `info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
-  `debug`, `usage`, `probe`, `batch` (README §9).
-* **Roadmap** — `dump` + `bundle-verify` (ROADMAP §2), `report` (ROADMAP §1), `--repl`, `find`/`--at-marker`,
-  `statediff`, `buffer`, `watch`, `debug --group`, `schema`, `sweep` (ROADMAP §3), pixel history, shader patching,
-  shader debugging, overlays (ROADMAP §4), contact sheets, per-pass counters, `mesh --stage/--obj`, texture
-  subresources (ROADMAP §5), `deps`, memory/aliasing report, `--format`, structural `diff` (ROADMAP §6),
-  `replaydiff` (ROADMAP §7), the capture corpus and the golden/fixture tests (ROADMAP §8).
+  `debug`, `usage`, `probe`, `batch`, and the bundle pair `dump` + `bundle-verify` (README §9).
+* **Roadmap** — `report` (ROADMAP §1), `--repl`, `find`/`--at-marker`,
+  `statediff`, `buffer`, `watch`, `debug --group`, `schema`, `sweep` (ROADMAP§2), pixel history, shader patching,
+  shader debugging, overlays (ROADMAP§3), contact sheets, per-pass counters, `mesh --stage/--obj`, texture
+  subresources (ROADMAP§4), `deps`, memory/aliasing report, `--format`, structural `diff` (ROADMAP§5),
+  `replaydiff` (ROADMAP§6), the capture corpus and the golden/fixture tests (ROADMAP§7).
 
 ### 10.1 The rule, and why it is the rule
 
 * **Opening a capture is the expensive thing.** It creates a device and takes ~2 s on a small capture and ~6 s
   on a 1.4 GB one, and only one replay may run at a time. A question the *files* can answer must never be
-  asked of the engine: one `dump` *(ROADMAP §2)* or one `batch` file pays the open once for the whole frame.
+  asked of the engine: one `dump` (README §9) or one `batch` file pays the open once for the whole frame.
 * **The offline half is the verifiable half.** No device, sub-second once the stream is cached, deterministic,
   and covered by the unittest suite — which is why the roadmap puts the analysis *heuristics* there (the report
   generator is offline code over a bundle, ROADMAP §1) and keeps the driver a data source.
@@ -874,17 +910,17 @@ offline tool, and it survives the process that produced it; stdout does not, and
 
 | What to extract | Command | Why an agent wants it |
 |---|---|---|
-| the action list and markers | `replay_dump draws <rdc> 100000` (or the bundle's `events.json`, *ROADMAP §2*) | the frame's structure: what is a pass, what is a draw, which eids are real |
-| per-event state | `state <eid>`, or `states/<eid>.json` in the bundle *(ROADMAP §2)* | render targets, depth, shaders, root parameters — the "what was bound" half of every claim |
+| the action list and markers | `replay_dump draws <rdc> 100000` (or the bundle's `events.json`, README §9) | the frame's structure: what is a pass, what is a draw, which eids are real |
+| per-event state | `state <eid>`, or `states/<eid>.json` in the bundle (README §9) | render targets, depth, shaders, root parameters — the "what was bound" half of every claim |
 | shader reflection | `shaders <eid>` (add `--disasm` when the shader itself is the question) | the **names** (`MobileBasePass`, `IndirectLightingCache`) and the bind points that turn a root parameter into a meaning |
-| named constant values | `cb <eid> <stage> <slot>`, or the bundle's `cbuffers/` *(ROADMAP §2)* | what the shader actually read: the numbers behind "the light is too bright" |
-| buffer contents | `buffer <resId> [offset] [len]` *(ROADMAP §3)* | what is really in a buffer that reflection cannot describe (index data, structured buffers) |
-| textures | `textures --save <dir>` today; subresources and raw/HDR options *(ROADMAP §5)* | decoded pixels to look at, plus the format/dimension facts for the audit |
-| render targets | `image <eid> <out.bmp>` today; bundle `rt/` *(ROADMAP §2)* and contact sheets *(ROADMAP §5)* | what the pass produced — the fastest way to see "this pass drew nothing" |
-| geometry | `mesh <eid>` today; other stages and `--obj` *(ROADMAP §5)* | what the VS/GS emitted, which is where vertex bugs show themselves |
-| GPU counters | `counters` today; per-pass fold *(ROADMAP §5)* | where the time went, where the driver supports it |
+| named constant values | `cb <eid> <stage> <slot>`, or the bundle's `cbuffers/` (README §9) | what the shader actually read: the numbers behind "the light is too bright" |
+| buffer contents | `buffer <resId> [offset] [len]` *(ROADMAP§2)* | what is really in a buffer that reflection cannot describe (index data, structured buffers) |
+| textures | `textures --save <dir>` today; subresources and raw/HDR options *(ROADMAP§4)* | decoded pixels to look at, plus the format/dimension facts for the audit |
+| render targets | `image <eid> <out.bmp>` today; bundle `rt/` (README §9) and contact sheets *(ROADMAP§4)* | what the pass produced — the fastest way to see "this pass drew nothing" |
+| geometry | `mesh <eid>` today; other stages and `--obj` *(ROADMAP§4)* | what the VS/GS emitted, which is where vertex bugs show themselves |
+| GPU counters | `counters` today; per-pass fold *(ROADMAP§4)* | where the time went, where the driver supports it |
 | debug messages | `debug` | the API's own complaints — the highest-value red flags there are |
-| usage chains | `usage <resId>`, or `resources.json` *(ROADMAP §2)* | who writes and who reads a resource: the evidence for "dead" and "uninitialised" |
+| usage chains | `usage <resId>`, or `resources.json` (README §9) | who writes and who reads a resource: the evidence for "dead" and "uninitialised" |
 | resource identity | `resources <rdc>` (offline) | names and sizes for every id, so output speaks in names instead of `res342` |
 | the file's own view | `sections`, `verify`, `markers`, `draws`, `rootsig`, `descriptors` (offline) | structure, integrity, and the descriptor writes the engine does not report |
 | the `.rdc` itself | keep it next to the bundle | the offline commands read it directly; the engine's output is a *cache* of what it said, never the only copy |
@@ -894,11 +930,11 @@ offline tool, and it survives the process that produced it; stdout does not, and
 1. **Offline first, because it is free.** `verify` (is the file intact?), `summary`/`markers` (what is in it?),
    `resources` (ids → names), `draws` (the command stream's own account). No device, ~0.3 s each once the
    stream is cached (§4.8).
-2. **One replay session for everything the engine alone can answer.** `dump` *(ROADMAP §2)* when it exists; otherwise a
+2. **One replay session for everything the engine alone can answer.** `dump` (README §9), or a
    `batch` file holding the specific questions (README §9). Never open the capture twice for the same
    question, and call `probe` first if the eids are not certain.
 3. **Analyse offline over the bundle *and* the `.rdc`**: the report generator *(ROADMAP §1)* for the map, then targeted
-   offline commands (`resources`, `deps` *(ROADMAP §6)*, `diff` *(ROADMAP §6)*, `rootsig`) for the specific thing.
+   offline commands (`resources`, `deps` *(ROADMAP§5)*, `diff` *(ROADMAP§5)*, `rootsig`) for the specific thing.
 4. **Targeted engine follow-ups only** for what is still open, using the eids the offline step produced — not a
    second fishing expedition. Files narrow the question, the engine answers it, files again.
 5. **Assemble the answer with evidence**, and state plainly what could not be determined (§10.6).
@@ -908,7 +944,7 @@ offline tool, and it survives the process that produced it; stdout does not, and
 **A. "Explain this frame to me."** The five-minute pass, and the one to run before any other recipe.
 
 ```powershell
-.\build\replay_dump.exe dump 'capture.rdc' --out bundle --with-images   # roadmap §2: one replay, everything
+.\build\replay_dump.exe dump 'capture.rdc' bundle --with-images        # README §9: one replay, everything
 python rdc_analysis.py report 'capture.rdc' --out out                   # roadmap §1: the executive summary
 ```
 
@@ -925,11 +961,11 @@ today: `sections`, `summary`, `markers`, `draws`, `resources`.
 .\build\replay_dump.exe cb 'capture.rdc' <eid> ps 3            # ... and the values it read
 ```
 
-If the draw is there and the values look right, the pixel history *(ROADMAP §4)* is the next step and usually the
+If the draw is there and the values look right, the pixel history *(ROADMAP§3)* is the next step and usually the
 answer: it lists every event that touched that pixel **and the reason each was rejected** — `depthTestFailed`,
 `stencilTestFailed`, `scissorClipped`, `viewClipped`, `shaderDiscarded`, `backfaceCulled`, `sampleMasked` —
 with the values before and after. "Nothing drew it" then becomes "the scissor was 0×0 at eid 812". If the pixel
-history says the shader itself is responsible, patch it *(ROADMAP §4)* — force the return value, disable the branch —
+history says the shader itself is responsible, patch it *(ROADMAP§3)* — force the return value, disable the branch —
 and re-render the draw to see what changes. That experiment is often faster than reasoning about the
 disassembly.
 
@@ -937,12 +973,12 @@ disassembly.
 `replaydiff` exist.
 
 ```powershell
-python rdc_analysis.py diff mobile.rdc pc.rdc                      # roadmap §6: the file's view, no device
-.\build\replay_dump.exe replaydiff mobile.rdc pc.rdc --with-images # roadmap §7: what the engine saw, and the renders
+python rdc_analysis.py diff mobile.rdc pc.rdc                      # roadmap§5: the file's view, no device
+.\build\replay_dump.exe replaydiff mobile.rdc pc.rdc --with-images # roadmap§6: what the engine saw, and the renders
 ```
 
 Then narrow by name rather than by index: the pass list (aligned by **marker path**, so it survives
-re-captures), the named cbuffer values that moved (`watch <name>` *(ROADMAP §3)* turns that into a table over the whole
+re-captures), the named cbuffer values that moved (`watch <name>` *(ROADMAP§2)* turns that into a table over the whole
 frame), and the schema table *(ROADMAP §1.7)* to say which *concept* the differing block is (`IndirectLightingCache`,
 `Material`, …). Where the two engines' reflections disagree on names entirely, the offline `resources` and
 `rootsig` views are the fallback: they compare what the *file* recorded. State the GPU caveat (§10.5) in the
@@ -957,20 +993,20 @@ python rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name → id,
 ```
 
 Three things to check, in this order: is the *content* right (the decoded PNG), is the *format* right for how
-it is sampled (the RT-format audit, *ROADMAP §5*), and was it *written* before it was read (`deps` *(ROADMAP §6)*: the
+it is sampled (the RT-format audit, *ROADMAP§4*), and was it *written* before it was read (`deps` *(ROADMAP§5)*: the
 write→read chain). To prove its contribution rather than argue about it, substitute a flat texture for it and
-diff the renders *(ROADMAP §4, §5)* — if the picture does not change, the texture is not the problem.
+diff the renders *(ROADMAP§3, §5)* — if the picture does not change, the texture is not the problem.
 
 **E. "What is in this uniform — and is it ever what we expect?"**
 
 ```powershell
 .\build\replay_dump.exe cb 'capture.rdc' 27931 ps 3     # named values, structs and arrays expanded
-.\build\replay_dump.exe watch 'capture.rdc' Light.intensity   # roadmap §3: the value at every event
+.\build\replay_dump.exe watch 'capture.rdc' Light.intensity   # roadmap§2: the value at every event
 ```
 
 `cb` answers "what is bound here"; `watch` answers "is it ever different" — the difference between a constant
 that is wrong and a constant that is never set at all. An all-zero buffer where the reflection says the shader
-reads it is a red flag the report generator looks for *(ROADMAP §1.4)*, and `buffer <resId>` *(ROADMAP §3)* shows the raw bytes
+reads it is a red flag the report generator looks for *(ROADMAP §1.4)*, and `buffer <resId>` *(ROADMAP§2)* shows the raw bytes
 when the reflection is not enough (structured buffers, index data, hand-built tables).
 
 **F. "What does the shader actually do?"** Four independent views, cheapest first.
@@ -978,12 +1014,12 @@ when the reflection is not enough (structured buffers, index data, hand-built ta
 ```powershell
 .\build\replay_dump.exe shaders 'capture.rdc' <eid> --disasm   # the code, with the reflection next to it
 python rdc_analysis.py dxbc 'capture.rdc' verbose              # which containers exist, and their hashes
-.\build\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP §5, the rest)
+.\build\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP§4, the rest)
 ```
 
 Cross-check the signatures before reading the maths: VS output vs PS input (same semantic, index and width —
 a mismatch is a real bug and a *certain* finding), and each stage's expected bindings vs what the root
-signature actually binds. When debug info exists in the capture, the shader debugger *(ROADMAP §4)* steps one
+signature actually binds. When debug info exists in the capture, the shader debugger *(ROADMAP§3)* steps one
 invocation and prints the variables; when it does not (usually), say so — that is a limitation to report, not
 a puzzle to keep grinding at.
 
@@ -991,12 +1027,12 @@ a puzzle to keep grinding at.
 
 ```powershell
 .\build\replay_dump.exe counters 'capture.rdc'                 # what the driver can measure
-.\build\replay_dump.exe counters 'capture.rdc' --per-pass      # roadmap §5: folded per pass (fetch is per event)
-.\build\replay_dump.exe image 'capture.rdc' <eid> out.bmp      # what each pass produced (contact sheet, ROADMAP §5)
+.\build\replay_dump.exe counters 'capture.rdc' --per-pass      # roadmap§4: folded per pass (fetch is per event)
+.\build\replay_dump.exe image 'capture.rdc' <eid> out.bmp      # what each pass produced (contact sheet, ROADMAP§4)
 ```
 
-The offline half supplies the parts the GPU cannot: `deps` *(ROADMAP §6)* for writes nobody reads and reads nobody
-wrote, the memory/aliasing report *(ROADMAP §6)* for "these N MB could be shared", and the VRAM budget for "what if
+The offline half supplies the parts the GPU cannot: `deps` *(ROADMAP§5)* for writes nobody reads and reads nobody
+wrote, the memory/aliasing report *(ROADMAP§5)* for "these N MB could be shared", and the VRAM budget for "what if
 this were half resolution". Counters are hardware and driver dependent — if they are unavailable, the honest
 answer is "not measurable here", not zero.
 
@@ -1005,7 +1041,7 @@ answer is "not measurable here", not zero.
 ```powershell
 python rdc_analysis.py draws 'capture.rdc'                     # offline: clears, copies and the order of writes
 .\build\replay_dump.exe usage 'capture.rdc' <resId>            # engine: the same question, from the device's side
-.\build\replay_dump.exe buffer 'capture.rdc' <resId> 0 256     # roadmap §3: the actual bytes
+.\build\replay_dump.exe buffer 'capture.rdc' <resId> 0 256     # roadmap§2: the actual bytes
 ```
 
 The class of bug where the answer is a *question*: a resource read in a pass that no earlier pass wrote
@@ -1017,7 +1053,7 @@ earlier eid.
 **I. "Did my change fix it — or break something else?"**
 
 ```powershell
-.\build\replay_dump.exe batch 'capture.rdc' run.txt > before.txt   # or `dump` (roadmap §2)
+.\build\replay_dump.exe batch 'capture.rdc' run.txt > before.txt   # or `dump`, README §9
 # ... rebuild / recapture ...
 .\build\replay_dump.exe batch 'capture.rdc' run.txt > after.txt
 ```
@@ -1025,8 +1061,8 @@ earlier eid.
 Compare the **text** output byte-for-byte (it is the contract: this is how the driver's own regression pass is
 run, README §9), and validate the JSON separately — parse it, and check for duplicate keys, because a plain
 parse hides a repeated key and that is exactly how a dropped vertex-shader block went unnoticed once. With
-images, compare with a difference threshold *(ROADMAP §5)* rather than by eye: "did the picture change" should be a
-number. Keep the two bundles: the golden/fixture tests *(ROADMAP §8)* are the same idea, checked in.
+images, compare with a difference threshold *(ROADMAP§4)* rather than by eye: "did the picture change" should be a
+number. Keep the two bundles: the golden/fixture tests *(ROADMAP§7)* are the same idea, checked in.
 
 **J. "Triage a capture someone sent me."** A fixed order, because each step can end the investigation.
 
@@ -1041,7 +1077,7 @@ number. Keep the two bundles: the golden/fixture tests *(ROADMAP §8)* are the s
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
 with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §9.5):
+this is the one case for the standalone harness (ROADMAP§8.5):
 
 ```powershell
 python rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
@@ -1068,15 +1104,15 @@ silence.
 **M. "Run it headless."** Two different regimes, and they should not be confused:
 
 * **CI, no GPU:** the offline tool only — `verify`, `summary`, `draws`, `resources`, `report` *(ROADMAP §1)*, `selftest`,
-  Pyright. The fixture bundles *(ROADMAP §8)* are what make even the report generator testable there.
+  Pyright. The fixture bundles *(ROADMAP§7)* are what make even the report generator testable there.
 * **A machine with the GPU and the capture:** the driver, gated — `probe` alone, one replay at a time,
-  `debug --fail-on error` *(ROADMAP §3)* as the pass/fail line, `bundle-verify` *(ROADMAP §2)* over the artefacts, and the
+  `debug --fail-on error` *(ROADMAP§2)* as the pass/fail line, `bundle-verify` over the artefacts, and the
   golden/baseline comparison of §10.4 I. Record what CI cannot cover rather than implying coverage.
 
 ### 10.5 Pitfalls an agent must not walk into
 
 * **A wrong eid is not an error.** `state`/`shaders` on an id that has no pipeline state return an *empty*
-  result. Check with `probe`, or use a marker path *(ROADMAP §3)* instead of a number.
+  result. Check with `probe`, or use a marker path *(ROADMAP§2)* instead of a number.
 * **A chunk index is not an event id.** The offline tool numbers chunks; the engine numbers what a command list
   recorded. On one capture the first draw was chunk 316 while the first event with state was 842 (README §9).
 * **`probe` runs alone** — it forces non-events on purpose and leaves the last real event's state behind, so
@@ -1088,7 +1124,7 @@ silence.
   neither = killed).
 * **Text output is the contract.** It stays byte-identical unless a change is deliberate and recorded; the
   JSON is what a consumer should parse (README §9).
-* **Three names, three tools.** `replay_dump dump` (a bundle, *§2*) is not `rdc_analysis.py dump` (a raw stream
+* **Three names, three tools.** `replay_dump dump` (a bundle, README §9) is not `rdc_analysis.py dump` (a raw stream
   range); `replay_dump draws` (events, with engine state) is not `rdc_analysis.py draws` (chunk-level); and the
   report generator is `report` *(ROADMAP §1)*, because `summary` is already the structural histogram.
 * **Formats and features are conditional.** Not every texture format can be decoded, shader debugging needs
@@ -1107,9 +1143,9 @@ built on.
 ## 11. See also
 
 * `ROADMAP.md` — features not implemented yet, in priority order: the **executive summary** and the replay bundle
-  it reads (§1–§2), the driver's navigation and experiment commands (§3–§5), the offline **dependency graph**
+  it reads (§1), the driver's navigation and experiment commands (§3–§5), the offline **dependency graph**
   and memory report (§6), **two-capture A/B** (§7), the **verification corpus** (§8), and the D3D12 harness for
-  synthetic inputs (§9.5).
+  synthetic inputs (`ROADMAP.md` §8.5).
 * RenderDoc source, expected at `<root>/rdc-tools/renderdoc-src/` (§1.1). The files this tool and its docs rely
   on: `serialise/serialiser.cpp` (chunk framing), `serialise/rdcfile.cpp` (container), `core/core.h` and
   `driver/d3d12/d3d12_common.h` (chunk-name enums), `driver/d3d12/d3d12_command_list_wrap.cpp` (payload

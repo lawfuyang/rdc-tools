@@ -52,7 +52,11 @@ EXPORTS
 "@ | Set-Content -Encoding ASCII $def
 
 $lib = Join-Path $build 'renderdoc.lib'
-$src = Join-Path $root 'replay_dump.cpp'
+# Two translation units: the tool, and the schema table it publishes (schema.cpp/schema.h). /MP compiles them
+# in parallel -- with two units that is not much, but the switch is what keeps a third file from being free
+# in wall-clock terms only by accident. The headers are not precompiled; both units are small enough that /MP
+# pays for itself without one.
+$src = (Join-Path $root 'replay_dump.cpp') + '" "' + (Join-Path $root 'schema.cpp')
 $out = Join-Path $build "$Out.exe"
 
 $bat = Join-Path $build 'build.bat'
@@ -61,7 +65,7 @@ $bat = Join-Path $build 'build.bat'
 call "$vcvars" >nul || exit /b 1
 cd /d "$build" || exit /b 1
 lib /nologo /def:"$def" /out:"$lib" /machine:x64 || exit /b 1
-cl /nologo /std:c++17 /EHsc /O2 ^
+cl /nologo /std:c++17 /EHsc /O2 /MP ^
    /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 ^
    /external:W0 /external:anglebrackets ^
    /D_CRT_SECURE_NO_WARNINGS /I "$root\renderdoc-src\renderdoc\api\replay" /DRENDERDOC_PLATFORM_WIN32 ^

@@ -84,6 +84,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   last must say so with its `last` argument. After changing any command, validate:
   `build\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
   the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
+- Layout, so new code has an obvious home: `rdc_analysis.py` is the decoders, the commands and the CLI;
+  `rdc_report.py` and `rdc_schemas.py` are the two offline layers, re-exported from `rdc_analysis.py`
+  (`X as X`, the PEP 484 re-export form) so `R.cmd_report` and `R.validate_document` keep working for the
+  tests that were written against them. On the C++ side `replay_dump.cpp` is the tool and `schema.cpp` /
+  `schema.h` hold the schema table — *data only*, because the printing, writing and checking need the tool's
+  `Fail`/log plumbing. Split by what never changes together, not by size: the last split moved 474 lines of
+  table out of the driver and 829 lines of analysis out of the tool, and touched no logic at all.
 - Every `--json` document carries `schemaVersion` (README §9, and §4.12 for the validator), and the schema for it lives in the
   driver's `kSchemas` table. A new document, or a new member on an existing one, updates that schema **and**
   the checked-in `schema/` folder in the same change (`replay_dump schema --out schema`, then

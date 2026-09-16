@@ -25,9 +25,13 @@ device. §8 lists the sharp edges that follow from that.
 
 ```
 rdc-tools/
-  rdc_analysis.py     the tool (single file, ~2400 lines)
+  rdc_analysis.py     the offline tool: .rdc decoders, the commands, the CLI (§3, §4)
+  rdc_report.py       the frame report — a bundle in, deterministic Markdown/JSON out (§4.11)
+  rdc_schemas.py      the JSON contract — the validator behind `validate` (§4.12)
+  schema/             the driver's schemas, checked in (`schema --check` fails when they drift, §4.12)
   replay_dump.cpp     the replay driver: asks RenderDoc's engine what the file cannot say (§9)
-  build_replay.ps1    builds it against the installed renderdoc.dll (output in .\build\)
+  schema.cpp  schema.h  the schema table the driver publishes — data; the tool prints, writes and checks it
+  build_replay.ps1    builds both translation units against the installed renderdoc.dll (output in .\build\)
   README.md           this file — usage, features, internals, how to extend
   ROADMAP.md          unimplemented features and planned work
   tests/              self-contained unittest suite (run: rdc_analysis.py selftest)

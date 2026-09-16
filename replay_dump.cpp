@@ -1032,6 +1032,19 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
   return 0;
 }
 
+//: One signature element as a row: the semantic with its index, the register it starts at, and `c<N>` -- the
+//: component count the engine reports for it (`SigParameter::compCount`), in the same labelled-number style
+//: the binding rows use (`t0 s0 n4`, `b0 s0`).
+//:
+//: The count is here for the offline side's sake: a pixel shader that reads *more* components of a semantic
+//: than the stage before it writes is a link error, and that cannot be seen from the semantic name alone. It
+//: is the count rather than a type name because the count is what the comparison needs -- naming the type
+//: would mean carrying RenderDoc's own `VarType` stringiser, which this tool does not link.
+static std::string SignatureText(const SigParameter &sig)
+{
+  return Fmt("%s%d reg%d c%d", sig.semanticName.c_str(), sig.semanticIndex, sig.regIndex, sig.compCount);
+}
+
 //: The shader reflection: constant blocks with their names and bind points, the resource bindings,
 //: the input/output signatures, and the disassembly. This is what names a root parameter, and what
 //: the offline tool's removed `sig`/`dxbc` harvest was trying to guess at.
@@ -1114,14 +1127,12 @@ static int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *p
 
     ArrayOpen("inputSignature");
     for(size_t s = 0; s < refl->inputSignature.size(); s++)
-      Row(Fmt("%s%d reg%d", refl->inputSignature[s].semanticName.c_str(),
-              refl->inputSignature[s].semanticIndex, refl->inputSignature[s].regIndex));
+      Row(SignatureText(refl->inputSignature[s]));
     ArrayClose(false);                               // outputSignature follows
 
     ArrayOpen("outputSignature");
     for(size_t s = 0; s < refl->outputSignature.size(); s++)
-      Row(Fmt("%s%d reg%d", refl->outputSignature[s].semanticName.c_str(),
-              refl->outputSignature[s].semanticIndex, refl->outputSignature[s].regIndex));
+      Row(SignatureText(refl->outputSignature[s]));
     ArrayClose(!wantDisasm);
 
     if(wantDisasm)

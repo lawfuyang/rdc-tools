@@ -501,12 +501,16 @@ class TestReportDetectors(BundleCase):
                          'root constants can serve the register too, and a bundle cannot say which')
 
     def test_the_measured_vertex_and_pixel_signature_pair_does_not_fire(self):
-        """The real rows from `PC Renderer.rdc` at eid 700.
+        """The real rows from `PC Renderer.rdc` at eid 700, and the same window's rows with their widths.
 
         The vertex shader emits five semantics and the pixel shader reads six; the extra one is
         `SV_IsFrontFace`, which the rasteriser supplies. That is why the rule ignores `SV_` on both sides --
         and why this pair, the only measured attribute pass available, must stay silent. Committed as a test
         rather than a note because it is the one case that could have made the rule fire on correct shaders.
+
+        The second bundle is the same capture's rows as the driver writes them now, with the engine's
+        component counts (`c4`, `c3`, `c1` -- measured at eid 678 in that window). Both spellings must stay
+        silent: an older bundle has no counts, and a newer one has counts that agree.
         """
         bundle = self.path('b')
         write_bundle(
@@ -524,6 +528,58 @@ class TestReportDetectors(BundleCase):
                                     'SV_Position0 reg4']}]}}})
         self.assertEqual(self.flags(bundle, 'shader-io-mismatch'), [],
                          'a system input and an interpolation suffix are not mismatches')
+
+        with_widths = self.path('bw')
+        write_bundle(
+            with_widths, events=[event(678, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+            states={678: {'shaders': {'eid': 678, 'stages': [
+                {'stage': 'vs', 'resource': '1', 'entry': 'Main', 'constantBlocks': [],
+                 'inputSignature': ['ATTRIBUTE0 reg0 c4', 'ATTRIBUTE13 reg1 c1', 'SV_InstanceID0 reg2 c1',
+                                    'SV_VertexID0 reg3 c1'],
+                 'outputSignature': ['TEXCOORD10_centroid0 reg0 c4', 'TEXCOORD11_centroid0 reg1 c4',
+                                     'PRIMITIVE_ID0 reg2 c1', 'TEXCOORD9 reg3 c3', 'SV_Position0 reg4 c4']},
+                {'stage': 'ps', 'resource': '2', 'entry': 'MainPS', 'constantBlocks': [],
+                 'outputSignature': ['SV_Target0 reg0 c4'],
+                 'inputSignature': ['TEXCOORD10_centroid0 reg0 c4', 'TEXCOORD11_centroid0 reg1 c4',
+                                    'PRIMITIVE_ID0 reg2 c1', 'SV_IsFrontFace0 reg2 c1', 'TEXCOORD9 reg3 c3',
+                                    'SV_Position0 reg4 c4']}]}}})
+        self.assertEqual(self.flags(with_widths, 'shader-io-mismatch'), [],
+                         'the measured widths agree on every semantic')
+
+    def test_a_pixel_input_wider_than_the_vertex_output_is_a_finding(self):
+        """The width half of *VS out is not PS in*: the evidence is the engine's own component count.
+
+        Reading *fewer* components is a legal prefix subset and stays silent; reading *more* cannot be
+        satisfied at pipeline creation. Rows without a count -- a bundle from an older driver -- are not
+        compared at all rather than guessed at, which is the difference between "agrees" and "not looked at".
+        """
+        def pair(vs_out: List[str], ps_in: List[str], name: str) -> str:
+            bundle = self.path(name)
+            write_bundle(bundle, events=[event(96, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
+                         states={96: {'shaders': {'eid': 96, 'stages': [
+                             {'stage': 'vs', 'resource': '1', 'entry': 'Main', 'constantBlocks': [],
+                              'outputSignature': vs_out},
+                             {'stage': 'ps', 'resource': '2', 'entry': 'MainPS', 'constantBlocks': [],
+                              'inputSignature': ps_in}]}}})
+            return bundle
+
+        wider = self.flags(pair(['TEXCOORD0 reg0 c2', 'SV_Position0 reg1 c4'],
+                                ['TEXCOORD0 reg0 c4', 'SV_Position0 reg1 c4'], 'wider'),
+                           'shader-io-mismatch')
+        self.assertEqual(len(wider), 1, 'SV_Position agrees, TEXCOORD0 does not')
+        self.assertIn('reads TEXCOORD0 at width c4 and the vertex shader writes it at c2', wider[0]['what'])
+        self.assertIn('may use fewer components than its producer writes, never more', wider[0]['what'])
+        self.assertEqual(wider[0]['evidence'],
+                         ['vs Main -> ps MainPS, eid 96..96',
+                          'vs writes: TEXCOORD0 reg0 c2', 'ps reads: TEXCOORD0 reg0 c4'])
+        self.assertEqual(wider[0]['certainty'], 'certain')
+
+        narrower = self.flags(pair(['TEXCOORD0 reg0 c4'], ['TEXCOORD0 reg0 c2'], 'narrower'),
+                              'shader-io-mismatch')
+        self.assertEqual(narrower, [], 'a prefix subset is legal')
+        unknown = self.flags(pair(['TEXCOORD0 reg0'], ['TEXCOORD0 reg0'], 'unknown'),
+                             'shader-io-mismatch')
+        self.assertEqual(unknown, [], 'an older bundle carries no component counts to compare')
 
     def test_a_pixel_input_the_vertex_shader_does_not_emit_is_a_finding(self):
         def pair(vs_out: List[str], ps_in: List[str], extra_stage: str = '') -> str:

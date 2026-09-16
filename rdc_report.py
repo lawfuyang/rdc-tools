@@ -1040,19 +1040,31 @@ def detect_unbound_root_parameters(bundle: BundleData) -> List[RedFlag]:
     return flags
 
 
-#: A signature row as the reflection writes it: `<SEMANTIC><index> reg<N>` — `SV_Position0 reg4`,
-#: `TEXCOORD9 reg3`, `TEXCOORD10_centroid0 reg0`. The semantic carries its index, and HLSL's interpolation
-#: modifier (`_centroid`, `_linear`, `_nointerpolation`) can be on either side or on both, which is why the
-#: comparison below tries the name with and without it rather than keeping a list of modifiers to strip.
-SIGNATURE_ROW = re.compile(r'^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*?)(?P<index>\d+)\s+reg\d+\s*$')
+#: A signature row as the reflection writes it: `<SEMANTIC><index> reg<N> [c<M>]` — `SV_Position0 reg4`,
+#: `TEXCOORD9 reg3 c3`, `TEXCOORD10_centroid0 reg0 c4`. The `cN` is the component count the engine reports
+#: (`SigParameter::compCount`), and it is *optional*: a bundle written by an older driver has no `cN`, and
+#: such a row is compared for name and index only rather than guessed at. The semantic carries its index,
+#: and HLSL's interpolation modifier (`_centroid`, `_linear`, `_nointerpolation`) can be on either side or
+#: on both, which is why the comparison below tries the name with and without it rather than keeping a list
+#: of modifiers to strip.
+SIGNATURE_ROW = re.compile(r'^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*?)(?P<index>\d+)\s+reg\d+'
+                           r'(?:\s+c(?P<count>\d+))?\s*$')
 
 
-def _semantic(row: Any) -> Optional[Tuple[str, int]]:
-    """`(name, index)` for a signature row, or None for a row this rule does not read."""
+def _semantic(row: Any) -> Optional[Tuple[str, int, Optional[int]]]:
+    """`(name, index, components)` for a signature row, or None for a row this rule does not read. The
+    count is None when the row does not carry one, which is not the same as a count of zero."""
     match = SIGNATURE_ROW.match(str(row))
     if match is None:
         return None
-    return match.group('name'), int(match.group('index'))
+    count = match.group('count')
+    return match.group('name'), int(match.group('index')), int(count) if count is not None else None
+
+
+def _pair(semantic: Tuple[str, int, Optional[int]]) -> Tuple[str, int]:
+    """Name and index, which is what "the same semantic" means here. The width is a separate question and
+    is compared separately, because reading *fewer* components than the producer writes is legal."""
+    return semantic[0], semantic[1]
 
 
 def _semantic_matches(produced: Tuple[str, int], consumed: Tuple[str, int]) -> bool:
@@ -1073,19 +1085,29 @@ def _semantic_matches(produced: Tuple[str, int], consumed: Tuple[str, int]) -> b
 
 
 def detect_shader_io_mismatch(bundle: BundleData) -> List[RedFlag]:
-    """A pixel shader reading a semantic the vertex shader does not emit (ROADMAP §1.1, certain).
+    """A pixel shader input the vertex shader does not provide (ROADMAP §1.1, certain).
 
-    Both reflections are in the same document, so this needs no capture: D3D12 requires every PS input to be
-    produced by the VS, and the only exceptions are the `SV_` system values, which the rasteriser supplies
-    (`SV_IsFrontFace` in the measured case -- the one input of six that the vertex shader does not emit, and
-    the reason the rule ignores `SV_` on both sides). A vertex shader emitting *more* than the pixel shader
-    reads is legal and never reported.
+    Both reflections are in the same document, so this needs no capture, and it answers both halves of the
+    row *VS out is not PS in*:
+
+    * **A semantic the vertex shader does not emit at all.** D3D12 requires every PS input to be produced by
+      the preceding stage, and the only exceptions are the `SV_` system values, which the rasteriser supplies
+      (`SV_IsFrontFace` in the measured case -- the one input of six that the vertex shader does not emit, and
+      the reason the rule ignores `SV_` on both sides). A vertex shader emitting *more* than the pixel shader
+      reads is legal and never reported.
+    * **The same semantic at a greater width.** The driver's rows carry the engine's component count
+      (`c4`, `c3`, `c1`; measured on `PC Renderer.rdc`, where `TEXCOORD9` is c3 and `SV_Position0` is c4), and
+      an input that reads *more* components of a semantic than its producer writes cannot be satisfied at
+      pipeline creation. Reading *fewer* is a legal prefix subset and stays silent. The component *type*
+      (float against uint) is not in the row, so a type-level mismatch is not reported: the row says what it
+      says, and the row is the evidence.
 
     A geometry, hull or domain shader between them can change the signature, so an event that has one is
     skipped rather than reported: the rule compares adjacent stages, and those are not adjacent.
     """
     flags: List[RedFlag] = []
-    groups: Dict[Tuple[str, str, str], List[int]] = {}
+    missing: Dict[Tuple[str, str, str], List[int]] = {}
+    narrow: Dict[Tuple[str, str, str, int, int], Dict[str, Any]] = {}
     for key in sorted(bundle['states']):
         shaders = bundle['states'][key].get('shaders')
         if not isinstance(shaders, dict):
@@ -1095,26 +1117,51 @@ def detect_shader_io_mismatch(bundle: BundleData) -> List[RedFlag]:
             continue
         if any(other in stages for other in ('gs', 'hs', 'ds')):
             continue
+        eid = int(shaders.get('eid', 0) or 0)
+        vs_entry = str(stages['vs'].get('entry', '?'))
+        ps_entry = str(stages['ps'].get('entry', '?'))
 
-        produced = [row for row in (_semantic(r) for r in stages['vs'].get('outputSignature', []))
+        produced = [(row, raw) for row, raw in
+                    ((_semantic(r), str(r)) for r in stages['vs'].get('outputSignature', []))
                     if row is not None and not row[0].startswith('SV_')]
         for row in stages['ps'].get('inputSignature', []):
             consumed = _semantic(row)
             if consumed is None or consumed[0].startswith('SV_'):
                 continue
-            if not any(_semantic_matches(one, consumed) for one in produced):
-                eid = int(shaders.get('eid', 0) or 0)
-                groups.setdefault((str(stages['vs'].get('entry', '?')),
-                                   str(stages['ps'].get('entry', '?')),
-                                   '%s%d' % (consumed[0], consumed[1])), []).append(eid)
+            # An exact name match wins over a suffix match: if the vertex shader writes both `TEXCOORD9`
+            # and `TEXCOORD9_centroid`, the plain one is what a plain `TEXCOORD9` input is compared with.
+            matches = [one for one in produced if _semantic_matches(_pair(one[0]), _pair(consumed))]
+            exact = [one for one in matches if one[0][0] == consumed[0]]
+            match = exact[0] if exact else (matches[0] if matches else None)
+            if match is None:
+                missing.setdefault((vs_entry, ps_entry, '%s%d' % (consumed[0], consumed[1])),
+                                   []).append(eid)
+                continue
+            if match[0][2] is not None and consumed[2] is not None and consumed[2] > match[0][2]:
+                key2 = (vs_entry, ps_entry, '%s%d' % (consumed[0], consumed[1]),
+                        match[0][2], consumed[2])
+                entry = narrow.setdefault(key2, {'eids': [], 'vs': match[1], 'ps': str(row)})
+                entry['eids'].append(eid)
 
-    for key in sorted(groups):
-        eids = sorted(groups[key])
+    for key in sorted(missing):
+        eids = sorted(missing[key])
         flags.append({
             'detector': 'shader-io-mismatch',
             'what': 'the pixel shader reads %s and the vertex shader does not emit it -- D3D12 has no other '
                     'source for it than the preceding stage' % key[2],
             'evidence': ['vs %s -> ps %s, eid %d..%d' % (key[0], key[1], eids[0], eids[-1])],
+            'certainty': 'certain',
+            'unproven': True,
+        })
+    for key in sorted(narrow):
+        entry = narrow[key]
+        eids = sorted(entry['eids'])
+        flags.append({
+            'detector': 'shader-io-mismatch',
+            'what': 'the pixel shader reads %s at width c%d and the vertex shader writes it at c%d: an input '
+                    'may use fewer components than its producer writes, never more' % (key[2], key[4], key[3]),
+            'evidence': ['vs %s -> ps %s, eid %d..%d' % (key[0], key[1], eids[0], eids[-1]),
+                         'vs writes: %s' % entry['vs'], 'ps reads: %s' % entry['ps']],
             'certainty': 'certain',
             'unproven': True,
         })
@@ -1202,10 +1249,12 @@ def report_caveats() -> List[str]:
         'capture whose bug list is known (ROADMAP §1.5). What is not checked at all (ROADMAP §1.1): '
         '"nothing bound through a descriptor table" and "binding kind mismatch" need the descriptor writes '
         'followed through the stream (which in turn needs the event-id-to-chunk calibration, ROADMAP §2); '
-        '"dead compute" needs those plus the dispatch\'s UAV bindings; the signature-width half of "VS out is '
-        'not PS in", and the depth-test, scissor and stencil rows, need pipeline state a bundle does not '
-        'carry (a driver change); MSAA needs the ResolveSubresource payload read; and the two heuristics wait '
-        'on those. Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
+        '"dead compute" needs those plus the dispatch\'s UAV bindings; the depth-test, scissor and stencil rows '
+        'need pipeline state a bundle does not carry (a driver change); MSAA needs the ResolveSubresource '
+        'payload read, and none of the captures here carries a multisampled resource or a resolve at all; the '
+        'component *type* of a signature element (float against uint) is not in the reflection rows, so a '
+        'type-level mismatch is not checked even though the width is; and the two heuristics wait on those. '
+        'Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
         'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '
         'next frame or by the CPU afterwards looks exactly like nothing ever reading the resource. A resource '

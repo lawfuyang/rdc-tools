@@ -18,8 +18,13 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
   table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report, notables,
-  recommendations, detectors), `test_rdc_validate.py` (schemas), or all of them with
-  `python -m unittest discover -s tests -t tests`.
+  recommendations, detectors), `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
+  (schemas), or all of them with `python -m unittest discover -s tests -t tests`.
+- **The suite never reaches the network.** The source-tree fetch is the one place the tool downloads anything,
+  and it writes into exactly one folder — `renderdoc-src` at the root, the one `rdc_renderdoc_src.target_dir()`
+  names — so a test that hands a command its own tree gets a check and a fallback, never a download. That is why
+  `tests/test_rdc_renderdoc_src.py` patches `target_dir` to its scratch root to exercise the fetch, and why the
+  other files can call `load_chunk_names` with a temp folder without thinking about it.
 - A test fixture that the detectors read — the chunk-name map, the cache directory — is patched on the
   module that *owns* it, and the capture the test builds must come from the same map. Building a capture from
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
@@ -69,8 +74,9 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   imported by name (`import rdc_chunkmap`). `src/py/rdc_analysis.py` is the entry point and re-exports every
   module (`from rdc_commands import *`), so `R.<anything>` keeps working for the tests and for scripts. Do not
   turn it back into one file, and do not add an `__init__.py`.
-- **A module may only import modules beneath it**, and the layering is: `rdc_types` → `rdc_chunkmap` →
-  `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` → `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
+- **A module may only import modules beneath it**, and the layering is: `rdc_renderdoc_src` (the tree, and
+  fetching it) → `rdc_types` → `rdc_chunkmap` → `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` →
+  `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
   and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors →
   `rdc_notable`/`rdc_recommend` → `rdc_report_render` → `rdc_report` → `rdc_analysis`. A cycle breaks
   `from X import *` at import time (a partially initialised module exports only what it has defined so far), so
@@ -221,7 +227,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 - Docs: `README.md` (setup, quick start, the playbook for an agent), `REFERENCE.md` (internals, the command
   reference, examples, pitfalls, the driver), `ROADMAP.md` (unimplemented work).
-- Never commit `renderdoc-src/` — vendored upstream code, gitignored.
+- Never commit `renderdoc-src/` — upstream code fetched on demand, gitignored (`src/py/rdc_renderdoc_src.py`).
 - Never run `git commit` or `git push` unless explicitly asked to.
 
 # Naming

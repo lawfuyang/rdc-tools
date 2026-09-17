@@ -35,6 +35,7 @@ Usage:
   python rdc_analysis.py report   <rdc> <bundleDir> [outDir]   # frame report from `replay_dump dump`
   python rdc_analysis.py validate <file|bundleDir> <schemaDir> [kind]  # documents vs the schemas
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
+  python rdc_analysis.py bootstrap [tag]                   # fetch the RenderDoc source the chunk names come from
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 """
 from __future__ import annotations
@@ -75,6 +76,10 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         render_report_markdown as render_report_markdown,
                         report_caveats as report_caveats,
                         severity_of as severity_of, severity_table as severity_table)
+from rdc_renderdoc_src import (BootstrapError as BootstrapError,
+                               NO_BOOTSTRAP_ENV as NO_BOOTSTRAP_ENV, describe as describe,
+                               ensure as ensure, is_populated as is_populated, latest_tag as latest_tag,
+                               missing_parts as missing_parts, target_dir as target_dir)
 from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPORT_SCHEMA,
                          SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,
@@ -157,6 +162,26 @@ def _arg(argv: Sequence[str], index: int, default: Optional[int] = None,
         raise IndexError('missing command argument #%d' % index)
     return default
 
+def cmd_bootstrap(argv: Sequence[str]) -> int:
+    """`bootstrap [tag]` -- put the RenderDoc source tree where the tool reads its chunk names from.
+
+    Every command fetches it on demand through `rdc_chunkmap.load_chunk_names`; this is the same step run
+    explicitly, for a fresh clone that wants it up front, for a script, or to pin a version. It is also the
+    only path where a failure is an *error*: the automatic one keeps the documented fallback (numeric chunk
+    ids and a warning), because a command that could not download should still analyse the capture.
+    """
+    tag = argv[0] if argv else None
+    root = target_dir()
+    already = is_populated(root)
+    try:
+        ensure(root=root, tag=tag, log=lambda text: print(text), strict=True)
+    except BootstrapError as exc:
+        print('error: %s' % exc)
+        return 1
+    print('renderdoc-src : %s (%s)' % (root, 'already populated' if already else 'fetched'))
+    print('chunk names   : %d name(s) parsed from it' % len(load_chunk_names(root)))
+    return 0
+
 def main() -> None:
     """CLI entry point: dispatch `sys.argv[1]` to the matching `cmd_*` function."""
     argv = sys.argv
@@ -164,6 +189,8 @@ def main() -> None:
         sys.exit(cmd_selftest(argv[2:]))
     if len(argv) > 1 and argv[1] == 'cache':
         sys.exit(cmd_cache(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'bootstrap':
+        sys.exit(cmd_bootstrap(argv[2:]))
     if len(argv) < 3:
         print(__doc__)
         return

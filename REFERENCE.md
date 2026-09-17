@@ -59,8 +59,9 @@ align to 64              Serialiser::ChunkAlignment
 `iter_chunks()` implements exactly this and yields `{off, id, flags, length, data}` where **`data` is the
 payload offset** — already past the metadata. Chunk IDs come from `SystemChunk` (`renderdoc/core/core.h`,
 `FirstDriverChunk = 1000`) and `D3D12Chunk` (`renderdoc/driver/d3d12/d3d12_common.h`); `parse_chunk_enum()`
-parses those C++ enums at runtime, **out of the `renderdoc-src` copy in the root folder** (README §1.1), so names stay
-correct for the RenderDoc version that produced the capture.
+parses those C++ enums at runtime, **out of the `renderdoc-src` tree in the root folder** — fetched on demand
+when it is not there (README §1.1, `rdc_renderdoc_src`) — so names stay correct for the RenderDoc version that
+produced the capture.
 
 > **The single most important detail:** in real captures the flags are usually `0xf0000` (callstack + thread +
 > duration + timestamp all present), so **the payload starts 36 bytes into the chunk, not 8**. Never hand-compute
@@ -129,6 +130,7 @@ parts (`fourcc, offset, length`). Part meanings:
 | `resources` | `<rdc> [limit=200] [nameFilter]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
 | `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
+| `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the numeric-id fallback. Needs no capture file |
 
 ### 4.2 Stream text mining
 
@@ -716,10 +718,11 @@ sections, uniform names — and `ROADMAP.md` keeps them out of the offline plan 
 not on this list"). The ones that stay offline work items are tracked with an acceptance gate in
 `ROADMAP.md` §11. A bullet here is a known limitation, not a permanent design decision.
 
-* **Chunk names need the RenderDoc source tree in the root folder.** The tool expects
-  `<root>/rdc-tools/renderdoc-src/` (see README §1.1); if it is absent, or if its version is older than the one that
-  produced the capture, names degrade to numeric IDs. The framing itself is version-stable, so decoding still
-  works — only the labels are missing.
+* **Chunk names need the RenderDoc source tree.** The tool fetches it into `<root>/rdc-tools/renderdoc-src/`
+  on first use (README §1.1) and says so; when the fetch cannot happen — no network, `$RDC_NO_BOOTSTRAP`, a
+  `$RENDERDOC_SRC` that holds no tree — names degrade to numeric IDs. The same happens when the tree's version
+  is older than the one that produced the capture, which the tool says when it names a chunk. The framing
+  itself is version-stable, so decoding still works; only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed. Replay reads them for you
   (§9), so this is not planned as offline work.
 * **No name resolution for root parameters.** The serialised root signature carries no names, and neither do

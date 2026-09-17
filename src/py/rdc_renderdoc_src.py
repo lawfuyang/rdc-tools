@@ -1,0 +1,282 @@
+"""The RenderDoc source tree this tool reads its enums from: is it there, and fetching it when it is not.
+
+The tool parses the chunk-name enums out of the RenderDoc source at runtime, so the names it prints match the
+RenderDoc version that produced the capture (`README` section 1.1). That tree used to be a manual step, which
+meant a fresh clone produced `Chunk1203` instead of names until someone read the README -- so the tree is now
+**fetched on demand**: the first command that needs an enum asks `ensure()` for the tree, and `ensure()` either
+finds it, reports that it was asked not to, or downloads the latest tagged RenderDoc source from the project's
+GitHub releases and extracts it into `renderdoc-src`.
+
+Three properties this module is built around:
+
+* **It never fails the command.** A missing tree is the documented fallback (numeric chunk ids and a warning),
+  so every failure here -- no network, a rate-limited API, a disk that says no -- is reported and then behaves
+  exactly like the tree that was never there. Only the explicit `bootstrap` command turns a failure into an
+  error, because a reader who asked for the download is owed the reason it did not happen.
+* **It extracts defensively.** The archive is written member by member, and a member whose path leaves the
+  destination (absolute, `..`, a Windows separator, a drive letter) or that is not a regular file (a symlink, a
+  device) is refused rather than skipped quietly. A download is untrusted input; `tarfile.extractall` is not
+  used at all.
+* **It writes only where the tool looks,** and only into `renderdoc-src` itself. That folder also holds the
+  captures in this repository, so the extraction adds `renderdoc/...` beside them and removes nothing.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import shutil
+import sys
+import tarfile
+import urllib.error
+import urllib.request
+from typing import Callable, Dict, List, Optional, Tuple
+
+#: The files the tool cannot work without, relative to the tree's root: the `SystemChunk` enum and the D3D12
+#: chunk enum. A tree that has these two is "populated" for this tool's purposes -- deliberately a *content*
+#: check rather than a marker file, so a half-extracted or hand-copied tree is recognised as incomplete.
+REQUIRED: Tuple[Tuple[str, ...], ...] = (
+    ('renderdoc', 'core', 'core.h'),
+    ('renderdoc', 'driver', 'd3d12', 'd3d12_common.h'),
+)
+
+#: Where the source comes from: the project's own GitHub, the latest *tag* (a release), not a branch tip --
+#: a branch would move under the tool between runs.
+GITHUB_REPO = 'baldurk/renderdoc'
+TAGS_URL = 'https://api.github.com/repos/%s/tags?per_page=1'
+TARBALL_URL = 'https://codeload.github.com/%s/tar.gz/refs/tags/%s'
+
+#: GitHub serves the API only to a named client, and a network call should never hang forever.
+USER_AGENT = 'rdc-tools (RenderDoc offline analysis; +https://github.com/lawfuyang/rdc-tools)'
+TIMEOUT = 60.0
+
+#: The variable that turns the fetch off: a machine with no network, or a reader who wants the numeric-id
+#: fallback, sets `RDC_NO_BOOTSTRAP` and every command behaves as it did before this module existed.
+NO_BOOTSTRAP_ENV = 'RDC_NO_BOOTSTRAP'
+
+
+class BootstrapError(Exception):
+    """A tree that could not be fetched or extracted, with the reason in the message."""
+
+
+def _log_to_stderr(text: str) -> None:
+    """The default log: stderr, never stdout, because stdout is the tool's data channel (`--json`)."""
+    sys.stderr.write(text + '\n')
+
+
+def target_dir() -> str:
+    """Where a fetched tree goes: `renderdoc-src` at the repository root, the documented convention.
+
+    Resolved from this file's own location (`<root>/src/py/rdc_renderdoc_src.py`), so the tool writes exactly
+    where it looks -- `rdc_chunkmap._find_renderdoc_src` walks up from the same folder.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(os.path.dirname(here)), 'renderdoc-src')
+
+
+def missing_parts(root: str) -> List[str]:
+    """The required files that are not in this tree, as `renderdoc/core/core.h` strings (empty = populated)."""
+    return ['/'.join(parts) for parts in REQUIRED if not os.path.isfile(os.path.join(root, *parts))]
+
+
+def is_populated(root: str) -> bool:
+    """Whether every file the tool parses is there. A missing *directory* is the same answer as a missing file."""
+    return not missing_parts(root)
+
+
+def _fetch(url: str, timeout: float = TIMEOUT) -> bytes:
+    """One HTTP GET. The only place this module touches the network, which is what the tests replace."""
+    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def latest_tag(timeout: float = TIMEOUT) -> str:
+    """The most recent tag on the RenderDoc repository, e.g. `v1.46`.
+
+    The tags API lists the most recently *pushed* tag first, which for this project's `v<major>.<minor>`
+    release tags is the latest release. A response that is not the list of objects with a `name` is an error
+    rather than a guess -- a wrong tag would download a tree whose enums do not match the capture.
+    """
+    payload = json.loads(_fetch(TAGS_URL % GITHUB_REPO, timeout).decode('utf-8'))
+    if not isinstance(payload, list) or not payload:
+        raise BootstrapError('the tags API returned no tags (%s)' % (TAGS_URL % GITHUB_REPO))
+    first = payload[0]
+    if not isinstance(first, dict) or not str(first.get('name', '')).strip():
+        raise BootstrapError('the tags API returned an entry with no name: %r' % (first,))
+    return str(first['name']).strip()
+
+
+def tarball_url(tag: str) -> str:
+    """Where a tag's source archive lives. `codeload` is the documented endpoint and is not rate-limited."""
+    return TARBALL_URL % (GITHUB_REPO, tag)
+
+
+def _safe_parts(name: str) -> Optional[List[str]]:
+    """A tar member's path with the archive's own top folder removed, or None when it must be refused.
+
+    `renderdoc-1.46/renderdoc/core/core.h` becomes `['renderdoc', 'core', 'core.h']`. Anything that could
+    escape the destination is refused: a `..` component, an absolute path, a Windows separator (a tar entry is
+    written with `/`, so a backslash is either an accident or an attack), a drive letter, or an empty name.
+    """
+    if '\\' in name or ':' in name or name.startswith('/'):
+        return None
+    parts = [part for part in name.split('/') if part not in ('', '.')]
+    if not parts or '..' in parts:
+        return None
+    return parts[1:]                      # drop the `renderdoc-<version>/` prefix the archive carries
+
+
+def _extract(archive: tarfile.TarFile, root: str, log: Callable[[str], None]) -> Tuple[int, int]:
+    """Write an opened archive's regular files under `root`; return `(files written, entries refused)`."""
+    written = 0
+    refused = 0
+    for member in archive:
+        parts = _safe_parts(member.name)
+        if parts is None:
+            refused += 1
+            continue
+        if member.isdir():
+            os.makedirs(os.path.join(root, *parts), exist_ok=True)
+            continue
+        if not member.isfile():
+            # A symlink or a device node: the tool reads text files, so this is not paid for with the risk of
+            # writing through a link that points somewhere else.
+            refused += 1
+            continue
+        source = archive.extractfile(member)
+        if source is None:
+            refused += 1
+            continue
+        destination = os.path.join(root, *parts)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        with open(destination, 'wb') as handle:
+            shutil.copyfileobj(source, handle)
+        written += 1
+        if written % 2000 == 0:
+            log('  %d file(s)...' % written)
+    return written, refused
+
+
+def download(tag: str, root: str, log: Callable[[str], None] = lambda _text: None,
+             timeout: float = TIMEOUT) -> int:
+    """Fetch a tag's source archive and extract it into `root`; return the number of files written.
+
+    The archive is held in memory (it is ~20 MB) so a failed download cannot leave a half-written file behind
+    and there is one place a caller could cache it. Extraction adds files; it removes nothing, which matters
+    because `renderdoc-src` is also where this repository keeps its captures.
+    """
+    log('fetching %s' % tarball_url(tag))
+    payload = _fetch(tarball_url(tag), timeout)
+    log('  %d byte(s) of archive; extracting into %s' % (len(payload), root))
+    os.makedirs(root, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(payload), mode='r:gz') as archive:
+        written, refused = _extract(archive, root, log)
+    if refused:
+        log('  %d entr(ies) refused (not a regular file, or a path outside the tree)' % refused)
+    log('  %d file(s) extracted' % written)
+    if not is_populated(root):
+        # A tag whose layout moved, or an archive that was cut short: leave what is there and say what is
+        # missing, because the caller's fallback (numeric ids) is still better than an exception.
+        raise BootstrapError('%s was extracted but %s is still missing: %s'
+                             % (tag, root, ', '.join(missing_parts(root))))
+    return written
+
+
+def ensure(root: Optional[str] = None, tag: Optional[str] = None,
+           log: Optional[Callable[[str], None]] = None, strict: bool = False) -> str:
+    """Make sure a usable RenderDoc source tree is at `root`, fetching one if it is not; return the root.
+
+    Called by `rdc_chunkmap.load_chunk_names`, so any command that needs the enums goes through here -- which
+    is the whole hook: there is no per-command plumbing to forget.
+
+    The order of decisions, and why:
+
+    1. A populated tree (or an explicit `root` that is populated) is returned untouched and **silently** --
+       the common case must cost nothing and print nothing.
+    2. `$RENDERDOC_SRC` is a reader pointing at their own tree. It is never written into: if it does not
+       contain what the tool needs, that is reported and the caller falls back, because overwriting a path
+       somebody set by hand is not this module's business. The same goes for any other tree a caller names:
+       **the fetch happens only into `target_dir()`**, the one place the tool looks and the only folder this
+       module is allowed to write to. `renderdoc-src` is also where this repository keeps its captures, so
+       "only the documented folder" is the rule that keeps a bootstrap from surprising anybody -- and the
+       reason the test suite cannot reach the network by calling a command.
+    3. `RDC_NO_BOOTSTRAP` asks for the documented no-tree behaviour: report and return, no network.
+    4. Otherwise the latest tag is fetched and extracted into `<repository root>/renderdoc-src`.
+
+    `strict=True` (the explicit `bootstrap` command) raises instead of returning on failure, so a reader who
+    asked for the download gets the reason. Everything else ignores the exception: a tree that could not be
+    fetched is the same situation as a tree that was never there, and every command already handles that.
+    """
+    if log is None:
+        log = _log_to_stderr
+    target = root or target_dir()
+    if is_populated(target):
+        return target
+
+    env = os.environ.get('RENDERDOC_SRC')
+    if env and os.path.abspath(env) == os.path.abspath(target):
+        note = ('RENDERDOC_SRC points at %s, which is missing %s -- nothing was downloaded into it'
+                % (target, ', '.join(missing_parts(target))))
+        log('note: %s' % note)
+        if strict:
+            raise BootstrapError(note)
+        return target
+
+    if os.path.abspath(target) != os.path.abspath(target_dir()):
+        # Silent on purpose: this is a caller looking at a tree that is not the tool's own (a test's scratch
+        # folder, or a path a script passed in), and the caller already reports a missing tree itself -- it is
+        # the one that knows what it was doing. The rule that matters is the one enforced here: no write.
+        note = ('%s is not populated (%s) and it is not the documented tree, so it was not written into: the '
+                'fetch only ever fills %s' % (target, ', '.join(missing_parts(target)), target_dir()))
+        if strict:
+            raise BootstrapError(note)
+        return target
+
+    if os.environ.get(NO_BOOTSTRAP_ENV):
+        note = ('%s is not populated (%s) and %s is set, so nothing was downloaded'
+                % (target, ', '.join(missing_parts(target)), NO_BOOTSTRAP_ENV))
+        log('note: %s' % note)
+        if strict:
+            raise BootstrapError(note)
+        return target
+
+    try:
+        wanted = tag or latest_tag()
+        log('renderdoc-src is not populated (%s): fetching RenderDoc %s from GitHub'
+            % (', '.join(missing_parts(target)), wanted))
+        download(wanted, target, log=log)
+        log('  %s is populated from %s' % (target, wanted))
+    except (BootstrapError, urllib.error.URLError, OSError, ValueError, EOFError, tarfile.TarError) as exc:
+        note = ('could not fetch the RenderDoc source (%s); chunk names will fall back to numeric ids '
+                '(see README section 1.1)' % exc)
+        log('warning: %s' % note)
+        if strict:
+            raise BootstrapError(note) from exc
+    return target
+
+
+def describe(root: Optional[str] = None) -> Dict[str, object]:
+    """What a report on the tree itself needs: where it is, whether it is usable, and what is missing."""
+    target = root or target_dir()
+    return {'root': target, 'populated': is_populated(target), 'missing': missing_parts(target),
+            'required': ['/'.join(parts) for parts in REQUIRED], 'tag_url': TAGS_URL % GITHUB_REPO}
+
+
+__all__ = [
+    'BootstrapError',
+    'GITHUB_REPO',
+    'NO_BOOTSTRAP_ENV',
+    'REQUIRED',
+    'TAGS_URL',
+    'TARBALL_URL',
+    'describe',
+    'download',
+    'ensure',
+    'is_populated',
+    'latest_tag',
+    'missing_parts',
+    'tarball_url',
+    'target_dir',
+]

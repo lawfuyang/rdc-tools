@@ -29,6 +29,7 @@ rdc-tools/
     rdc_analysis.py     the CLI: the command table and the dispatch (run this)
     rdc_types.py        the shapes of what the tool reads, and the constants they are framed with
     rdc_chunkmap.py     chunk id -> name, from the RenderDoc source tree's enums
+    rdc_renderdoc_src.py  where that tree is, and fetching it when it is not there (§1.1)
     rdc_stream.py       the container and the frame stream (sections, framing, LZ4/Zstd)
     rdc_cache.py        the decompressed-stream cache, and `load_stream`
     rdc_dxbc.py         the DXBC/DXIL containers the capture carries
@@ -79,7 +80,7 @@ rdc-tools/
 |---|---|
 | Python 3.8+ | tested with `C:\Program Files\Python311\python.exe` |
 | `zstandard` (optional) | only for Zstd-compressed sections. Not needed for the captures used so far (they are LZ4, which is implemented in-file). `pip install zstandard` if `sections` reports `zstd`. |
-| **RenderDoc source tree in the root folder** | **Required for readable chunk names.** The tool reads the *real implementation of RenderDoc* — the chunk-name enums — from a `renderdoc-src` folder in the root folder: `<root>/rdc-tools/renderdoc-src/`. **You must have a copy of the RenderDoc source tree there** (see §1.1). Without it the tool still runs, but `chunks` / `summary` / `draws` print numeric chunk IDs (`1040`) instead of names (`List_DrawIndexedInstanced`). |
+| **RenderDoc source tree** | **Fetched for you** — the tool reads the *real implementation of RenderDoc* (the chunk-name enums) from a `renderdoc-src` folder in the root folder, and downloads the latest tagged source into it the first time a command needs a name (see §1.1). Nothing to clone. On a machine with no network the tool still runs, printing numeric chunk IDs (`1040`) instead of names (`List_DrawIndexedInstanced`); `bootstrap` fetches it up front, and `$RDC_NO_BOOTSTRAP` turns the fetch off. |
 | A `.rdc` capture | any D3D12 capture; Vulkan captures parse at container level but the chunk decoders are D3D12-specific |
 
 Run it as:
@@ -90,19 +91,20 @@ Run it as:
 
 Running with no arguments prints the command list (the module docstring).
 
-### 1.1 The RenderDoc source tree — `renderdoc-src` in the root folder
+### 1.1 The RenderDoc source tree — fetched for you
 
 The tool does **not** guess chunk names: it parses the chunk-name enums out of the **real RenderDoc
-implementation** at runtime, so the names it prints always match the RenderDoc version that produced the
-capture. That means **you must have a copy of the RenderDoc source tree in the root folder, named
-`renderdoc-src`**:
+implementation** at runtime, so the names it prints match the RenderDoc version that produced the capture.
+That tree used to be a manual step. It is now **fetched on demand**: the first command that needs a chunk name
+downloads the latest tagged RenderDoc source from GitHub and extracts it into `renderdoc-src` in the root
+folder. Nothing to clone, nothing to unzip.
 
 ```
 <root>/rdc-tools/                      <- the root folder of this tool
     src/py/                            the tool
     README.md
     ROADMAP.md
-    renderdoc-src/                     <- a copy of the RenderDoc source tree goes HERE
+    renderdoc-src/                     <- fetched here on first use (and it holds your captures)
         renderdoc/
             core/core.h                        SystemChunk enum      (PushMarker, InitialContents, ...)
             driver/d3d12/d3d12_common.h        D3D12Chunk enum       (List_DrawIndexedInstanced, ...)
@@ -110,36 +112,48 @@ capture. That means **you must have a copy of the RenderDoc source tree in the r
         ...
 ```
 
-Only two header files are actually read (`renderdoc/core/core.h` and
-`renderdoc/driver/d3d12/d3d12_common.h`), but keep the whole tree so that other parts can be consulted while
-extending the tool.
+Only two header files are actually *read* (`renderdoc/core/core.h` and
+`renderdoc/driver/d3d12/d3d12_common.h`) — "populated" means those two exist, which is also how a
+half-extracted tree is recognised — but the whole tree is kept, because the rest is what you consult while
+extending the tool (REFERENCE §6).
 
-**Where to get it.** Clone or download the source of the RenderDoc version used to take the capture — matching
-the installed capture tool is what makes the enum values line up:
+**Doing it explicitly.** Every command fetches on demand; these run the same step up front, which is what a
+fresh clone, a script or a pinned version wants:
 
 ```powershell
-cd 'C:\Workspace WIth Spaces\rdc-tools'
-git clone --depth 1 --branch v1.46 https://github.com/baldurk/renderdoc.git renderdoc-src
-# or unzip the source archive for the matching release into .\renderdoc-src
+& $py src\py\rdc_analysis.py bootstrap            # fetch the latest tagged source, or do nothing
+& $py src\py\rdc_analysis.py bootstrap v1.46      # pin a tag, e.g. to match the installed RenderDoc
 ```
 
-This project was developed against RenderDoc **1.46** (`C:\Program Files\RenderDoc`, see `sections` output for
-the capture's own version).
+It downloads ~54 MB, extracts ~6,000 files (~900 MB on disk — the full source tree, docs included) in about
+13 seconds, and prints where it put them and how many chunk names parsed out of it. A second run is a silent
+no-op. The extracted tree is RenderDoc's own checkout, so the version it reports (the tag) is the version of
+the enums; if that differs from the RenderDoc that recorded the capture, the tool says so when it names a
+chunk.
 
-**How the location is resolved** (`_find_renderdoc_src()` in `src/py/rdc_chunkmap.py`), in order:
+**Where the tree is looked for** (`_find_renderdoc_src()` in `src/py/rdc_chunkmap.py`), in order:
 
 1. the `RENDERDOC_SRC` environment variable, if set;
-2. `<the folder holding the module>/renderdoc-src`, and then the same name in every folder above it — this is
+2. `<the folder holding a module>/renderdoc-src`, and then the same name in every folder above it — this is
    the search that finds the documented `<root>/rdc-tools/renderdoc-src`, and it also finds a tree beside the
-   tool if you keep one there (**the documented convention**);
+   tool if you keep one there (**the documented convention**, and the one place the fetch ever writes);
 3. `C:\Workspace WIth Spaces\rdc-tools\renderdoc-src` — the historical absolute default.
 
 The walk upwards is deliberate: the tool used to sit at the repository root and now sits in `src/py`, and one
 search that works for both is better than a second convention to remember.
 
-If none of them contains `renderdoc/core/core.h`, the tool prints a one-line warning to stderr and continues
-with **numeric chunk IDs**. Everything else — container parsing, decompression, payload decoding, `draws`,
-`dxbc`, `verify` — is unaffected.
+**When it will not fetch.** Three cases, all deliberate:
+
+| case | what happens |
+|---|---|
+| `$RENDERDOC_SRC` is set | it is used and **never written into**: if it has no usable tree, that is reported and the run continues with numeric ids. Overwriting a path you set by hand is not the tool's business. |
+| `$RDC_NO_BOOTSTRAP` is set | no network at all: the tool checks, warns and falls back, exactly as it did before the fetch existed. For an offline machine, or a reader who wants no surprise downloads. |
+| the command names its own tree (a script, the test suite) | checked and reported, never filled — the fetch only ever writes into `renderdoc-src` in the root folder. |
+
+In every one of those cases, and when the download fails (no network, GitHub unreachable, disk full), the
+tool prints one warning to stderr and continues with **numeric chunk IDs** (`1040` instead of
+`List_DrawIndexedInstanced`). Everything else — container parsing, decompression, payload decoding, `draws`,
+`dxbc`, `verify` — is unaffected, and a capture is always analysed.
 
 To point at a tree somewhere else for a single run:
 
@@ -484,7 +498,8 @@ built on.
   (§5), two-capture A/B (§6), the verification corpus (§7), the D3D12 harness (§8.5).
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.
-* **`renderdoc-src/`** — expected in the root folder (§1.1). The files the decoders were written against:
+* **`renderdoc-src/`** — fetched into the root folder on first use (§1.1), and also where this project keeps
+  its captures. The files the decoders were written against:
   `serialise/serialiser.cpp` (chunk framing), `serialise/rdcfile.cpp` (container), `core/core.h` and
   `driver/d3d12/d3d12_common.h` (chunk-name enums), `driver/d3d12/d3d12_command_list_wrap.cpp` (payload
   layouts), `driver/d3d12/d3d12_serialise.cpp` + `d3d12_manager.h`, `api/replay/renderdoc_replay.h`.

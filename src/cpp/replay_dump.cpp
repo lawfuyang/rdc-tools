@@ -29,7 +29,8 @@
 // Without (1) or (2) the engine runs with uninitialised global state and dies inside OpenCapture
 // with an access violation.
 //
-// Build: build_replay.ps1 (MSVC + an import library made from the installed DLL's exports).
+// Build: `cmake -S . -B build -A x64 && cmake --build build --config Release` (MSVC plus an import
+// library made from the installed DLL's exports -- AGENTS.md and REFERENCE §9 have the flags).
 //
 // One deliberate interface gap, because "fix it" is the wrong answer:
 //
@@ -146,6 +147,46 @@ const char *kSaveFlag = "--save";
 const char *kLogFlag = "--log";
 
 void Usage();
+
+//: Says so, once, when the offline tool has no RenderDoc source tree to name chunks from.
+//:
+//: This driver does not read that tree -- it asks the installed engine, which is the point of it -- so this
+//: is not a prerequisite for the command about to run. It is a prerequisite for *reading the answer*: the
+//: offline tool names every chunk id from the tree, and a fresh clone that never fetched it prints
+//: `Chunk1203` where a name belongs. The tool fetches it on demand (README 1.1), so the one useful thing
+//: this program can do is say that it has not been fetched yet.
+//:
+//: Deliberately quiet in three ways, because a hint that repeats is noise: nothing is printed when
+//: `$RENDERDOC_SRC` is set (the reader pointed at their own tree, and it is not this program's business
+//: whether it is complete), nothing when the tree is there, and it goes to stderr so `--json` on stdout
+//: stays a document.
+void WarnIfRenderdocSrcMissing()
+{
+  if(getenv("RENDERDOC_SRC") != NULL)
+    return;
+
+  char exe[4096];
+  const DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
+  if(len == 0 || len >= sizeof(exe))
+    return;
+  std::string dir(exe, len);
+  const size_t slash = dir.find_last_of("\\/");
+  if(slash == std::string::npos)
+    return;
+  dir = dir.substr(0, slash);                    // <root>\bin
+  const size_t parent = dir.find_last_of("\\/");
+  const std::string root = parent == std::string::npos ? dir : dir.substr(0, parent);
+
+  const std::string core = root + "\\renderdoc-src\\renderdoc\\core\\core.h";
+  if(GetFileAttributesA(core.c_str()) != INVALID_FILE_ATTRIBUTES)
+    return;
+
+  fprintf(stderr,
+          "note: %s\\renderdoc-src has no RenderDoc source, so the offline tool will print chunk ids\n"
+          "      rather than chunk names. It fetches the tree on demand -- the first command that needs\n"
+          "      one, or `python src\\py\\rdc_analysis.py bootstrap` to do it now (README section 1.1).\n",
+          root.c_str());
+}
 
 //: Runs one command against an already-open capture. Shared by `main` and `batch`, so a command
 //: name and its arguments mean the same thing however they were spelled.
@@ -370,6 +411,11 @@ int main(int argc, char **argv)
   // is loaded, so a bundle can be verified on a machine where RenderDoc is not even installed.
   if(!strcmp(cmd, "bundle-verify"))
     return CmdBundleVerify(args[1].c_str());
+
+  // The one environment prerequisite this program has an opinion about, checked here rather than at
+  // startup so `--help`, `schema` and `selftest` say nothing about it: everything below this line
+  // opens the capture and answers with ids the offline tool will want to name.
+  WarnIfRenderdocSrcMissing();
 
   // The log is opened only once the command is known to be runnable, so `--help` and a command
   // without a capture path -- which do nothing -- leave no file behind. The absolute name goes into

@@ -7,6 +7,8 @@ import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
+import rdc_renderdoc_src     # the tree's location, and fetching it when it is not there
+
 CHUNK_CALLSTACK = 0x00010000
 CHUNK_THREADID = 0x00020000
 CHUNK_DURATION = 0x00040000
@@ -188,21 +190,28 @@ def parse_chunk_enum(text: str, enum_name: str) -> Dict[int, str]:
 def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: str = 'D3D12') -> Dict[int, str]:
     """Build the chunk-id -> name map from the RenderDoc source enums.
 
-    Warns once on stderr when the source tree is missing; the tool then falls back to numeric ids
-    and everything else keeps working (see README 1.1).
+    The tree is asked for first (`rdc_renderdoc_src.ensure`), which fetches the latest tagged RenderDoc source
+    when it is absent and the network allows it -- this function is the only place the tool needs an enum, so
+    it is the only place the fetch is hooked, and every command that prints chunk names goes through it.
+
+    Warns once on stderr when there is still no tree (no network, `RDC_NO_BOOTSTRAP`, or a `$RENDERDOC_SRC`
+    that does not hold one); the tool then falls back to numeric ids and everything else keeps working (see
+    README 1.1).
     """
     global _SRC_WARNED
     names: Dict[int, str] = {}
+    src_root = rdc_renderdoc_src.ensure(src_root)
     core = os.path.join(src_root, 'renderdoc', 'core', 'core.h')
     if not os.path.isfile(core) and not _SRC_WARNED:
         _SRC_WARNED = True
         sys.stderr.write(
             'warning: RenderDoc source not found at %s\n'
-            '         Put a copy of the RenderDoc source tree in the root folder as `renderdoc-src`,\n'
-            '         i.e. <repository root>/renderdoc-src/ (see README section 1).\n'
-            '         Searched: $RENDERDOC_SRC, then `renderdoc-src` beside this file and in every\n'
-            '         folder above it.\n'
-            '         Chunk names will fall back to numeric ids; everything else still works.\n' % src_root)
+            '         (the convention is a `renderdoc-src` folder at the repository root). It is fetched\n'
+            '         automatically when the network allows it and this one was not, so chunk names fall\n'
+            '         back to numeric ids and everything else still works.\n'
+            '         Fetch it with `python src\\py\\rdc_analysis.py bootstrap`, point $RENDERDOC_SRC at a\n'
+            '         tree, or set %s to skip this (see README section 1.1).\n'
+            % (src_root, rdc_renderdoc_src.NO_BOOTSTRAP_ENV))
     if os.path.isfile(core):
         with open(core, encoding='utf-8', errors='replace') as fh:
             names.update(parse_chunk_enum(fh.read(), 'SystemChunk'))

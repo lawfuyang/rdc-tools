@@ -24,13 +24,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-for _p in (HERE, ROOT):
+for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 import rdc_analysis as R          # noqa: E402
-import rdc_fixtures as F          # noqa: E402
-from test_rdc_analysis import CmdCase as _CmdCase   # noqa: E402
+import rdc_chunkmap as chunkmap   # noqa: E402  (the detectors name chunks through this module, so the
+import rdc_fixtures as F          # noqa: E402   #   capture fixture must be built with the same map)
+from rdc_testcase import CmdCase as _CmdCase   # noqa: E402
 
 RDC = 'fixture.rdc'
 
@@ -1025,7 +1026,11 @@ class StreamCase(_CmdCase):
     """
 
     def chunk_ids(self) -> Dict[str, int]:
-        return {name: cid for cid, name in R.load_chunk_names().items()}
+        # Through the module the detectors themselves call: the test fixture patches it with a fake
+        # `renderdoc-src` tree, and a capture built from the *unpatched* map would use ids the detector then
+        # cannot name -- which is exactly how these two tests failed once the loader moved out of the entry
+        # module.
+        return {name: cid for cid, name in chunkmap.load_chunk_names().items()}
 
     def rdc(self, *chunks: bytes) -> str:
         return self.path('c.rdc', F.rdc([F.section('FrameCapture', F.stream(*chunks))]))

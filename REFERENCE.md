@@ -235,12 +235,20 @@ fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and 
 
 | Command | Effect |
 |---|---|
-| `python rdc_analysis.py selftest` | run the whole suite (`test` is an alias) |
-| `python rdc_analysis.py selftest -v` | per-test output |
-| `python rdc_analysis.py selftest -k Draws` | only tests whose id contains `Draws` |
-| `python tests/test_rdc_analysis.py` | parsers and decoders only |
-| `python tests/test_rdc_commands.py` | commands and CLI dispatch only |
+| `python src\py\rdc_analysis.py selftest` | run the whole suite (`test` is an alias) |
+| `python src\py\rdc_analysis.py selftest -v` | per-test output |
+| `python src\py\rdc_analysis.py selftest -k Draws` | only tests whose id contains `Draws` |
+| `python tests/test_rdc_analysis.py` | the container, the compression and the cache (95 tests) |
+| `python tests/test_rdc_chunks.py` | the chunk stream, the payloads and the shader containers (112) |
+| `python tests/test_rdc_resources.py` | the resource table, descriptor heaps and the enum parsing (93) |
+| `python tests/test_rdc_commands.py` | commands and CLI dispatch (151) |
+| `python tests/test_rdc_report.py` | the report and its detectors (50) |
+| `python tests/test_rdc_validate.py` | the schema validator (17) |
 | `python -m unittest discover -s tests -t tests` | the same suite through unittest |
+
+The files are split by area, and `tests/rdc_testcase.py` holds what they share: the capture builders'
+case classes, the stdout capture helpers, and the scratch-directory handling. It is a support module, not a
+test file — `discover` only collects `test_*.py`.
 
 Exit code is 0 when everything passes, 1 on failure, 2 for a bad option.
 
@@ -289,9 +297,9 @@ Measured on the 61 MB PC capture in this repo: `sections` 3.56 s → 0.27 s, `ve
 
 | Command | Effect |
 |---|---|
-| `python rdc_analysis.py cache` | list the entries: stream size, method, build time, source capture |
-| `python rdc_analysis.py cache dir` | print the cache directory |
-| `python rdc_analysis.py cache clear` | delete every entry (prints files removed and MB freed) |
+| `python src\py\rdc_analysis.py cache` | list the entries: stream size, method, build time, source capture |
+| `python src\py\rdc_analysis.py cache dir` | print the cache directory |
+| `python src\py\rdc_analysis.py cache clear` | delete every entry (prints files removed and MB freed) |
 
 The cache is pure optimisation and cannot change what a command prints apart from that label. An entry is used
 only when it was built from exactly this file (same absolute path, size and mtime), for this section, and holds
@@ -309,8 +317,8 @@ The unit tests point `RDC_CACHE_DIR` at a scratch directory, so they never touch
 `draws` uses it to annotate every binding (§4.5):
 
 ```powershell
-python rdc_analysis.py resources 'capture.rdc' 20      # first 20 rows
-python rdc_analysis.py resources 'capture.rdc' 0 lut   # every row whose name contains "lut"
+python src\py\rdc_analysis.py resources 'capture.rdc' 20      # first 20 rows
+python src\py\rdc_analysis.py resources 'capture.rdc' 0 lut   # every row whose name contains "lut"
 ```
 
 ```
@@ -340,8 +348,8 @@ total resources: 241 (shown 2)
 readable:
 
 ```powershell
-python rdc_analysis.py descriptors 'capture.rdc'        # every written slot
-python rdc_analysis.py descriptors 'capture.rdc' 0 298  # one heap, by id or by name
+python src\py\rdc_analysis.py descriptors 'capture.rdc'        # every written slot
+python src\py\rdc_analysis.py descriptors 'capture.rdc' 0 298  # one heap, by id or by name
 ```
 
 ```
@@ -378,8 +386,8 @@ driver publishes — `schema/` in this repo, written by `replay_dump schema --ou
 contract is a file a consumer can read rather than something reverse-engineered from a writer.
 
 ```powershell
-python rdc_analysis.py validate bundle schema        # every document in a bundle
-python rdc_analysis.py validate t.json schema textures   # a document saved from a command's stdout
+python src\py\rdc_analysis.py validate bundle schema        # every document in a bundle
+python src\py\rdc_analysis.py validate t.json schema textures   # a document saved from a command's stdout
 ```
 
 Every `--json` document carries `schemaVersion` (1 today), so a consumer can refuse a shape it does not
@@ -390,8 +398,8 @@ ignoring it: a silently-skipped keyword is how "validated" stops meaning anythin
 apart. A schema change is a one-command regeneration plus a review of the diff:
 
 ```powershell
-.\build\replay_dump.exe schema --out schema
-.\build\replay_dump.exe schema --check schema      # fails when the folder and the driver disagree
+.\bin\replay_dump.exe schema --out schema
+.\bin\replay_dump.exe schema --check schema      # fails when the folder and the driver disagree
 ```
 
 That check is what makes the regeneration a rule rather than a habit: it compares the folder against the
@@ -472,8 +480,8 @@ describing a pass as something it has not established.
 **Find the two sphere groups in a mobile base pass and see how they differ**
 
 ```powershell
-& $py rdc_analysis.py markers 'mobile.rdc' | Select-String -Pattern 'BasePass' -Context 0,12
-& $py rdc_analysis.py draws   'mobile.rdc' 40
+& $py src\py\rdc_analysis.py markers 'mobile.rdc' | Select-String -Pattern 'BasePass' -Context 0,12
+& $py src\py\rdc_analysis.py draws   'mobile.rdc' 40
 ```
 
 **Read a constant buffer that a draw binds**
@@ -495,8 +503,8 @@ Offline you can still see *which* shaders the capture embeds and where (`dxbc`) 
 **Dump shaders for external disassembly**
 
 ```powershell
-& $py rdc_analysis.py dxbc          'mobile.rdc'          # where they are
-& $py rdc_analysis.py dump-shaders  'mobile.rdc' '.\out\mobile'
+& $py src\py\rdc_analysis.py dxbc          'mobile.rdc'          # where they are
+& $py src\py\rdc_analysis.py dump-shaders  'mobile.rdc' '.\out\mobile'
 ```
 
 ---
@@ -608,7 +616,7 @@ Add to `main()`:
         cmd_psos(path)
 ```
 
-Then: `python rdc_analysis.py psos capture.rdc`.
+Then: `python src\py\rdc_analysis.py psos capture.rdc`.
 
 ### 7.3 Useful internal helpers
 
@@ -678,18 +686,18 @@ not on this list"). The ones that stay offline work items are tracked with an ac
 ## 9. The replay driver (`replay_dump`)
 
 Everything the offline tool leaves to RenderDoc — uniform *names*, values, decoded textures,
-disassembly, post-VS geometry, the rendered image — is what `replay_dump.cpp` asks the engine for. It
+disassembly, post-VS geometry, the rendered image — is what `src/cpp/replay_dump.cpp` asks the engine for. It
 is a second tool, built against the installed `renderdoc.dll`, and it exists because the offline
 tool's job is what replay is bad at (the container, the chunk stream, sub-second queries) while this
 one's job is what reading the file cannot answer at all.
 
 ```powershell
-.\build_replay.ps1                              # MSVC + the installed DLL; output in .\build\
-.\build\replay_dump.exe shaders 'capture.rdc' 270      # reflection: cbuffers, bindings, signatures
-.\build\replay_dump.exe cb      'capture.rdc' 270 ps 3 # the named values of one cbuffer
-.\build\replay_dump.exe state   'capture.rdc' 270      # bound shaders, outputs, root parameters
-.\build\replay_dump.exe textures 'capture.rdc' --save .\out   # every texture, decoded to PNG
-.\build\replay_dump.exe shaders 'capture.rdc' 270 --disasm    # ... with the disassembly
+cmake -S . -B build -A x64 && cmake --build build --config Release   # MSVC + the installed DLL -> .\bin\
+.\bin\replay_dump.exe shaders 'capture.rdc' 270      # reflection: cbuffers, bindings, signatures
+.\bin\replay_dump.exe cb      'capture.rdc' 270 ps 3 # the named values of one cbuffer
+.\bin\replay_dump.exe state   'capture.rdc' 270      # bound shaders, outputs, root parameters
+.\bin\replay_dump.exe textures 'capture.rdc' --save .\out   # every texture, decoded to PNG
+.\bin\replay_dump.exe shaders 'capture.rdc' 270 --disasm    # ... with the disassembly
 ```
 
 | Command | Gives |
@@ -715,7 +723,7 @@ one's job is what reading the file cannot answer at all.
 **The contract — `schema`, `selftest` and `schemaVersion`.** Every `--json` document carries
 `schemaVersion` (1 today), so a reader can refuse a shape it does not understand instead of guessing. `schema`
 prints the JSON Schema for each document kind, and `schema --out schema` writes the checked-in `schema/`
-folder that `python rdc_analysis.py validate <bundle> schema` reads (§4.12), and `schema --check <dir>`
+folder that `python src\py\rdc_analysis.py validate <bundle> schema` reads (§4.12), and `schema --check <dir>`
 fails when that folder and the driver disagree — which is how a committed copy is kept from going stale.
 `selftest` runs where a
 capture cannot: the JSON writer's escaping, separators and balance, the schema table, the help text, and the
@@ -799,14 +807,19 @@ that a separator goes *in front of* every item after the first, never after a la
 it cannot work out on its own is whether a field is the object's last, which is what the `last`
 argument at those call sites is for.
 
-**The build is strict on purpose** (`build_replay.ps1`): `/W4 /permissive- /Zc:__cplusplus
+**The build is strict on purpose** (`CMakeLists.txt`): `/W4 /permissive- /Zc:__cplusplus
 /Zc:preprocessor /utf-8`, with `/external:W0 /external:anglebrackets` so RenderDoc's own headers stay
-quiet. It builds with zero warnings, and the SAL annotation on the `Fmt` helper makes the compiler
-check every format string against its arguments — a varargs mismatch is undefined behaviour, and it is
-also how the tool would print nonsense. `renderdoccmd.exe` is copied into `build/` along with the DLL:
-the engine spawns `<its own directory>\renderdoccmd.exe crashhandle` for its crash handler, and without
-it every run logs `Failed to create crashhandle server: 2`, waits 400 ms for a server that never
-arrives, and continues with no handler.
+quiet, `/WX` in Release (a warning is a finding: this tool exists to report what it cannot prove), and
+`/MP` so the modules compile in parallel — with one target the build tool has nothing to overlap, which
+is why the split into `src/cpp/*.cpp` costs no wall-clock. The build tree stays in `build/` (gitignored)
+and the executable and its DLLs go to `bin/` (gitignored), so the path every command in this document
+uses does not move when the build system or its flags change. Two targets are for style, not building:
+`clang-format` rewrites `src/cpp` to RenderDoc's own `.clang-format` and `clang-format-check` fails on a
+diff. The SAL annotation on the `Fmt` helper makes the compiler check every format string against its
+arguments — a varargs mismatch is undefined behaviour, and it is also how the tool would print nonsense.
+`renderdoccmd.exe` is deployed into `bin/` along with the DLL: the engine spawns `<its own
+directory>\renderdoccmd.exe crashhandle` for its crash handler, and without it every run logs `Failed to
+create crashhandle server: 2`, waits 400 ms for a server that never arrives, and continues with no handler.
 
 **Opening a capture is the expensive part, so batch it.** Standing the replay engine up — its own copy
 of the frame plus a replay device — is ~2 s on the Android capture and ~6 s on the 1.4 GB hobby one,
@@ -815,7 +828,7 @@ while individual commands cost 0.0–1.5 s. A batch file pays the open once:
 ```powershell
 # each line is a command, in the same syntax minus the executable and the capture
 "probe 120`ninfo`nstate 270`nshaders 270 --json" | Set-Content .\run.txt -Encoding ASCII
-.\build\replay_dump.exe batch 'capture.rdc' .\run.txt
+.\bin\replay_dump.exe batch 'capture.rdc' .\run.txt
 ```
 
 Measured, three runs covering 26 commands: **19.8 s total** (18 commands 4.9 s, the two probes 5.8 s,

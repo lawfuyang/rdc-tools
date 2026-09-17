@@ -1,0 +1,191 @@
+"""The frame report: a bundle in, deterministic Markdown and JSON out (`report`).
+
+Everything here reads files and returns text, which is why it is testable from fixture bundles
+(`tests/test_rdc_report.py`) with no capture, no GPU and no driver. Split out of `rdc_analysis.py`
+when that file passed 3000 lines; `rdc_analysis.py report` is still the entry point, and it
+re-exports everything here.
+"""
+from __future__ import annotations
+
+import json
+import os
+from typing import List, Optional, Tuple
+
+from rdc_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_passes import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_detect_common import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_detect_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_detect_usage import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_detect_state import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_detect_stream import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_detect_binding import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_report_render import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+
+# ---------------------------------------------------------------------------
+# The frame report (`report`).
+#
+# ROADMAP section 1, skeleton: a bundle written by `replay_dump dump` (REFERENCE §9) in, a deterministic
+# Markdown report out. What is here is deliberately structural -- it says what the engine reported,
+# every claim carries the event id it came from, and the report states in its own text what it cannot
+# say. The detectors, the notable lists and the engine-name interpretation are the later items in that
+# section, and the report names them as absent rather than guessing at them.
+#
+# Byte-stable for a fixed bundle: no timestamps, no absolute paths, every table sorted, and nothing
+# iterated out of a set. That is what lets two runs be diffed against each other and the output be
+
+def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List[RedFlag], List[DetectorRun]]:
+    """Every finding, and what each detector did -- listed, so "clean" cannot be confused with "unchecked"."""
+    flags: List[RedFlag] = []
+    runs: List[DetectorRun] = []
+
+    runs.append({'detector': 'debug-message', 'ran': True, 'why': ''})
+    flags.extend(detect_messages(bundle))
+    runs.append({'detector': 'all-zero-constant-block', 'ran': True, 'why': ''})
+    flags.extend(detect_zero_constant_blocks(bundle))
+    runs.append({'detector': 'unbound-root-parameter', 'ran': True, 'why': ''})
+    flags.extend(detect_unbound_root_parameters(bundle))
+
+    # The two rules that read *resolved* table slots share a gate: a bundle from a driver that did not resolve
+    # tables has nothing for them to look at, and "no table binds anything wrongly" and "I could not look" are
+    # different answers -- the run list is where that difference lives. The root-descriptor half above needs no
+    # table rows at all, which is why it is not gated with them.
+    resolved = any(TABLE_SLOT_ROW.match(str(row))
+                   for documents in bundle['states'].values()
+                   for row in (documents.get('state') or {}).get('rootParameters', []))
+    why = '' if resolved else 'no resolved descriptor tables in this bundle (written by an older driver)'
+    for detector, function in (('unbound-table-slot', detect_unbound_table_slots),
+                               ('binding-kind-mismatch', detect_binding_kind_mismatch)):
+        runs.append({'detector': detector, 'ran': resolved, 'why': why})
+        if resolved:
+            flags.extend(function(bundle))
+    runs.append({'detector': 'shader-io-mismatch', 'ran': True, 'why': ''})
+    flags.extend(detect_shader_io_mismatch(bundle))
+
+    # Four detectors read the usage lists, so they share one gate: a bundle written with --no-usage carries
+    # `resourceUsage: (not collected...)` and each of them is *skipped with the reason* rather than reported
+    # clean. The three chain rules stay separate detectors (and separate rules) rather than one
+    # pass, because each has its own certainty and each can be checked on its own.
+    collected = str(bundle['manifest'].get('resourceUsage', '')) == 'collected'
+    reason = '' if collected else 'no usage lists in this bundle (written with --no-usage)'
+    for detector, function in (('dead-allocation', detect_dead_allocations),
+                               ('read-before-write', detect_read_before_write),
+                               ('write-never-read', detect_write_never_read),
+                               ('load-instead-of-clear', detect_load_instead_of_clear),
+                               ('dead-compute', detect_dead_compute)):
+        runs.append({'detector': detector, 'ran': collected, 'why': reason})
+        if collected:
+            flags.extend(function(bundle))
+
+    # The pipeline-state rules need the blocks the driver started recording with this bundle format
+    # (viewports/scissors/outputMerger, and the component type on signature rows). A bundle from an older
+    # driver carries none of them, and each rule reports itself as *not looked at* with that reason rather
+    # than as clean -- the same contract the table rules follow.
+    state_reason = _pipeline_state_reason(bundle)
+    for detector, function in (('depth-logic', detect_depth_logic),
+                               ('empty-scissor', detect_empty_scissor),
+                               ('stencil-without-writer', detect_stencil_without_writer),
+                               ('blend-in-opaque-pass', detect_blend_in_opaque_pass),
+                               ('format-units-suspicion', detect_format_units_suspicion)):
+        runs.append({'detector': detector, 'ran': not state_reason, 'why': state_reason})
+        if not state_reason:
+            flags.extend(function(bundle))
+    # MSAA is the one of the group that needs no pipeline state: `samples` is in the resource table and a
+    # resolve is a usage row, which every bundle has.
+    runs.append({'detector': 'mismatched-msaa', 'ran': True, 'why': ''})
+    flags.extend(detect_mismatched_msaa(bundle))
+
+    # The .rdc-side three: they need the chunk stream, so they need the capture path, and they need the
+    # RenderDoc source tree to name what they are looking at. Either being absent is a *skip* with the
+    # reason, never a clean report, because "no marker is unbalanced" and "I could not tell markers apart"
+    # are different answers and only one of them is worth anything.
+    for detector, function in (('marker-imbalance', detect_marker_balance),
+                               ('unattributed-draws', detect_unattributed_draws),
+                               ('zero-work', detect_zero_work)):
+        if not rdc_path:
+            runs.append({'detector': detector, 'ran': False, 'why': 'no capture path given'})
+            continue
+        try:
+            found = function(rdc_path)
+        except Exception as exc:
+            # A capture that moved, or that is not a capture: these detectors are the only part of a report
+            # that touches the file, and a report about a bundle must not die because the .rdc is elsewhere.
+            # The reason goes in the run list, which is where a reader looks for what was not checked.
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'the capture could not be read: %s' % exc})
+            continue
+        if found is None:
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'no chunk-name map: the RenderDoc source tree was not found '
+                                '(README §1.1)'})
+            continue
+        runs.append({'detector': detector, 'ran': True, 'why': ''})
+        flags.extend(found)
+
+    # The findings keep the order their detector gave them -- "biggest first" is information, and a final
+    # sort by evidence would throw it away (each detector sorts its own findings, so this is deterministic).
+    return flags, runs
+
+def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int:
+    """Write `report.md` and `report.json` for a bundle: `report <rdc> <bundleDir> [outDir]`.
+
+    The report is written next to the bundle by default, because that is where the evidence it cites
+    lives. stdout gets a short summary and the paths; the documents are the output.
+    """
+    try:
+        bundle = load_bundle(bundle_dir)
+    except BundleError as exc:
+        print('error: %s' % exc)
+        return 1
+
+    recorded = str(bundle['manifest'].get('capture', ''))
+    if recorded and os.path.basename(recorded) != os.path.basename(path):
+        print('warning: the bundle was written for %s, but this capture is %s: the report describes '
+              'the bundle' % (recorded, path))
+
+    passes = reconstruct_passes(bundle['events'], bundle['resources'])
+    for entry in passes:
+        _state_rollup(bundle, entry)
+
+    flags, detectors = detect_all(bundle, path)
+
+    doc: ReportDocument = {
+        'reportVersion': REPORT_VERSION,
+        'capture': recorded or path,
+        'captureSha256': str(bundle['manifest'].get('captureSha256', '')),
+        'bundleDir': bundle_dir,
+        'bundle': bundle['manifest'],
+        'frame': frame_facts(bundle),
+        'passes': passes,
+        'flags': flags,
+        'detectors': detectors,
+        'caveats': report_caveats(),
+        'appendix': [],
+    }
+
+    target_dir = out_dir or bundle_dir
+    try:
+        if target_dir and not os.path.isdir(target_dir):
+            os.makedirs(target_dir)
+        markdown_path = os.path.join(target_dir, 'report.md')
+        json_path = os.path.join(target_dir, 'report.json')
+        # `newline=''` with an explicit '\n': the report is compared byte-for-byte between runs and
+        # between platforms, so the line ending is the tool's decision, not the platform's.
+        with open(markdown_path, 'w', encoding='utf-8', newline='') as fh:
+            fh.write(render_report_markdown(doc, path))
+        with open(json_path, 'w', encoding='utf-8', newline='') as fh:
+            json.dump(doc, fh, indent=2, sort_keys=True, ensure_ascii=False)
+            fh.write('\n')
+    except OSError as exc:
+        print('error: cannot write the report into %s: %s' % (target_dir, exc))
+        return 1
+
+    print('capture  : %s' % (recorded or path))
+    print('bundle   : %s' % bundle_dir)
+    print('events   : %d with bound state, %d pass(es), %d resource(s)'
+          % (doc['frame']['events'], len(passes), doc['frame']['resources']))
+    print('written  : %s' % markdown_path)
+    print('written  : %s' % json_path)
+    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §1.4)'
+          % (len(flags), sum(1 for run in detectors if run['ran'])))
+    return 0
+

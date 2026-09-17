@@ -25,18 +25,45 @@ device. REFERENCE §8 lists the sharp edges that follow from that.
 
 ```
 rdc-tools/
-  rdc_analysis.py     the offline tool: .rdc decoders, the commands, the CLI (REFERENCE §3, §4)
-  rdc_report.py       the frame report — a bundle in, deterministic Markdown/JSON out (REFERENCE §4.11)
-  rdc_schemas.py      the JSON contract — the validator behind `validate` (REFERENCE §4.12)
-  schema/             the driver's schemas, checked in (`schema --check` fails when they drift, REFERENCE §4.12)
-  replay_dump.cpp     the replay driver: asks RenderDoc's engine what the file cannot say (REFERENCE §9)
-  schema.cpp  schema.h  the schema table the driver publishes — data; the tool prints, writes and checks it
-  build_replay.ps1    builds both translation units against the installed renderdoc.dll (output in .\build\)
+  src/py/             the offline tool, one module per layer (REFERENCE §3, §4)
+    rdc_analysis.py     the CLI: the command table and the dispatch (run this)
+    rdc_types.py        the shapes of what the tool reads, and the constants they are framed with
+    rdc_chunkmap.py     chunk id -> name, from the RenderDoc source tree's enums
+    rdc_stream.py       the container and the frame stream (sections, framing, LZ4/Zstd)
+    rdc_cache.py        the decompressed-stream cache, and `load_stream`
+    rdc_dxbc.py         the DXBC/DXIL containers the capture carries
+    rdc_resources.py    formats, the resource table, descriptor heaps, root signatures, `RDEF`
+    rdc_payloads.py     the chunk payload decoders (draw state, pipeline, CBVs, vertex buffers)
+    rdc_commands.py     the commands themselves (draws, resources, descriptors, verify, ...)
+    rdc_report.py       the frame report: a bundle in, deterministic Markdown/JSON out (§4.11)
+    rdc_bundle.py       the bundle's types and loader
+    rdc_passes.py       pass reconstruction and the frame-at-a-glance roll-ups
+    rdc_detect_*.py     the detectors by family: bundle, usage, pipeline state, binding, chunk stream
+    rdc_report_render.py  the Markdown writer and the report's own caveats
+    rdc_schemas.py      the JSON contract — the validator behind `validate` (§4.12)
+  src/cpp/            the replay driver, same idea (REFERENCE §9)
+    src/cpp/replay_dump.cpp     the entry point: options, dispatch, help
+    common.h            the modules' shared declarations — globals, types, one section per module
+    text.cpp            the engine's names and values as text
+    output.cpp          the JSON/text writer every command prints through
+    capture.cpp         the replay session: the DLL, logging, the RAII guards, argument helpers
+    actions.cpp         the capture's action tree, and which events are dispatches
+    commands_*.cpp      the commands by area (frame inspection; per-event state)
+    bundle.cpp          the bundle producer and verifier the report reads
+    selftest.cpp        the driver checking itself + publishing its schemas
+    src/cpp/schema.cpp src/cpp/schema.h the schema table — data; the tool prints, writes and checks it
+  CMakeLists.txt      builds the driver against the installed renderdoc.dll (output in .\bin\)
+  .clang-format       RenderDoc's own C++ style, copied (the driver is a RenderDoc client)
+  tools/              deploy_dlls.cmake — copies the engine's DLLs next to the exe
+  schema/             the driver's schemas, checked in (`schema --check` fails when they drift, §4.12)
+  bin/                the built driver and the DLLs it loads (gitignored)
+  build/              the CMake build tree (gitignored)
   README.md           this file — setup, quick start, and the playbook for an AI agent
   REFERENCE.md        the detail behind it: internals (3), commands (4), examples (5), payload facts (6),
                       extending (7), pitfalls (8), the driver (9)
   ROADMAP.md          unimplemented features and planned work
-  tests/              self-contained unittest suite (run: rdc_analysis.py selftest)
+  tests/              self-contained unittest suite, one file per area (run: src/py/rdc_analysis.py selftest);
+                      rdc_testcase.py holds the cases and fixtures they share
   pyrightconfig.json  type-checker config: typeCheckingMode "standard", target Python 3.8
   typings/            stub for the optional zstandard dependency
 ```
@@ -55,7 +82,7 @@ rdc-tools/
 Run it as:
 
 ```powershell
-& 'C:\Program Files\Python311\python.exe' rdc_analysis.py <command> <file.rdc> [args...]
+& 'C:\Program Files\Python311\python.exe' src\py\rdc_analysis.py <command> <file.rdc> [args...]
 ```
 
 Running with no arguments prints the command list (the module docstring).
@@ -69,7 +96,7 @@ capture. That means **you must have a copy of the RenderDoc source tree in the r
 
 ```
 <root>/rdc-tools/                      <- the root folder of this tool
-    rdc_analysis.py                    this tool
+    src/py/                            the tool
     README.md
     ROADMAP.md
     renderdoc-src/                     <- a copy of the RenderDoc source tree goes HERE
@@ -96,12 +123,16 @@ git clone --depth 1 --branch v1.46 https://github.com/baldurk/renderdoc.git rend
 This project was developed against RenderDoc **1.46** (`C:\Program Files\RenderDoc`, see `sections` output for
 the capture's own version).
 
-**How the location is resolved** (`_find_renderdoc_src()` in the tool), in order:
+**How the location is resolved** (`_find_renderdoc_src()` in `src/py/rdc_chunkmap.py`), in order:
 
 1. the `RENDERDOC_SRC` environment variable, if set;
-2. `<folder containing rdc_analysis.py>/renderdoc-src` — **the documented convention**;
-3. `<parent of that folder>/renderdoc-src` — a sibling folder, for when the tool is nested;
-4. `C:\Workspace WIth Spaces\renderdoc-src` — the historical absolute default.
+2. `<the folder holding the module>/renderdoc-src`, and then the same name in every folder above it — this is
+   the search that finds the documented `<root>/rdc-tools/renderdoc-src`, and it also finds a tree beside the
+   tool if you keep one there (**the documented convention**);
+3. `C:\Workspace WIth Spaces\rdc-tools\renderdoc-src` — the historical absolute default.
+
+The walk upwards is deliberate: the tool used to sit at the repository root and now sits in `src/py`, and one
+search that works for both is better than a second convention to remember.
 
 If none of them contains `renderdoc/core/core.h`, the tool prints a one-line warning to stderr and continues
 with **numeric chunk IDs**. Everything else — container parsing, decompression, payload decoding, `draws`,
@@ -111,7 +142,7 @@ To point at a tree somewhere else for a single run:
 
 ```powershell
 $env:RENDERDOC_SRC = 'D:\src\renderdoc'
-& $py rdc_analysis.py chunks 'capture.rdc' 40 List_Draw
+& $py src\py\rdc_analysis.py chunks 'capture.rdc' 40 List_Draw
 Remove-Item Env:\RENDERDOC_SRC
 ```
 
@@ -148,17 +179,17 @@ A typical triage session:
 
 ```powershell
 $py = 'C:\Program Files\Python311\python.exe'
-& $py rdc_analysis.py sections 'capture.rdc'
-& $py rdc_analysis.py summary  'capture.rdc' | Select-Object -First 60
-& $py rdc_analysis.py draws    'capture.rdc' 40
-& $py rdc_analysis.py chunk    'capture.rdc' 452
+& $py src\py\rdc_analysis.py sections 'capture.rdc'
+& $py src\py\rdc_analysis.py summary  'capture.rdc' | Select-Object -First 60
+& $py src\py\rdc_analysis.py draws    'capture.rdc' 40
+& $py src\py\rdc_analysis.py chunk    'capture.rdc' 452
 ```
 
 The frame-level answer needs one replay session first (`replay_dump dump`, REFERENCE §9), and then it is offline:
 
 ```powershell
-.\build\replay_dump.exe dump 'capture.rdc' bundle    # the engine's answers, to disk
-& $py rdc_analysis.py report 'capture.rdc' bundle    # report.md + report.json (REFERENCE §4.11)
+.\bin\replay_dump.exe dump 'capture.rdc' bundle    # the engine's answers, to disk
+& $py src\py\rdc_analysis.py report 'capture.rdc' bundle    # report.md + report.json (REFERENCE §4.11)
 ```
 
 ---
@@ -240,10 +271,10 @@ offline tool, and it survives the process that produced it; stdout does not, and
 **A. "Explain this frame to me."** The five-minute pass, and the one to run before any other recipe.
 
 ```powershell
-.\build\replay_dump.exe dump 'capture.rdc' bundle --with-images   # REFERENCE §9: one replay, everything
-python rdc_analysis.py report 'capture.rdc' bundle                # REFERENCE §4.11: the frame report
-python rdc_analysis.py validate bundle schema                     # REFERENCE §4.12: the documents vs their schemas
-.\build\replay_dump.exe schema --check schema                     # REFERENCE §4.12: the schemas vs the driver
+.\bin\replay_dump.exe dump 'capture.rdc' bundle --with-images   # REFERENCE §9: one replay, everything
+python src\py\rdc_analysis.py report 'capture.rdc' bundle                # REFERENCE §4.11: the frame report
+python src\py\rdc_analysis.py validate bundle schema                     # REFERENCE §4.12: the documents vs their schemas
+.\bin\replay_dump.exe schema --check schema                     # REFERENCE §4.12: the schemas vs the driver
 ```
 
 Read it in this order: frame at a glance → pipeline map → pass by pass → the caveats → the appendix of
@@ -254,10 +285,10 @@ report. Offline-only fallback: `sections`, `summary`, `markers`, `draws`, `resou
 **B. "Why is this object missing, black, or the wrong colour?"** The pixel-level route, in order of cost.
 
 ```powershell
-.\build\replay_dump.exe draws 'capture.rdc' 200 Shadow          # find the pass and the eids (markers first)
-.\build\replay_dump.exe state 'capture.rdc' <eid>              # was it even drawn? RTs, shaders, root params
-.\build\replay_dump.exe shaders 'capture.rdc' <eid>            # names + bind points: what the shader reads
-.\build\replay_dump.exe cb 'capture.rdc' <eid> ps 3            # ... and the values it read
+.\bin\replay_dump.exe draws 'capture.rdc' 200 Shadow          # find the pass and the eids (markers first)
+.\bin\replay_dump.exe state 'capture.rdc' <eid>              # was it even drawn? RTs, shaders, root params
+.\bin\replay_dump.exe shaders 'capture.rdc' <eid>            # names + bind points: what the shader reads
+.\bin\replay_dump.exe cb 'capture.rdc' <eid> ps 3            # ... and the values it read
 ```
 
 If the draw is there and the values look right, the pixel history *(ROADMAP §3)* is the next step and usually the
@@ -272,8 +303,8 @@ disassembly.
 `replaydiff` exist.
 
 ```powershell
-python rdc_analysis.py diff mobile.rdc pc.rdc                      # roadmap §5: the file's view, no device
-.\build\replay_dump.exe replaydiff mobile.rdc pc.rdc --with-images # roadmap §6: what the engine saw, and the renders
+python src\py\rdc_analysis.py diff mobile.rdc pc.rdc                      # roadmap §5: the file's view, no device
+.\bin\replay_dump.exe replaydiff mobile.rdc pc.rdc --with-images # roadmap §6: what the engine saw, and the renders
 ```
 
 Then narrow by name rather than by index: the pass list (aligned by **marker path**, so it survives
@@ -286,9 +317,9 @@ answer: both frames were replayed on *this* machine's GPU.
 **D. "Is this texture the problem?"**
 
 ```powershell
-python rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name → id, size, format
-.\build\replay_dump.exe usage 'capture.rdc' <resId>              # every event that touches it
-.\build\replay_dump.exe textures 'capture.rdc' Sky --save .\tex  # decode it and look at it
+python src\py\rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name → id, size, format
+.\bin\replay_dump.exe usage 'capture.rdc' <resId>              # every event that touches it
+.\bin\replay_dump.exe textures 'capture.rdc' Sky --save .\tex  # decode it and look at it
 ```
 
 Three things to check, in this order: is the *content* right (the decoded PNG), is the *format* right for how
@@ -299,8 +330,8 @@ diff the renders *(ROADMAP §3, §5)* — if the picture does not change, the te
 **E. "What is in this uniform — and is it ever what we expect?"**
 
 ```powershell
-.\build\replay_dump.exe cb 'capture.rdc' 27931 ps 3     # named values, structs and arrays expanded
-.\build\replay_dump.exe watch 'capture.rdc' Light.intensity   # roadmap §2: the value at every event
+.\bin\replay_dump.exe cb 'capture.rdc' 27931 ps 3     # named values, structs and arrays expanded
+.\bin\replay_dump.exe watch 'capture.rdc' Light.intensity   # roadmap §2: the value at every event
 ```
 
 `cb` answers "what is bound here"; `watch` answers "is it ever different" — the difference between a constant
@@ -311,9 +342,9 @@ when the reflection is not enough (structured buffers, index data, hand-built ta
 **F. "What does the shader actually do?"** Four independent views, cheapest first.
 
 ```powershell
-.\build\replay_dump.exe shaders 'capture.rdc' <eid> --disasm   # the code, with the reflection next to it
-python rdc_analysis.py dxbc 'capture.rdc' verbose              # which containers exist, and their hashes
-.\build\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP §4, the rest)
+.\bin\replay_dump.exe shaders 'capture.rdc' <eid> --disasm   # the code, with the reflection next to it
+python src\py\rdc_analysis.py dxbc 'capture.rdc' verbose              # which containers exist, and their hashes
+.\bin\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP §4, the rest)
 ```
 
 Cross-check the signatures before reading the maths: VS output vs PS input (same semantic, index and width —
@@ -325,9 +356,9 @@ a puzzle to keep grinding at.
 **G. "Where does the time and the bandwidth go?"**
 
 ```powershell
-.\build\replay_dump.exe counters 'capture.rdc'                 # what the driver can measure
-.\build\replay_dump.exe counters 'capture.rdc' --per-pass      # roadmap §4: folded per pass (fetch is per event)
-.\build\replay_dump.exe image 'capture.rdc' <eid> out.bmp      # what each pass produced (contact sheet, ROADMAP §4)
+.\bin\replay_dump.exe counters 'capture.rdc'                 # what the driver can measure
+.\bin\replay_dump.exe counters 'capture.rdc' --per-pass      # roadmap §4: folded per pass (fetch is per event)
+.\bin\replay_dump.exe image 'capture.rdc' <eid> out.bmp      # what each pass produced (contact sheet, ROADMAP §4)
 ```
 
 The offline half supplies the parts the GPU cannot: `deps` *(ROADMAP §5)* for writes nobody reads and reads nobody
@@ -338,9 +369,9 @@ answer is "not measurable here", not zero.
 **H. "This looks uninitialised, or garbage."**
 
 ```powershell
-python rdc_analysis.py draws 'capture.rdc'                     # offline: clears, copies and the order of writes
-.\build\replay_dump.exe usage 'capture.rdc' <resId>            # engine: the same question, from the device's side
-.\build\replay_dump.exe buffer 'capture.rdc' <resId> 0 256     # roadmap §2: the actual bytes
+python src\py\rdc_analysis.py draws 'capture.rdc'                     # offline: clears, copies and the order of writes
+.\bin\replay_dump.exe usage 'capture.rdc' <resId>            # engine: the same question, from the device's side
+.\bin\replay_dump.exe buffer 'capture.rdc' <resId> 0 256     # roadmap §2: the actual bytes
 ```
 
 The class of bug where the answer is a *question*: a resource read in a pass that no earlier pass wrote
@@ -352,9 +383,9 @@ earlier eid.
 **I. "Did my change fix it — or break something else?"**
 
 ```powershell
-.\build\replay_dump.exe batch 'capture.rdc' run.txt > before.txt   # or `dump`, REFERENCE §9
+.\bin\replay_dump.exe batch 'capture.rdc' run.txt > before.txt   # or `dump`, REFERENCE §9
 # ... rebuild / recapture ...
-.\build\replay_dump.exe batch 'capture.rdc' run.txt > after.txt
+.\bin\replay_dump.exe batch 'capture.rdc' run.txt > after.txt
 ```
 
 Compare the **text** output byte-for-byte (it is the contract: this is how the driver's own regression pass is
@@ -365,11 +396,11 @@ number. Keep the two bundles: the golden/fixture tests *(ROADMAP §7)* are the s
 
 **J. "Triage a capture someone sent me."** A fixed order, because each step can end the investigation.
 
-1. `python rdc_analysis.py verify <rdc>` — is the file itself intact? (framing, padding, payload checks)
+1. `python src\py\rdc_analysis.py verify <rdc>` — is the file itself intact? (framing, padding, payload checks)
 2. `replay_dump info <rdc>` — API, driver, GPU, feature flags (`pixelHistory`, `shaderDebugging`), counts.
 3. `replay_dump debug <rdc>` — the API's own complaints; validation errors outrank any self-made hypothesis.
 4. `replay_dump draws <rdc> 200` — the marker map: which passes exist, and which eids are real.
-5. `python rdc_analysis.py resources <rdc>` — names for the ids, and the sizes that tell you what is big.
+5. `python src\py\rdc_analysis.py resources <rdc>` — names for the ids, and the sizes that tell you what is big.
 6. `replay_dump probe <rdc> <maxEid>` if the numbers look wrong: a wrong eid returns an *empty* state rather
    than an error, so "nothing is bound" must be checked before it is believed.
 7. Then the report *(ROADMAP §1)* or the specific recipe above.
@@ -379,9 +410,9 @@ with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` ne
 this is the one case for the standalone harness (ROADMAP §8.5):
 
 ```powershell
-python rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
-python rdc_analysis.py rootsig 'capture.rdc'                  # the exact binding layout to reproduce
-.\build\replay_dump.exe cb 'capture.rdc' <eid> ps 0           # realistic constants to start from
+python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
+python src\py\rdc_analysis.py rootsig 'capture.rdc'                  # the exact binding layout to reproduce
+.\bin\replay_dump.exe cb 'capture.rdc' <eid> ps 0           # realistic constants to start from
 ```
 
 Feed those three into the harness with hand-built constants, and compare its result against what replay reports
@@ -454,4 +485,4 @@ built on.
   `driver/d3d12/d3d12_common.h` (chunk-name enums), `driver/d3d12/d3d12_command_list_wrap.cpp` (payload
   layouts), `driver/d3d12/d3d12_serialise.cpp` + `d3d12_manager.h`, `api/replay/renderdoc_replay.h`.
 * **The tools print their own help**: `rdc_analysis.py` with no arguments prints every command, and
-  `build\replay_dump.exe` with no arguments prints the driver's.
+  `bin\replay_dump.exe` with no arguments prints the driver's.

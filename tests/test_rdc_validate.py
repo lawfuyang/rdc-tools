@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-for _p in (HERE, ROOT):
+for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

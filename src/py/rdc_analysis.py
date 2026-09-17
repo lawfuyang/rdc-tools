@@ -1,0 +1,213 @@
+"""Offline RenderDoc .rdc analyser (no renderdoc.pyd needed).
+
+Container layout (from renderdoc/serialise/rdcfile.cpp):
+  FileHeader(32) | BinaryThumbnail(8 + jpg) | CaptureMetaData(13 + name) | CaptureTimeBase(16)
+  then N x { BinarySectionHeader(40) | name | data }
+
+Section flags observed: 0x2 = LZ4 (u32 block-size prefixes), 0x4 = Zstd (u32 prefix + zstd frames),
+0x0 = uncompressed.
+
+The frame-capture section is one structured-data (SDChunk) stream; we decompress it and analyse the
+readable content (D3D12: resource names, shader debug names, cbuffer reflection strings, ...).
+
+Usage:
+  python rdc_analysis.py sections <rdc>
+  python rdc_analysis.py blocks   <rdc>          # per-section compression accounting
+  python rdc_analysis.py resources <rdc> [limit] [nameFilter]   # id -> kind/size/name
+  python rdc_analysis.py descriptors <rdc> [limit] [heapFilter] # descriptor heap contents
+  python rdc_analysis.py verify   <rdc>          # framing/padding/payload checks, exit 1 on problems
+  python rdc_analysis.py summary  <rdc>
+  python rdc_analysis.py markers  <rdc>
+  python rdc_analysis.py chunks   <rdc> [limit] [nameFilter]
+  python rdc_analysis.py chunk    <rdc> <chunkIndex>
+  python rdc_analysis.py draws    <rdc> [maxDraws]
+  python rdc_analysis.py rootsig  <rdc> [maxSigs]        # decoded root signatures: parameter types,
+                                                         #   registers, spaces, descriptor ranges
+  python rdc_analysis.py strings  <rdc> [minlen] [maxlines]
+  python rdc_analysis.py names    <rdc> [minlen]
+  python rdc_analysis.py grep     <rdc> <pattern> [context]
+  python rdc_analysis.py dump     <rdc> <start> <length> [minlen]
+  python rdc_analysis.py count    <rdc> <pattern> [pattern ...]
+  python rdc_analysis.py hex      <rdc> <start> <length>
+  python rdc_analysis.py dxbc     <rdc> [verbose]
+  python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
+  python rdc_analysis.py dump-shaders <rdc> <outdir>
+  python rdc_analysis.py report   <rdc> <bundleDir> [outDir]   # frame report from `replay_dump dump`
+  python rdc_analysis.py validate <file|bundleDir> <schemaDir> [kind]  # documents vs the schemas
+  python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
+  python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
+"""
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from typing import Optional, Sequence
+
+# The two offline layers that grew out of this file. Imported rather than moved silently, so the CLI, the
+# tests and anything else that already says `rdc_analysis.cmd_report` keep working; the heavy lifting is in
+# the modules, which is where the line counts are for a reason. `X as X` is the re-export form PEP 484
+# defines: it says "this name is part of this module's interface", so the type checker does not report the
+# import as unused while still checking that the module it comes from exports it.
+from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT as DEAD_ALLOCATION_LIMIT,
+                        REPORT_VERSION as REPORT_VERSION, BundleData as BundleData,
+
+                        BundleError as BundleError, DetectorRun as DetectorRun,
+                        RedFlag as RedFlag, ReportDocument as ReportDocument, ReportPass as ReportPass,
+                        cmd_report as cmd_report, detect_all as detect_all,
+                        detect_dead_allocations as detect_dead_allocations,
+                        detect_marker_balance as detect_marker_balance,
+                        detect_messages as detect_messages,
+                        detect_shader_io_mismatch as detect_shader_io_mismatch,
+                        detect_unattributed_draws as detect_unattributed_draws,
+                        detect_unbound_root_parameters as detect_unbound_root_parameters,
+                        detect_zero_constant_blocks as detect_zero_constant_blocks,
+                        detect_zero_work as detect_zero_work,
+                        frame_facts as frame_facts, load_bundle as load_bundle,
+                        reconstruct_passes as reconstruct_passes,
+                        render_report_markdown as render_report_markdown,
+                        report_caveats as report_caveats)
+from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
+                         SchemaError as SchemaError, cmd_validate as cmd_validate,
+                         load_schemas as load_schemas, schema_for_file as schema_for_file,
+                         validate_document as validate_document)
+
+from rdc_types import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_stream import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_cache import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_chunkmap import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+
+def _filter_suite(suite: unittest.TestSuite, patterns: Sequence[str]) -> unittest.TestSuite:
+    """Keep only the tests whose id contains one of `patterns` (like `unittest -k`)."""
+    out = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            out.addTest(_filter_suite(test, patterns))
+        elif any(p in test.id() for p in patterns):
+            out.addTest(test)
+    return out
+
+def cmd_selftest(args: Optional[Sequence[str]] = None) -> int:
+    """Run the unit-test suite in the `tests` folder next to this file.
+
+    Extra arguments: `-v` for verbose, `-k <substring>` to run matching tests only.
+    Returns a process exit code (0 = all passed).
+    """
+    argv = list(args or [])
+    verbosity, patterns, unknown = 1, [], []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ('-v', '--verbose'):
+            verbosity = 2
+        elif a in ('-q', '--quiet'):
+            verbosity = 1
+        elif a in ('-k', '--pattern') and i + 1 < len(argv):
+            i += 1
+            patterns.append(argv[i])
+        else:
+            unknown.append(a)
+        i += 1
+    if unknown:
+        print('usage: rdc_analysis.py selftest [-v] [-k <substring>]')
+        return 2
+    # This module lives in src/py/ and the suite in tests/, both under the repository root. The tool's own
+    # folder goes on sys.path so the suite can `import rdc_analysis` / `import rdc_report` by name -- which
+    # is what the tests do, and what the re-exports above exist for.
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(os.path.dirname(here))
+    tests_dir = os.path.join(root, 'tests')
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    if not os.path.isdir(tests_dir):
+        print('no tests folder at %s (it belongs to the repository root above %s)' % (tests_dir, os.path.basename(__file__)))
+        return 1
+        return 1
+    print('running tests from %s' % tests_dir)
+    suite = unittest.TestLoader().discover(tests_dir, pattern='test_*.py', top_level_dir=tests_dir)
+    if patterns:
+        suite = _filter_suite(suite, patterns)
+    result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
+def _arg(argv: Sequence[str], index: int, default: Optional[int] = None,
+         base: int = 10) -> int:
+    """Return `int(argv[index], base)`, or `default` when the argument is absent.
+
+    Mirrors the original hand-rolled `int(sys.argv[n]) if len(sys.argv) > n else default` indexing:
+    a missing argument uses the default, a present-but-unparsable one raises `ValueError` and a
+    missing required argument (no default) raises `IndexError` -- both pinned by the CLI tests.
+    """
+    if index < len(argv):
+        return int(argv[index], base)
+    if default is None:
+        raise IndexError('missing command argument #%d' % index)
+    return default
+
+def main() -> None:
+    """CLI entry point: dispatch `sys.argv[1]` to the matching `cmd_*` function."""
+    argv = sys.argv
+    if len(argv) > 1 and argv[1] in ('test', 'selftest'):
+        sys.exit(cmd_selftest(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'cache':
+        sys.exit(cmd_cache(argv[2:]))
+    if len(argv) < 3:
+        print(__doc__)
+        return
+    cmd, path = argv[1], argv[2]
+    if cmd == 'chunk':
+        cmd_chunk_detail(path, int(argv[3]))
+    elif cmd == 'draws':
+        cmd_draws(path, _arg(argv, 3, 80))
+    elif cmd == 'chunks':
+        cmd_chunks(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+    elif cmd == 'verify':
+        sys.exit(cmd_verify(path))
+    elif cmd == 'summary':
+        cmd_summary(path)
+    elif cmd == 'markers':
+        cmd_markers(path)
+    elif cmd == 'rootsig':
+        cmd_rootsig(path, _arg(argv, 3, 40))
+    elif cmd == 'dump-chunk':
+        cmd_dump_chunk(path, int(argv[3]), argv[4])
+    elif cmd == 'dump-shaders':
+        cmd_dump_shaders(path, argv[3])
+    elif cmd == 'report':
+        sys.exit(cmd_report(path, argv[3], argv[4] if len(argv) > 4 else None))
+    elif cmd == 'validate':
+        if len(argv) < 4:
+            print('usage: rdc_analysis.py validate <file|bundleDir> <schemaDir|one.schema.json> [kind]')
+            sys.exit(2)
+        sys.exit(cmd_validate(path, argv[3], argv[4] if len(argv) > 4 else None))
+    elif cmd == 'sections':
+        cmd_sections(path)
+    elif cmd == 'blocks':
+        cmd_blocks(path)
+    elif cmd == 'resources':
+        cmd_resources(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+    elif cmd == 'descriptors':
+        cmd_descriptors(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+    elif cmd == 'strings':
+        cmd_strings(path, _arg(argv, 3, 6), _arg(argv, 4, 200))
+    elif cmd == 'names':
+        cmd_names(path, _arg(argv, 3, 10))
+    elif cmd == 'grep':
+        cmd_grep(path, argv[3], _arg(argv, 4, 200))
+    elif cmd == 'dump':
+        cmd_dump(path, int(argv[3], 0), int(argv[4], 0), _arg(argv, 5, 4))
+    elif cmd == 'dxbc':
+        cmd_dxbc(path)
+    elif cmd == 'count':
+        cmd_count(path, argv[3:])
+    elif cmd == 'hex':
+        cmd_hex(path, argv[3], argv[4])
+    else:
+        print(__doc__)
+
+if __name__ == '__main__':
+    main()

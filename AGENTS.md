@@ -5,16 +5,27 @@ does; nothing here is a supported product.
 
 ## Always run the checks after any code change
 
-Any change to `rdc_analysis.py` (or to `tests/`) is not finished until **both** of these pass:
+Any change to `src/py/` (or to `tests/`, or to `src/cpp/` — which has its own gate: a warning-free
+`cmake --build build --config Release` and `clang-format-check`) is not finished until **both** of these pass:
 
 ```powershell
-python rdc_analysis.py selftest    # whole suite, ~1 s: exit 0 = pass, 1 = fail, 2 = bad option
-npx --yes pyright@latest           # must print: 0 errors, 0 warnings
+python src\py\rdc_analysis.py selftest    # whole suite, ~7 s: exit 0 = pass, 1 = fail, 2 = bad option
+npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
 ```
 
 - `selftest -v` for per-test output, `selftest -k Draws` to run only matching test ids.
-- Other entry points: `python tests/test_rdc_analysis.py` (parsers/decoders),
-  `python tests/test_rdc_commands.py` (commands/CLI), `python -m unittest discover -s tests -t tests`.
+- Other entry points, one file per area (`tests/rdc_testcase.py` holds what they share, and is not a test
+  file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
+  `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
+  table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report/detectors),
+  `test_rdc_validate.py` (schemas), or all of them with `python -m unittest discover -s tests -t tests`.
+- A test fixture that the detectors read — the chunk-name map, the cache directory — is patched on the
+  module that *owns* it, and the capture the test builds must come from the same map. Building a capture from
+  the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
+  their setup and found nothing.
+- A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
+  `renderdoc-src\PC Renderer.rdc` must still print `2132 events / 47 passes / 493 resources / 101 findings from
+  20 detectors`, and the driver's text output must stay byte-identical.
 - New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix.
 - Never weaken, skip or delete an assertion to make a run pass. Tests pinning behaviour that looks wrong
   are marked `CHARACTERIZATION` — change code and test together, and say so.
@@ -23,7 +34,8 @@ npx --yes pyright@latest           # must print: 0 errors, 0 warnings
 ## Python coding guidelines
 
 Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the test suite. Target:
-**Python 3.8+, standard library only** (plus the optional `zstandard`), **single file**, CLI behaviour frozen.
+**Python 3.8+, standard library only** (plus the optional `zstandard`), **one module per layer under
+`src/py/`**, CLI behaviour frozen.
 
 ### Types — Pyright/Pylance "Standard", zero errors and zero warnings
 
@@ -51,7 +63,21 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 ### Structure and behaviour
 
-- `rdc_analysis.py` stays a single file — do not split it into a package or add a shim module.
+- The tool is a **package-shaped folder, not a package**: `src/py/` holds plain modules with no `__init__.py`,
+  imported by name (`import rdc_chunkmap`). `src/py/rdc_analysis.py` is the entry point and re-exports every
+  module (`from rdc_commands import *`), so `R.<anything>` keeps working for the tests and for scripts. Do not
+  turn it back into one file, and do not add an `__init__.py`.
+- **A module may only import modules beneath it**, and the layering is: `rdc_types` → `rdc_chunkmap` →
+  `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` → `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
+  and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors → `rdc_report_render`
+  → `rdc_report` → `rdc_analysis`. A cycle breaks `from X import *` at import time (a partially initialised
+  module exports only what it has defined so far), so put a shared helper *below* the modules that need it
+  instead of importing upwards — that is why `_name_suffix` lives in `rdc_resources` and the loaders in
+  `rdc_cache`.
+- **A shared helper is called through its owner** (`rdc_chunkmap.load_chunk_names(...)`), never by the bare name
+  a star import copied — the qualified form is what makes an override, or a test's `mock.patch.object`, reach the
+  code that uses it, and it keeps the dependency visible at the call site. The tests patch the owner for the same
+  reason (`chunkmap.load_chunk_names`, `cache.cache_dir`, `resources.load_format_names`).
 - Keep the documented public names (`parse_container`, `iter_chunks`, `decode_chunk`, `load_chunk_names`,
   `load_format_names`, `parse_resource_table`, `parse_descriptor_heaps`, `parse_root_signatures`, `parse_rdef`,
   `shader_bind_names`, `load_stream`, `cache_dir`, `cache_lookup`, `cache_store`, `DrawState`, `ResourceInfo`,
@@ -69,7 +95,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   follows), **never** from the bound shaders. Measured: `PC Renderer.rdc` has a compute shader bound at every
   one of its 2132 events, so the shader-based guess called the whole frame compute and the report grouped a
   frame of draws into compute passes. A wrong value here is wrong everywhere downstream.
-- The replay driver (`replay_dump.cpp`, REFERENCE §9) keeps the same rule: it prints what the engine returns and
+- The replay driver (`src/cpp/replay_dump.cpp`, REFERENCE §9) keeps the same rule: it prints what the engine returns and
   nothing else. It must keep doing the three things a replay host has to do — `REPLAY_PROGRAM_MARKER()` at file
   scope, `RENDERDOC_InitialiseReplay()` before opening, `RENDERDOC_ShutdownReplay()` on the way out — or it
   dies inside `OpenCapture` with no diagnostic at all. Its output is unbuffered on purpose, so a crash still
@@ -93,15 +119,24 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   output goes through `JsonEscape` (a Windows path in `capture` broke every document once), and a separator is
   written *before* each item after the first, never after a last one — so a field which may be the object's
   last must say so with its `last` argument. After changing any command, validate:
-  `build\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
+  `bin\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
   the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
-- Layout, so new code has an obvious home: `rdc_analysis.py` is the decoders, the commands and the CLI;
-  `rdc_report.py` and `rdc_schemas.py` are the two offline layers, re-exported from `rdc_analysis.py`
-  (`X as X`, the PEP 484 re-export form) so `R.cmd_report` and `R.validate_document` keep working for the
-  tests that were written against them. On the C++ side `replay_dump.cpp` is the tool and `schema.cpp` /
-  `schema.h` hold the schema table — *data only*, because the printing, writing and checking need the tool's
-  `Fail`/log plumbing. Split by what never changes together, not by size: the last split moved 474 lines of
-  table out of the driver and 829 lines of analysis out of the tool, and touched no logic at all.
+- Layout, so new code has an obvious home. Python: `src/py/rdc_types.py` the shapes and their constants,
+  `rdc_chunkmap.py` the chunk-name enums, `rdc_stream.py` the container and the frame stream, `rdc_cache.py` the
+  stream cache and the loaders, `rdc_dxbc.py` the shader containers, `rdc_resources.py` the resource table and
+  everything read out of it (formats, heaps, root signatures, `RDEF`), `rdc_payloads.py` the chunk payload
+  decoders, `rdc_commands.py` the commands, `rdc_report.py`/`rdc_bundle.py`/`rdc_passes.py`/`rdc_detect_*.py`/
+  `rdc_report_render.py` the report, `rdc_schemas.py` the JSON contract, `rdc_analysis.py` the CLI that re-exports
+  them all. C++: `src/cpp/replay_dump.cpp` the entry point, `common.h` the modules' shared declarations,
+  `text.cpp`/`output.cpp` the printing, `capture.cpp` the engine session, `actions.cpp` the action tree,
+  `commands_frame.cpp`/`commands_state.cpp` the commands by area, `bundle.cpp` the bundle producer,
+  `selftest.cpp`, and `schema.cpp`/`schema.h` for the schema table — *data only*, because the printing, writing
+  and checking need the tool's `Fail`/log plumbing.
+- **Split by what never changes together, not by size.** The Python split was done by cutting the original file
+  at its own layer boundaries (and in dependency order: types → chunk-map → stream → cache/DXBC → resources →
+  payloads → commands → CLI); the C++ split moved whole families out (`text`, `output`, `capture`, `actions`,
+  the two command files, `bundle`, `selftest`) and touched no logic. A new module belongs beside the layer it
+  serves, and its imports must point *down* the layering (see the Python structure rules above).
 - A capture path with a space in it (`PC Renderer.rdc`) needs its quotes **inside** the argument:
   `Start-Process -ArgumentList` joins with spaces and does not quote, so `@('dump', $rdc)` arrives as
   `renderdoc-src\PC` and the run dies in under a second with `cannot open ...\renderdoc-src\PC`. Write it as

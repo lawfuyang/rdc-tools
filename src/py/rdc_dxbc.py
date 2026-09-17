@@ -1,0 +1,135 @@
+"""The DXBC/DXIL containers the capture carries: where they are, what parts they hold and what strings those parts contain."""
+
+from __future__ import annotations
+
+from rdc_types import *  # noqa: F401,F403
+from rdc_stream import *  # noqa: F401,F403
+from rdc_cache import *  # noqa: F401,F403
+
+from typing import Dict, Iterator, List, Sequence, TypedDict
+
+def parse_dxil_containers(stream: bytes) -> Iterator[DxbcContainer]:
+    """Yield `(offset, size, hash_hex, parts)` for every DXBC/DXIL container in `stream`.
+
+    Container header: 'DXBC' magic(4) | hash(16) | version(4) | size(4) | partCount(4) |
+    partOffsets[partCount](4) ; each part at +offset: fourcc(4) | size(4) | data.
+    """
+    pos = 0
+    while True:
+        i = stream.find(b'DXBC', pos)
+        if i < 0:
+            return
+        pos = i + 4
+        if i + 32 > len(stream):
+            continue
+        part_count = u32(stream, i + 28)
+        if part_count == 0 or part_count > 64 or i + 32 + part_count * 4 > len(stream):
+            continue
+        parts: List[DxbcPart] = []
+        ok = True
+        for k in range(part_count):
+            po = i + u32(stream, i + 32 + k * 4)
+            if po + 8 > len(stream):
+                ok = False
+                break
+            fourcc = stream[po:po + 4]
+            plen = u32(stream, po + 4)
+            if not all(32 <= c < 127 for c in fourcc) or po + 8 + plen > len(stream):
+                ok = False
+                break
+            parts.append((fourcc.decode('ascii', 'replace'), po + 8, plen))
+        if not ok or not parts:
+            continue
+        end = max(p[1] + p[2] for p in parts)
+        yield i, end - i, stream[i + 4:i + 20].hex(), parts
+
+def part_strings(blob: bytes, off: int, ln: int, minlen: int = 4) -> List[str]:
+    """Return the ASCII strings (>= `minlen`) inside `blob[off:off+ln]`."""
+    return [s for _, s in string_runs(blob, minlen, off, off + ln)]
+
+class DxbcRow(TypedDict):
+    """Internal per-container row used by `cmd_dxbc` (never leaves the module)."""
+    off: int
+    size: int
+    hash: str
+    stage: str
+    parts: List[str]
+
+def cmd_dxbc(path: str) -> None:
+    """Inventory the DXBC/DXIL containers: offset, size, stage, hash and the parts each carries.
+
+    This is a *container* view, not a shader analysis: it says which shaders the capture embeds and
+    where, so `dump-shaders` can extract the interesting ones. What a shader *reads* -- uniform
+    names, bind points, signatures, disassembly -- is the shader reflection's job, and the reflection
+    is the replay driver's (REFERENCE §9). The tool used to guess at it by scanning containers for
+    GI-ish strings and `TEXCOORD6..12`; that harvest was a worse answer to a question replay answers
+    exactly, so it was removed rather than kept.
+    """
+    _info, stream, how = load_stream(path)
+    print('stream %d bytes [%s]' % (len(stream), how))
+    rows: List[DxbcRow] = []
+    for off, size, h, parts in parse_dxil_containers(stream):
+        names = [p[0] for p in parts]
+        osg = next((p for p in parts if p[0] == 'OSG1'), None)
+        osg_s = part_strings(stream, osg[1], osg[2], 3) if osg else []
+        stage = 'root-sig' if 'RTS0' in names else (
+            'PS' if any('SV_Target' in s for s in osg_s) else
+            'VS' if any('SV_Position' in s for s in osg_s) else
+            'CS' if 'CS' in names else '?')
+        rows.append({'off': off, 'size': size, 'hash': h, 'stage': stage, 'parts': names})
+    print('DXBC/DXIL containers: %d' % len(rows))
+    by_stage: Dict[str, List[DxbcRow]] = {}
+    for r in rows:
+        by_stage.setdefault(r['stage'], []).append(r)
+    for st in sorted(by_stage):
+        print('  %-9s %d' % (st, len(by_stage[st])))
+    print()
+    print('%-4s %-10s %-8s %-8s %-34s %s' % ('#', 'offset', 'size', 'stage', 'hash', 'parts'))
+    for idx, r in enumerate(rows):
+        print('%-4d 0x%-8x %-8d %-8s %-34s %s'
+              % (idx, r['off'], r['size'], r['stage'], r['hash'][:32], ','.join(r['parts'])))
+
+def cmd_count(path: str, pats: Sequence[str]) -> None:
+    """Print the occurrence count and first offset of each pattern (verbatim, `-1` included)."""
+    _info, stream, how = load_stream(path)
+    print('stream %d bytes [%s]' % (len(stream), how))
+    for p in pats:
+        b = p.encode()
+        print('  %-30s count=%-8d first=0x%x' % (p, stream.count(b), stream.find(b)))
+
+def cmd_hex(path: str, start: str, length: str) -> None:
+    """Hex + ASCII dump of `[start, start+length)` (both arguments accept decimal and 0x hex)."""
+    _info, stream, _how = load_stream(path)
+    start_i, length_i = int(start, 0), int(length, 0)
+    print('window 0x%x..0x%x' % (start_i, start_i + length_i))
+    for i in range(start_i, min(len(stream), start_i + length_i), 16):
+        chunk = stream[i:i + 16]
+        hx = ' '.join('%02x' % c for c in chunk)
+        asc = ''.join(chr(c) if 32 <= c < 127 else '.' for c in chunk)
+        print('%08x  %-47s  %s' % (i, hx, asc))
+
+# ---------------------------------------------------------------------------
+# Chunk (structured-data) stream walking
+#
+# Framing from renderdoc/serialise/serialiser.cpp (Serialiser<Reading>::BeginChunk):
+#   u32 c              chunkID = c & 0xffff, flags = c & ~0xffff
+#   if c & 0x10000     u32 numFrames; u64 frames[numFrames]     (callstack)
+#   if c & 0x20000     u64 threadID
+#   if c & 0x40000     u64 durationMicro
+#   if c & 0x80000     i64 timestampMicro
+#   if c & 0x100000    u64 length  else  u32 length
+#   payload[length]
+# and the stream is then aligned to Serialiser::ChunkAlignment (= 64).
+#
+# Chunk IDs come from the driver's `enum class D3D12Chunk : uint32_t` (starting at
+# SystemChunk::FirstDriverChunk = 1000); we parse the enums straight out of the RenderDoc source
+# so the names stay correct for whatever version produced the capture.
+# ---------------------------------------------------------------------------
+__all__ = [
+    'DxbcRow',
+    'cmd_count',
+    'cmd_dxbc',
+    'cmd_hex',
+    'parse_dxil_containers',
+    'part_strings',
+]

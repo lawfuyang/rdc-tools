@@ -22,13 +22,15 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-for _p in (HERE, ROOT):
+for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 import rdc_analysis as R          # noqa: E402
+import rdc_chunkmap as chunkmap     # the tests patch the module that *owns* a name,
+import rdc_resources as resources   #   because a star import copies it and a copy cannot
 import rdc_fixtures as F          # noqa: E402
-from test_rdc_analysis import CmdCase as _CmdCase, capture_text, capture_all   # noqa: E402
+from rdc_testcase import CmdCase as _CmdCase, capture_text, capture_all   # noqa: E402
 
 
 class CmdCase(_CmdCase):
@@ -323,7 +325,7 @@ class TestCmdResources(CmdCase):
     def test_missing_format_names_fall_back_to_numbers(self):
         path = self.cap(self.ch('Device_CreatePlacedResource',
                                 F.pl_placed_resource(3, F.pl_resource_desc(3, 64, 64, fmt=10))))
-        with mock.patch.object(R, 'load_format_names', lambda src_root=None: {}):
+        with mock.patch.object(resources, 'load_format_names', lambda src_root=None: {}):
             out = self.out(R.cmd_resources, path)
         self.assertIn('fmt=10', out)
         self.assertIn('note: DXGI format names need the RenderDoc source', out)
@@ -742,7 +744,7 @@ class TestCmdChunks(CmdCase):
                       self.out(R.cmd_chunks, self.capture(), 200, 'NotAChunkName'))
 
     def test_missing_source_tree_warns_and_uses_numeric_ids(self):
-        with mock.patch.object(R, 'load_chunk_names', lambda src_root=None, driver='D3D12': {}):
+        with mock.patch.object(chunkmap, 'load_chunk_names', lambda src_root=None, driver='D3D12': {}):
             out = self.out(R.cmd_chunks, self.capture())
         self.assertIn('known chunk names: 0', out)
         self.assertIn('WARNING: RenderDoc source not found at', out)

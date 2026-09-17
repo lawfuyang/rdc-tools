@@ -1,6 +1,6 @@
 # rdc-tools — expansion roadmap / TODO
 
-Features that are **not implemented yet** in `rdc_analysis.py` or in its replay driver (`replay_dump.cpp`,
+Features that are **not implemented yet** in `rdc_analysis.py` or in its replay driver (`src/cpp/replay_dump.cpp`,
 REFERENCE §9), in rough priority order. Each item says what it is, why it is wanted, how it would be built, and
 what blocks it.
 
@@ -56,7 +56,7 @@ SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads,
 DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
 rendered image, and the bundle the report generator reads (`dump` + `bundle-verify`). The offline tool has a
-hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright
+hermetic unittest suite (`python src\py\rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
 `build/` folder. `AGENTS.md` holds the coding rules, REFERENCE §4.6/§4.7 how to run both. That suite is the safety
 net for everything below — land the tests with the change, not after it.
@@ -68,13 +68,16 @@ version — currently the chunk-name enums, which are parsed out of the RenderDo
 a `renderdoc-src` folder **in the root folder**, i.e. beside the tool:
 
 ```
-<root>/rdc-tools/rdc_analysis.py
+<root>/rdc-tools/src/py/rdc_chunkmap.py             the module that reads the enums
 <root>/rdc-tools/README.md
 <root>/rdc-tools/ROADMAP.md
 <root>/rdc-tools/renderdoc-src/                     <- a copy of the RenderDoc source tree MUST be here
     renderdoc/core/core.h                               SystemChunk enum
     renderdoc/driver/d3d12/d3d12_common.h               D3D12Chunk enum
 ```
+
+The search walks *up* from that module, so the tree can also sit beside it or at any folder above — the
+convention is the repository root, which is two levels up.
 
 **The user must have a copy of the RenderDoc source tree at `<root>/rdc-tools/renderdoc-src/`.** Get it with:
 

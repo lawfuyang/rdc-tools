@@ -344,8 +344,12 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
                                                               frame['computeEvents']))
     lines.append('| resources | %d (%s) |' % (frame['resources'], ', '.join(
         '%d %s' % (count, kind) for kind, count in sorted(frame['resourcesByKind'].items()))))
-    lines.append('| bytes in resources | %.2f MB of textures, %.2f MB of buffers |'
-                 % (frame['textureBytes'] / 1048576.0, frame['bufferBytes'] / 1048576.0))
+    # A texture's byte count is not in the resource table -- the driver records a texture's dimensions and
+    # format, not its bytes (see the notable list, which ranks them in pixels) -- so the row says what the
+    # table has. Printing "0.00 MB of textures" next to a hundred of them reads as "no texture memory".
+    lines.append('| bytes in resources | buffers %.2f MB; textures: no byte count in the table (it carries '
+                 'their dimensions, and the notable list ranks them in pixels) |'
+                 % (frame['bufferBytes'] / 1048576.0))
     lines.append('| render targets seen | %s |' % (', '.join(frame['targetsSeen']) or 'none'))
     lines.append('| formats seen | %s |' % (', '.join(frame['formatsSeen']) or 'none'))
     lines.append('| debug messages | %d%s |' % (frame['messages'], (

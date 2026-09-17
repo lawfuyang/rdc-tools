@@ -14,7 +14,7 @@ def report_caveats() -> List[str]:
         'A pass here is a run of consecutive events with the same call kind, render targets and depth '
         'target -- not a named pass. Call kinds (draw/copy/clear/marker), per-event triangle and thread '
         'counts, and marker names are not in a bundle at all: the replay API exposes no action list '
-        '(ROADMAP §2).',
+        '(ROADMAP §1).',
         'A compute pass is a run of dispatches with the same pipeline and shaders, and its targets and '
         'depth are given as not applicable: a dispatch does not set the output-merge state, so what the '
         'engine reports there is leftover from an earlier call. What a dispatch *does* write (its UAVs) '
@@ -31,26 +31,42 @@ def report_caveats() -> List[str]:
         'event, not what the shader made of it.',
         'Twenty detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
         'state, one over the resource table and three over the capture\'s chunk stream -- and every finding '
-        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §1.3). '
+        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §6). '
         'What is not checked at all is stated rather than approximated: MSAA\'s *which '
         'subresource did the resolve copy* half needs the ResolveSubresource payload, and the sRGB/linear half '
         'of the format rule needs a later sampling view\'s sRGB flag -- neither is in a bundle. The pipeline '
         'state is recorded '
-        'per state *change*, not per event (30 documents for the measured capture\'s 723 events), so a state '
-        'rule is stated per range rather than per event; and a bundle written by an older driver carries no '
+        'per state *change*, not per event (the frame table above gives this bundle\'s count of state documents '
+        'against its count of events), so a state rule is stated per range rather than per event; and a bundle '
+        'written by an older driver carries no '
         'pipeline state at all, so those five rules are reported as not looked at rather than as clean. Two '
         'things the binding rules deliberately do not claim: the *resource type* a reflection row declares '
         '(texture against buffer -- the row names a binding, not its type), and a range/heap disagreement at '
         'a register no shader reads. A bundle whose driver did not resolve descriptor tables carries no slot '
         'rows, and the rules that read them are then reported as not looked at rather than as clean.',
-        'Ranked notables and recommendations are not implemented yet either (ROADMAP §1.1, §1.2).',
+        'The notable lists rank what a bundle can measure -- calls, target bytes, resource churn, and counter '
+        'cost when the bundle was written with --with-counters -- and their own table says so where an input is '
+        'not available: a draw\'s vertex count is the first input of the rule and no bundle has it, because the '
+        'replay API exposes no action list (ROADMAP §1). A recommendation is a lead, not a verdict: it names '
+        'the first instance of something, with the command that shows it, and the finding behind it is still '
+        'unproven.',
+        'Missing reflection is not reported as missing: a shader the engine has no reflection for is simply a '
+        'shader with no constant blocks or bindings here, which is why the pipeline-state rules state which '
+        'blocks and signatures they read rather than claiming a clean result from an empty one. Shader '
+        'debugging is a capture property, not a bundle one: nothing here can say what a shader computed from '
+        'its inputs, only what it was bound to.',
+        'The frame was replayed on this machine\'s GPU: the capture properties in the bundle say whether the '
+        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §7, '
+        'remote replay). A pass is also not a *dispatch* of work in the engine\'s own terms -- the report groups '
+        'events, and the engine\'s own pass structure is only as close as its markers are.',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
         'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '
         'next frame or by the CPU afterwards looks exactly like nothing ever reading the resource. A resource '
-        'whose only row is `eid 0, Unused` was not tracked by the engine and is never judged (101 of the 133 '
-        'resources in the measured capture).',
-        'Counters are not folded per pass yet (ROADMAP §4). A bundle written with --with-counters '
-        'carries the per-event results in counters.json.',
+        'whose only row is `eid 0, Unused` was not tracked by the engine and is never judged: what the engine '
+        'did not record cannot be turned into either a use or an absence of one.',
+        'Counters are not folded into the pass sections (ROADMAP §3). A bundle written with --with-counters '
+        'carries the per-event results in counters.json, and the notable ranking sums them per pass, but no pass '
+        'roll-up prints them.',
         'Blend, depth-test, stencil, viewport and scissor state are in the bundle per state change, and the '
         'state given per pass is still the bound shaders and their constant blocks: a pass is a run of events '
         'and the state can change inside one, so the state rules name the eid range they were read at. The '
@@ -148,6 +164,125 @@ def _engine_section(engine: EngineInterpretation) -> List[str]:
         lines.append('')
     return lines
 
+def _input_block(inputs: List[NotableInput], rules: List[str], limit: int, oddity_limit: int) -> List[str]:
+    """The rule a notable list was built by: the ranking key, then the rules that ignore the ranking.
+
+    Printed before the rows for the same reason the caveats are printed at all -- a ranking whose inputs are
+    invisible cannot be disagreed with, and this one is a choice. An input the bundle could not answer stays in
+    the table with the reason, because a ranking that quietly did without it is a claim about the frame made
+    from data that was never there.
+    """
+    lines: List[str] = []
+    lines.append('Ranked by, most significant first -- this is the order of the rows below:')
+    lines.append('')
+    lines.append('| input | measured as | in this bundle |')
+    lines.append('|---|---|---|')
+    for entry in inputs:
+        state = 'read' if entry['available'] else '**not available** -- %s' % _md(entry['why'])
+        lines.append('| %s | %s | %s |' % (_md(entry['input']), _md(entry['how']), state))
+    lines.append('')
+    lines.append('Listed whatever their rank:')
+    lines.append('')
+    for rule in rules:
+        lines.append('- %s' % _md(rule))
+    lines.append('')
+    lines.append('The ranking lists at most %d and the rules at most %d more; the notes say what that left '
+                 'out.' % (limit, oddity_limit))
+    lines.append('')
+    return lines
+
+def _notable_passes_section(notables_doc: Notables) -> List[str]:
+    lines = _input_block(notables_doc['passInputs'], notables_doc['oddities'], notables_doc['limit'],
+                         notables_doc['oddityLimit'])
+    if not notables_doc['passes']:
+        lines.append('No pass is notable: the frame has no pass for the ranking to rank and none matched a '
+                     'rule above.')
+        lines.append('')
+        return lines
+    lines.append('| # | pass | eids | why it is here | measured |')
+    lines.append('|---|---|---|---|---|')
+    for row in notables_doc['passes']:
+        lines.append('| %s | %d | %d–%d | %s | %s |'
+                     % (row['rank'] or '—', row['passIndex'], row['firstEid'], row['lastEid'],
+                        '; '.join(_md(reason) for reason in row['why']),
+                        '; '.join(_md(value) for value in row['values'])))
+    lines.append('')
+    for note in notables_doc['notes']:
+        lines.append('- %s' % _md(note))
+    if notables_doc['notes']:
+        lines.append('')
+    return lines
+
+def _notable_resources_section(notables_doc: Notables) -> List[str]:
+    lines = _input_block(notables_doc['resourceInputs'], notables_doc['resourceSpecials'],
+                         notables_doc['limit'], notables_doc['oddityLimit'])
+    if not notables_doc['resources']:
+        lines.append('No resource is notable: nothing in the resource table is ranked, and none matched a rule '
+                     'above.')
+        lines.append('')
+        return lines
+    lines.append('| # | resource | what it is | why it is here | measured |')
+    lines.append('|---|---|---|---|---|')
+    for row in notables_doc['resources']:
+        named = '`%s`%s' % (row['resource'], ' "%s"' % _md(row['name']) if row['name'] else '')
+        lines.append('| %s | %s | %s | %s | %s |'
+                     % (row['rank'] or '—', named, '%s, %s' % (row['kind'], _md(row['detail'])),
+                        '; '.join(_md(reason) for reason in row['why']),
+                        '; '.join(_md(value) for value in row['values'])))
+    lines.append('')
+    return lines
+
+def _severity_block(table: List[SeverityRow]) -> List[str]:
+    """The rule the findings are grouped by: which group means what, and who put each detector in its group.
+
+    Severity is the tool's opinion, not the engine's, so it is printed with the line that justifies it line by
+    line -- a reader who thinks a group is wrong can name the detector they disagree about.
+    """
+    lines: List[str] = []
+    if not table:
+        return lines
+    lines.append('Grouped by severity: how much a finding of that kind would matter *if it is real*. That is '
+                 'this tool\'s judgement rather than the engine\'s, and it is declared per detector here so a '
+                 'reader can disagree with a line of it rather than with an ordering:')
+    lines.append('')
+    lines.append('| group | what it means | detectors, and why each is in the group |')
+    lines.append('|---|---|---|')
+    for row in table:
+        members = ' · '.join('`%s` — %s' % (_md(item['detector']), _md(item['why']))
+                             for item in row['members'])
+        lines.append('| **%s** | %s | %s |' % (_md(row['severity']), _md(row['means']), members))
+    lines.append('')
+    return lines
+
+def _recommendations_section(todo: Recommendations) -> List[str]:
+    """What to look at first, ranked, each with the command that shows its evidence."""
+    lines: List[str] = []
+    if not todo['rows']:
+        lines.append('Nothing to recommend: no detector fired, no oddity rule matched and no gap was left '
+                     'open. That is a statement about these checks, not about the frame -- the caveats below '
+                     'say what was not checked at all.')
+        lines.append('')
+        return lines
+    lines.append('Ranked by the same severity as the findings, then findings before structure notes before '
+                 'gaps. Each row is one thing to look at -- not one finding: a capture with twenty-one dead '
+                 'allocations has one row here, and the findings section has them all.')
+    lines.append('')
+    lines.append('| # | what to look at | why | command |')
+    lines.append('|---|---|---|---|')
+    for row in todo['rows']:
+        lines.append('| %d | %s | %s | `%s` |' % (row['rank'], _md(row['do']), _md(row['why']),
+                                                   _md(row['command'])))
+    lines.append('')
+    lines.append('`<dir>` in a command is where you want a bundle written. Where a finding\'s evidence names no '
+                 'event or resource for its command to aim at, the command is the frame-level one -- the action '
+                 'tree names every event, so it is always a way to find the one the row is about.')
+    lines.append('')
+    for note in todo['notes']:
+        lines.append('- %s' % _md(note))
+    if todo['notes']:
+        lines.append('')
+    return lines
+
 def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     """The report as Markdown. Deterministic: same bundle in, same bytes out."""
     manifest = doc['bundle']
@@ -162,10 +297,13 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     # JSON twin carries `bundleDir` for a tool that needs to know.
     lines.append('Written from a bundle of %s file(s) (manifest v%s, driver %s, RenderDoc %s): %d '
                  'event(s) with bound state, %d state-derived pass(es), %d resource(s), %d debug '
-                 'message(s).' % (manifest.get('fileCount'), manifest.get('bundleVersion'),
-                                  _md(str(manifest.get('driver'))), _md(str(manifest.get('renderdoc'))),
-                                  frame['events'], len(doc['passes']), frame['resources'],
-                                  frame['messages']))
+                 'message(s). Of those, %d pass(es) and %d resource(s) are notable, %d finding(s) fired and '
+                 '%d recommendation(s) came out of them (REFERENCE §4.11).'
+                 % (manifest.get('fileCount'), manifest.get('bundleVersion'),
+                    _md(str(manifest.get('driver'))), _md(str(manifest.get('renderdoc'))),
+                    frame['events'], len(doc['passes']), frame['resources'], frame['messages'],
+                    len(doc['notables']['passes']), len(doc['notables']['resources']),
+                    len(doc['flags']), len(doc['recommendations']['rows'])))
     lines.append('')
     lines.append('## Provenance')
     lines.append('')
@@ -181,6 +319,20 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
                                  manifest.get('withCounters'), _md(str(manifest.get('resourceUsage')))))
     lines.append('| files read | capture.json, events.json, resources.json, messages.json, '
                  'manifest.json, %d state document pair(s) |' % frame['stateDocuments'])
+    # What was and was not analysed (REFERENCE §4.11): the counts to check the detector runs and the notable
+    # lists against, and the capture properties that decide what *can* be checked at all.
+    lines.append('| capture properties | api `%s` (pipelineType %d), local replay %s, vendor id %d, shader '
+                 'debugging %s, pixel history %s, counters %s |'
+                 % (_md(str(frame['api'])), frame['pipelineType'], 'yes' if frame['localRenderer'] else 'no',
+                    frame['vendor'], 'available' if frame['shaderDebugging'] else 'not in the capture',
+                    'available' if frame['pixelHistory'] else 'not in the capture',
+                    'collected' if manifest.get('withCounters') else 'not collected (no --with-counters)'))
+    ran = [run for run in doc['detectors'] if run['ran']]
+    lines.append('| analysed | %d of %d detector(s) ran; %s; the notable tables name every input their '
+                 'ranking could not read |'
+                 % (len(ran), len(doc['detectors']),
+                    '%d skipped (Red flags names each with its reason)' % (len(doc['detectors']) - len(ran))
+                    if len(ran) < len(doc['detectors']) else 'none skipped'))
     lines.append('')
     lines.append('## Frame at a glance')
     lines.append('')
@@ -234,30 +386,6 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('## The engine\'s vocabulary')
     lines.append('')
     lines.extend(_engine_section(doc['engine']))
-    lines.append('## Red flags')
-    lines.append('')
-    ran = [run['detector'] for run in doc['detectors'] if run['ran']]
-    skipped = ['%s (%s)' % (run['detector'], run['why']) for run in doc['detectors'] if not run['ran']]
-    lines.append('%d finding(s). Detectors that ran: %s.%s'
-                 % (len(doc['flags']), ', '.join(ran) or 'none',
-                    ' Skipped: %s.' % ', '.join(skipped) if skipped else ''))
-    lines.append('')
-    lines.append('`certain` means the bundle proves the observation; `question` would mean the observation is '
-                 'real but its meaning depends on what the frame was for. Every finding is **unproven**: none '
-                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §1.3), '
-                 'so they are leads, not verdicts.')
-    lines.append('')
-    if doc['flags']:
-        lines.append('| detector | finding | evidence | certainty |')
-        lines.append('|---|---|---|---|')
-        for flag in doc['flags']:
-            lines.append('| %s | %s | %s | %s%s |'
-                         % (flag['detector'], flag['what'], '; '.join(flag['evidence']), flag['certainty'],
-                            ', unproven' if flag['unproven'] else ''))
-    else:
-        lines.append('Nothing fired -- which is a statement about these detectors, not about the frame: the '
-                     'caveats below say what was not checked at all.')
-    lines.append('')
     lines.append('## Pass by pass')
     for entry in doc['passes']:
         lines.append('')
@@ -292,6 +420,52 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
         else:
             lines.append('- no resource is used here for the first time')
     lines.append('')
+    lines.append('## Notable passes')
+    lines.append('')
+    lines.extend(_notable_passes_section(doc['notables']))
+    lines.append('## Notable resources')
+    lines.append('')
+    lines.extend(_notable_resources_section(doc['notables']))
+    lines.append('## Red flags')
+    lines.append('')
+    ran = [run['detector'] for run in doc['detectors'] if run['ran']]
+    skipped = ['%s (%s)' % (run['detector'], run['why']) for run in doc['detectors'] if not run['ran']]
+    lines.append('%d finding(s). Detectors that ran: %s.%s'
+                 % (len(doc['flags']), ', '.join(ran) or 'none',
+                    ' Skipped: %s.' % ', '.join(skipped) if skipped else ''))
+    lines.append('')
+    lines.append('`certain` means the bundle proves the observation; `question` would mean the observation is '
+                 'real but its meaning depends on what the frame was for. Every finding is **unproven**: none '
+                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §6), '
+                 'so they are leads, not verdicts.')
+    lines.append('')
+    lines.extend(_severity_block(doc['severityTable']))
+    # The group of a finding is a join on its detector -- the severity table above is the only place that
+    # judgement lives, so a row here cannot disagree with the table without the reader seeing both.
+    group_of = {item['detector']: row['severity'] for row in doc['severityTable'] for item in row['members']}
+    if doc['flags']:
+        for row in doc['severityTable']:
+            group = [flag for flag in doc['flags']
+                     if group_of.get(flag['detector'], 'medium') == row['severity']]
+            if not group:
+                continue
+            lines.append('### %s — %d finding(s)' % (_md(row['severity']), len(group)))
+            lines.append('')
+            lines.append('| detector | finding | evidence | certainty |')
+            lines.append('|---|---|---|---|')
+            for flag in group:
+                lines.append('| %s | %s | %s | %s%s |'
+                             % (flag['detector'], _md(flag['what']),
+                                '; '.join(_md(item) for item in flag['evidence']), flag['certainty'],
+                                ', unproven' if flag['unproven'] else ''))
+            lines.append('')
+    else:
+        lines.append('Nothing fired -- which is a statement about these detectors, not about the frame: the '
+                     'caveats below say what was not checked at all.')
+        lines.append('')
+    lines.append('## Recommendations')
+    lines.append('')
+    lines.extend(_recommendations_section(doc['recommendations']))
     lines.append('## What this report cannot tell you')
     lines.append('')
     for caveat in doc['caveats']:
@@ -305,6 +479,15 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
         first = entry['firstEid']
         lines.append("| %d | `replay_dump state '%s' %d` · `replay_dump shaders '%s' %d` |"
                      % (entry['index'], _md(rdc), first, _md(rdc), first))
+    lines.append('')
+    lines.append('A pass in the notable list is checked the same way, at its first event; a notable resource is '
+                 'checked with `replay_dump usage \'%s\' <resId>`, which is what the read counts in that list '
+                 'were computed from.' % _md(rdc))
+    lines.append('')
+    lines.append('Every row in this report carries the event id or the resource id it is about -- a pass by its '
+                 'eid range, a resource by its `res` id, a finding by the evidence on its own row -- and the '
+                 'recommendations carry the command that shows each one. A row that could not cite either would '
+                 'be a claim without evidence, and the suite fails on one (ROADMAP §6).')
     lines.append('')
     lines.append('A usage finding is checked the same way: `replay_dump usage \'%s\' <resId>` prints the same '
                  'list the detectors read (the engine\'s own `GetUsage`).' % _md(rdc))

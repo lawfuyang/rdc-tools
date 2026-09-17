@@ -118,6 +118,11 @@ def _describe(pass_entry: ReportPass, resources: Sequence[BundleResource]) -> Li
 #: saying so is the difference between "this pass uses these shaders" and "these were also bound".
 COMPUTE_STAGES = ('cs', 'as', 'ms')
 
+#: The engine's `GraphicsAPI` values in declaration order, which is what `capture.json`'s `pipelineType` is
+#: (`renderdoc-src/renderdoc/api/replay/replay_enums.h`). A value outside the table is named by its number
+#: rather than guessed at, the same way an unknown format is.
+GRAPHICS_APIS = ('D3D11', 'D3D12', 'OpenGL', 'Vulkan')
+
 def _state_rollup(bundle: BundleData, entry: ReportPass) -> None:
     """Fill a pass's shaders and constant blocks from the state documents of its first event.
 
@@ -186,6 +191,7 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
         severities[label] = severities.get(label, 0) + 1
 
     capture = bundle['capture']
+    pipeline = int(capture.get('pipelineType', 0) or 0)
     return {
         'events': len(events),
         'graphicsEvents': sum(1 for e in events if str(e.get('psoKind', 'graphics')) != 'compute'),
@@ -200,9 +206,12 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
         'messagesBySeverity': {k: severities[k] for k in sorted(severities)},
         'chunks': int(capture.get('chunks', 0) or 0),
         'stateDocuments': len(bundle['states']),
-        'pipelineType': int(capture.get('pipelineType', 0) or 0),
+        'pipelineType': pipeline,
+        'api': GRAPHICS_APIS[pipeline] if 0 <= pipeline < len(GRAPHICS_APIS) else 'api(%d)' % pipeline,
         'localRenderer': int(capture.get('localRenderer', 0) or 0),
         'vendor': int(capture.get('vendor', 0) or 0),
+        'shaderDebugging': int(capture.get('shaderDebugging', 0) or 0),
+        'pixelHistory': int(capture.get('pixelHistory', 0) or 0),
     }
 
 # ---------------------------------------------------------------------------
@@ -210,12 +219,13 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
 #
 # A detector is a pure function over the bundle that returns findings -- no printing, no presentation order,
 # no state. What it may say is bounded by what a bundle *proves*, and that is why there are three of them:
-# the rest of §1.1's list needs call arguments (zero work), the descriptor writes (unbound descriptors,
+# the rest of the report's rules need call arguments (zero work), the descriptor writes (unbound descriptors,
 # read-before-write), the action list (marker imbalance, unattributed draws) or the pipeline state (depth
 # logic, scissor, MSAA), and a bundle holds none of those. A detector that would have to guess is not written:
 # it would produce exactly the kind of confident wrong answer this tool exists to avoid.
 __all__ = [
     'COMPUTE_STAGES',
+    'GRAPHICS_APIS',
     '_describe',
     '_pass_structure',
     '_row_severity',

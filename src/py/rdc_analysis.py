@@ -50,10 +50,14 @@ from typing import Optional, Sequence
 # defines: it says "this name is part of this module's interface", so the type checker does not report the
 # import as unused while still checking that the module it comes from exports it.
 from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT as DEAD_ALLOCATION_LIMIT,
-                        REPORT_VERSION as REPORT_VERSION, BundleData as BundleData,
+                        KIND_ORDER as KIND_ORDER, NOTABLE_LIMIT as NOTABLE_LIMIT,
+                        ODDITY_LIMIT as ODDITY_LIMIT, RECOMMENDATION_LIMIT as RECOMMENDATION_LIMIT,
+                        REPORT_VERSION as REPORT_VERSION, SEVERITY_ORDER as SEVERITY_ORDER,
+                        BundleData as BundleData,
 
                         BundleError as BundleError, DetectorRun as DetectorRun,
                         RedFlag as RedFlag, ReportDocument as ReportDocument, ReportPass as ReportPass,
+                        _command as _command, _refs as _refs,
                         cmd_report as cmd_report, detect_all as detect_all,
                         detect_dead_allocations as detect_dead_allocations,
                         detect_marker_balance as detect_marker_balance,
@@ -64,9 +68,13 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         detect_zero_constant_blocks as detect_zero_constant_blocks,
                         detect_zero_work as detect_zero_work,
                         frame_facts as frame_facts, load_bundle as load_bundle,
+                        notable_passes as notable_passes, notable_resources as notable_resources,
+                        notables as notables,
                         reconstruct_passes as reconstruct_passes,
+                        recommendations as recommendations,
                         render_report_markdown as render_report_markdown,
-                        report_caveats as report_caveats)
+                        report_caveats as report_caveats,
+                        severity_of as severity_of, severity_table as severity_table)
 from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPORT_SCHEMA,
                          SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,

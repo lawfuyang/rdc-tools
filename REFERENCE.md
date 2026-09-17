@@ -242,7 +242,7 @@ fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and 
 | `python tests/test_rdc_chunks.py` | the chunk stream, the payloads and the shader containers (112) |
 | `python tests/test_rdc_resources.py` | the resource table, descriptor heaps and the enum parsing (93) |
 | `python tests/test_rdc_commands.py` | commands and CLI dispatch (151) |
-| `python tests/test_rdc_report.py` | the report, its detectors and the report schema (52) |
+| `python tests/test_rdc_report.py` | the report, its notables, its recommendations, its detectors and the report schema (70) |
 | `python tests/test_rdc_engine_schema.py` | the engine table: recognition, concepts, markers, values, no match (21) |
 | `python tests/test_rdc_validate.py` | the schema validator (17) |
 | `python -m unittest discover -s tests -t tests` | the same suite through unittest |
@@ -420,14 +420,28 @@ which is why the checked-in copy cannot quietly go stale after a document change
 
 | part of the report | what it is |
 |---|---|
-| provenance | the capture path as recorded, its SHA-256, the RenderDoc and driver versions, the bundle's flags, and which files were read |
+| provenance | the capture path as recorded, its SHA-256, the RenderDoc and driver versions, the bundle's flags, which files were read, the capture's own properties (API, local replay, vendor, shader debugging, counters), and how many detectors ran of how many |
 | frame at a glance | counts, resources by kind and bytes, the render targets and formats seen, debug messages by severity |
 | pipeline map | the passes in order — eid range, call kind, target, structure — plus a Mermaid graph of pass → target |
-| pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
 | the engine's vocabulary | which engine the capture's own names identify, every concept those names claim (with the name behind it), and the values the table tags for them — see below |
-| red flags | what the detectors found, each with the evidence that proves it and how certain it is — and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §1.3) |
+| pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
+| notable passes | the ranking's top five, plus every pass an oddity rule matches (depth-only, one call, unmarked, dead, the only pass touching a resource) — with the **rule printed above the rows**: each input, how it is measured, and which ones *this* bundle could not answer |
+| notable resources | the same for resources: ranked by size and by how many passes read them, plus never-read, targets, formats whose bytes mislead, and textures the table names no format for |
+| red flags | what the detectors found, each with the evidence that proves it and how certain it is — grouped by the severity table printed with it (the tool's declared judgement, per detector, so a line of it can be disagreed with), and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §6, the capture corpus) |
+| recommendations | what to look at first, ranked by the same severity: one row per detector that fired, per oddity rule that matched and per gap the report could not close — each with the driver command that shows its evidence |
 | what this report cannot tell you | the report states its own gaps, and every one of them is a roadmap item |
-| appendix | the `replay_dump state` / `shaders` command pair that reproduces each pass |
+| appendix | the `replay_dump state` / `shaders` / `usage` commands that reproduce a pass, a claim and a notable row |
+
+**Notability is a stated rule, not a score.** Every notable list prints the inputs it ranks by, in order, with
+the way each is measured — and it prints the ones it could *not* use just as plainly: a draw's vertex count is
+the first input of the notable-pass ranking and no bundle carries it, because the replay API exposes no action list, and
+counter cost is only in a bundle written with `--with-counters`. A texture is ranked in *pixels*, not bytes,
+because a bundle records its dimensions and format but not its byte count; where one figure has to compare a
+texture with a buffer, it is counted at 4 bytes per pixel and the `~` on that estimate says so. Two claims the
+lists deliberately do not make: "read by 0 passes" is only printed for a resource the engine *tracked*, and a
+resource with no usage rows at all, or with only the documented `eid 0, Unused` marker, is reported as what it
+is — untracked, which is not the same as unread. UAV rows (`CS_RWResource`) are counted separately, because
+they say a resource was reachable for reading *and* writing and not which happened.
 
 It is **deterministic** — byte-stable for a fixed bundle (sorted tables, no timestamps, no paths in the prose),
 so two runs diff cleanly and an analysis change shows up as a reviewable diff. It reads only the bundle's own
@@ -515,13 +529,13 @@ that could not look — no usage lists with `--no-usage`, no chunk-name map with
 a capture that has moved — is reported as *skipped* with the reason, because "clean" and "not checked" are
 different answers, and a bundle with no findings says so without implying the frame is fine.
 
-What it does **not** do yet (ROADMAP §1): MSAA's *which subresource did the resolve copy* half (the
+What it does **not** do yet: MSAA's *which subresource did the resolve copy* half (the
 `ResolveSubresource` payload is not in a bundle) and the sRGB/linear half of the format rule (a later
-sampling view's sRGB flag is not either), both stated as unclaimed rather than guessed at — plus ranked
-notables, recommendations, and the interpretation of engine names. Passes are therefore *state-derived*, not named — a
-run of events that agree on call kind and
-render targets, or on pipeline and shaders for a dispatch — and the report says so in its own words rather than
-describing a pass as something it has not established.
+sampling view's sRGB flag is not either), both stated as unclaimed rather than guessed at; counters folded into
+the pass sections; and the two ranking inputs a bundle cannot carry (a draw's vertex count, §4.11 above). Passes
+are *state-derived*, not named — a run of events that agree on call kind and render targets, or on pipeline and
+shaders for a dispatch — and the report says so in its own words rather than describing a pass as something it
+has not established.
 
 ---
 

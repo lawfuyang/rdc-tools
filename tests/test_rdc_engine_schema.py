@@ -335,7 +335,7 @@ class TestShippedTable(unittest.TestCase):
                               '%s asks about a group no concept is tagged with' % question['id'])
 
     def test_the_mobile_and_the_pc_concepts_are_different(self):
-        # The pilot of ROADMAP §1.3 in one assertion: the two captures' vocabularies are told apart by the
+        # The pilot in one assertion: the two captures' vocabularies are told apart by the
         # table, so a report over one of them cannot read like a report over the other.
         tables, _problems = E.load_engine_schemas()
         names = {concept['concept']: concept for concept in tables[0]['concepts']}

@@ -13,8 +13,10 @@ from typing import List, Optional, Tuple
 
 from rdc_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_passes import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_notable import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_engine_schema import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_common import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_recommend import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_usage import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_state import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -154,6 +156,17 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
 
     flags, detectors = detect_all(bundle, path)
 
+    # Which of them is worth looking at first (REFERENCE §4.11): a ranking whose inputs and rules are printed with
+    # its result, plus everything the rules list whatever its rank. The two lists are computed together because
+    # they share the rule table and the roll-up notes.
+    notable_lists = notables(bundle, passes)
+
+    # And what to *do* about it (REFERENCE §4.11): one lead per detector that fired, per oddity rule that matched
+    # and per gap the report could not close -- each with the command that shows its evidence. It reads the
+    # findings and the notable lists rather than the frame, so nothing is measured twice.
+    todo = recommendations(path, bundle, flags, detectors,
+                           notable_lists['passes'], notable_lists['resources'])
+
     doc: ReportDocument = {
         'schemaVersion': REPORT_SCHEMA_VERSION,
         'reportVersion': REPORT_VERSION,
@@ -164,6 +177,9 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
         'frame': frame_facts(bundle),
         'passes': passes,
         'engine': engine,
+        'notables': notable_lists,
+        'recommendations': todo,
+        'severityTable': severity_table(),
         'flags': flags,
         'detectors': detectors,
         'caveats': report_caveats(),
@@ -198,7 +214,10 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
             engine['notInterpreted'][0] if engine['notInterpreted'] else 'no engine table matched')))
     print('written  : %s' % markdown_path)
     print('written  : %s' % json_path)
-    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §1.3)'
+    print('notable  : %d pass(es), %d resource(s)' % (len(notable_lists['passes']),
+                                                      len(notable_lists['resources'])))
+    print('look at  : %d recommendation(s), ranked' % len(todo['rows']))
+    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §6)'
           % (len(flags), sum(1 for run in detectors if run['ran'])))
     return 0
 

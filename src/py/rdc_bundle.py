@@ -63,6 +63,10 @@ class BundleData(TypedDict):
     capture: Dict[str, Any]
     events: List[BundleEvent]
     resources: List[BundleResource]
+    #: The driver's counter results as rows (`eid 12  <name> = <value>`), empty unless the bundle was written
+    #: with `--with-counters`. They are the only per-event *cost* a bundle carries, which is why the notable
+    #: ranking reads them when they are there and says so when they are not.
+    counters: List[str]
     #: The driver writes messages as *rows* (`eid 12  error  <text>`), which is what the schema describes; an
     #: object with the same facts is accepted too, because a consumer should not have to know the spelling.
     messages: List[Union[BundleMessage, str]]
@@ -90,14 +94,100 @@ class ReportPass(TypedDict):
     firstTouched: List[str]
 
 #: One red flag. `what` is the *observation*; what it means is the reader's, because a bundle can prove what
-#: the engine held, not what the frame intended. `unproven` is the ROADMAP §1.3 gate: a detector that has
-#: never been checked against a capture whose bugs are known has not earned a verdict.
+#: the engine held, not what the frame intended. `certainty` is what the detector could prove (`certain` -- the
+#: bundle shows it; `question` -- the observation is real, its meaning depends on what the frame was for).
+#: `unproven` is the ROADMAP §6 gate: a detector that has never been checked against a capture whose bugs are
+#: known has not earned a verdict.
+#:
+#: A flag does *not* carry a severity: that is a property of the detector, not of the finding, and it lives in
+#: `severityTable` (one row per group, one member per detector, with the line that justifies it). The report's
+#: grouping is therefore a join on `detector`, and there is one place to disagree with -- rather than a value
+#: copied into every finding that a later change could leave behind.
 class RedFlag(TypedDict):
     detector: str
     what: str
     evidence: List[str]
     certainty: str
     unproven: bool
+
+#: One detector inside a severity group: its name, and why its findings belong in that group.
+class SeverityMember(TypedDict):
+    detector: str
+    why: str
+
+#: One severity group of the report's findings: the label, what it means for a reader, and the detectors whose
+#: findings land in it. The table is part of the document rather than of the renderer because it *is* the rule
+#: the grouping follows -- a reader who disagrees with a group should be able to see who put it there.
+class SeverityRow(TypedDict):
+    severity: str
+    means: str
+    members: List[SeverityMember]
+
+#: One input of a notable list's ranking: what it is, how it is measured from a bundle, and -- when a bundle
+#: cannot answer it at all -- why not. A ranking that hides an input it never had is the shape of claim this
+#: tool exists to avoid, so an unavailable input stays in the table with `available` false.
+class NotableInput(TypedDict):
+    input: str
+    how: str
+    available: bool
+    why: str
+
+#: One pass the notable list carries. `rank` is its position in the ranking (0 for a pass listed only by an
+#: oddity rule, which is not a rank), `why` the rules that listed it in the rules' own words, and `values` the
+#: measurements those rules read -- printed, so the order can be checked rather than taken.
+class NotablePass(TypedDict):
+    passIndex: int
+    firstEid: int
+    lastEid: int
+    rank: int
+    why: List[str]
+    values: List[str]
+
+#: One resource the notable list carries: the same shape, keyed by the resource instead of the pass.
+class NotableResource(TypedDict):
+    resource: str
+    name: str
+    kind: str
+    detail: str
+    rank: int
+    why: List[str]
+    values: List[str]
+
+#: A ranked notable list: the rule (inputs, oddity rules, the cap), the rows it produced, and the roll-ups of
+#: whatever the cap left out -- a cap nobody is told about reads as "this was all there was".
+class Notables(TypedDict):
+    limit: int
+    #: How many rows the *rule*-listed half may add before the rest are rolled up: a separate number from
+    #: `limit`, because the ranked list is meant to be short and the rules are meant to be complete.
+    oddityLimit: int
+    passInputs: List[NotableInput]
+    oddities: List[str]
+    passes: List[NotablePass]
+    resourceInputs: List[NotableInput]
+    resourceSpecials: List[str]
+    resources: List[NotableResource]
+    notes: List[str]
+
+#: One recommendation: what to do (`do`), why in one line with the evidence it rests on (`why`), how to see it
+#: for yourself (`command`), and where it came from (`kind`: a finding, a notable, or a gap the report could
+#: not close). `eid` and `resource` are 0/'' when the recommendation is not about one event or one resource.
+class Recommendation(TypedDict):
+    rank: int
+    kind: str
+    severity: str
+    do: str
+    why: str
+    command: str
+    eid: int
+    resource: str
+
+#: The ranked recommendations and the roll-up of what the cap left out. One row per thing to look at -- per
+#: detector, per oddity rule, per gap -- rather than per finding, because a list of twenty-one dead allocations
+#: is not a way to decide where to start.
+class Recommendations(TypedDict):
+    limit: int
+    rows: List[Recommendation]
+    notes: List[str]
 
 #: What a detector did. `why` is empty for one that ran and the reason for one that could not -- a report
 #: that lists only findings cannot tell "clean" from "not looked at", and that difference matters.
@@ -168,6 +258,9 @@ class ReportDocument(TypedDict):
     frame: Dict[str, Any]
     passes: List[ReportPass]
     engine: EngineInterpretation
+    notables: Notables
+    recommendations: Recommendations
+    severityTable: List[SeverityRow]
     flags: List[RedFlag]
     detectors: List[DetectorRun]
     caveats: List[str]
@@ -243,6 +336,9 @@ def load_bundle(bundle_dir: str) -> BundleData:
     resources: List[BundleResource] = _bundle_file(bundle_dir, 'resources.json').get('resources', [])
     messages: List[Union[BundleMessage, str]] = (_bundle_file(bundle_dir, 'messages.json', False) or {}).get(
         'messages', [])
+    # Optional like `messages.json`: a bundle written without `--with-counters` has no counter results, and
+    # that absence is reported (the notable ranking names the input as unavailable) rather than assumed.
+    counters: List[str] = (_bundle_file(bundle_dir, 'counters.json', False) or {}).get('counters', [])
 
     # The per-event documents that exist, keyed by eid: the pass roll-up names the shaders and the
     # constant blocks of the pass's first event, which is exactly the event the bundle writes a state
@@ -270,7 +366,7 @@ def load_bundle(bundle_dir: str) -> BundleData:
     # Built as a `BundleData` rather than as a dict literal: the seven members have different types, and a
     # literal widens to a union of them, which is no longer the type this function promises to return.
     return BundleData(manifest=manifest, capture=capture, events=events, resources=resources,
-                      messages=messages, states=states, cbuffers=cbuffers)
+                      messages=messages, counters=counters, states=states, cbuffers=cbuffers)
 
 __all__ = [
     'BUNDLE_VERSION',
@@ -286,11 +382,19 @@ __all__ = [
     'EngineInterpretation',
     'EngineQuestion',
     'EngineValue',
+    'NotableInput',
+    'NotablePass',
+    'NotableResource',
+    'Notables',
     'REPORT_SCHEMA_VERSION',
     'REPORT_VERSION',
+    'Recommendation',
+    'Recommendations',
     'RedFlag',
     'ReportDocument',
     'ReportPass',
+    'SeverityMember',
+    'SeverityRow',
     '_bundle_file',
     '_is_resource',
     '_md',

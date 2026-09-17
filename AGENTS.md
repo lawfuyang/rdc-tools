@@ -17,8 +17,9 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
 - Other entry points, one file per area (`tests/rdc_testcase.py` holds what they share, and is not a test
   file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
-  table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report/detectors),
-  `test_rdc_validate.py` (schemas), or all of them with `python -m unittest discover -s tests -t tests`.
+  table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report, notables,
+  recommendations, detectors), `test_rdc_validate.py` (schemas), or all of them with
+  `python -m unittest discover -s tests -t tests`.
 - A test fixture that the detectors read — the chunk-name map, the cache directory — is patched on the
   module that *owns* it, and the capture the test builds must come from the same map. Building a capture from
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
@@ -70,11 +71,20 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   turn it back into one file, and do not add an `__init__.py`.
 - **A module may only import modules beneath it**, and the layering is: `rdc_types` → `rdc_chunkmap` →
   `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` → `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
-  and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors → `rdc_report_render`
-  → `rdc_report` → `rdc_analysis`. A cycle breaks `from X import *` at import time (a partially initialised
-  module exports only what it has defined so far), so put a shared helper *below* the modules that need it
-  instead of importing upwards — that is why `_name_suffix` lives in `rdc_resources` and the loaders in
-  `rdc_cache`.
+  and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors →
+  `rdc_notable`/`rdc_recommend` → `rdc_report_render` → `rdc_report` → `rdc_analysis`. A cycle breaks
+  `from X import *` at import time (a partially initialised module exports only what it has defined so far), so
+  put a shared helper *below* the modules that need it instead of importing upwards — that is why `_name_suffix`
+  lives in `rdc_resources` and the loaders in `rdc_cache`.
+- **A rule the report prints is a rule the document carries.** The notable ranking, its inputs and the severity
+  each detector's findings are grouped by are in `report.json` (`notables`, `severityTable`), not baked into the
+  renderer: the renderer lays them out and joins the flags to their severity by `detector` alone. Adding a
+  detector means adding a line to `DETECTOR_SEVERITY` and a recipe to `DETECTOR_RECIPE` in `rdc_detect_common`,
+  and a test walks the run list against the table so one cannot arrive without the other.
+- **A notable list never turns "I do not know" into a fact.** `read by 0 passes` is printed only for a resource
+  the engine *tracked*; an empty usage chain, the `eid 0, Unused` marker and a UAV row are each reported as what
+  they are, because all three have been read as "nothing reads it" by mistake at least once. The units are the
+  table's own, too: bytes for a buffer, pixels for a texture, and a stated `~` wherever one has to be estimated.
 - **A shared helper is called through its owner** (`rdc_chunkmap.load_chunk_names(...)`), never by the bare name
   a star import copied — the qualified form is what makes an override, or a test's `mock.patch.object`, reach the
   code that uses it, and it keeps the dependency visible at the call site. The tests patch the owner for the same
@@ -164,7 +174,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - The frame report (`report`, REFERENCE §4.11) is deterministic *by contract*: byte-stable for a fixed bundle —
   sorted tables, no timestamps, no paths in the prose — because that is what lets two runs be diffed and
   `tests/test_rdc_report.py` pin the document. A change that alters those bytes is deliberate or it is a bug.
-  Its "what this report cannot tell you" section names what is not implemented yet (ROADMAP §1): whatever lands
+  Its "what this report cannot tell you" section names what is not implemented yet (REFERENCE §4.11): whatever lands
   there must update that section in the same change, or the report starts lying about its own coverage.
 - The engine vocabulary (`engine-schemas/*.json`, `rdc_engine_schema.py`) keeps three rules, and they are what
   make it worth reading: a concept is claimed **only** because the capture contains a name the table lists (a

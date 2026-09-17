@@ -404,7 +404,7 @@ def cmd_dump_chunk(path: str, index: int, outfile: str) -> None:
 def cmd_dump_shaders(path: str, outdir: str) -> None:
     """Write every DXBC/DXIL container to `outdir` as a `.dxil` file plus an index in `shaders.txt`.
 
-    This is the offline route to the D3D12 harness's input (ROADMAP §8.5) and a way to hand a shader to
+    This is the offline route to the D3D12 harness's input (ROADMAP §7.5) and a way to hand a shader to
     `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
     reflection's job, and the reflection is the replay driver's (REFERENCE §9).
     """

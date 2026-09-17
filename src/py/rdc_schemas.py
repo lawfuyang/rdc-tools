@@ -80,8 +80,11 @@ REPORT_SCHEMA: Dict[str, Any] = _obj({
         'chunks': {'type': 'integer'},
         'stateDocuments': {'type': 'integer'},
         'pipelineType': {'type': 'integer'},
+        'api': _text(),
         'localRenderer': {'type': 'integer'},
         'vendor': {'type': 'integer'},
+        'shaderDebugging': {'type': 'integer'},
+        'pixelHistory': {'type': 'integer'},
     }),
     'passes': _arr(_obj({
         'index': {'type': 'integer'},
@@ -138,6 +141,59 @@ REPORT_SCHEMA: Dict[str, Any] = _obj({
         })),
         'notInterpreted': _arr(_text()),
     }),
+    # The notable lists (REFERENCE §4.11): the rule -- its inputs, its oddity rules, its cap -- then the rows.
+    # The rule is part of the document rather than of the renderer because it *is* the answer to "why is this
+    # pass here", and a consumer that wants to disagree with the ranking needs it.
+    'notables': _obj({
+        'limit': {'type': 'integer'},
+        'oddityLimit': {'type': 'integer'},
+        'passInputs': _arr(_obj({'input': _text(), 'how': _text(), 'available': {'type': 'boolean'},
+                                 'why': _text()})),
+        'oddities': _arr(_text()),
+        'passes': _arr(_obj({
+            'passIndex': {'type': 'integer'},
+            'firstEid': {'type': 'integer'},
+            'lastEid': {'type': 'integer'},
+            'rank': {'type': 'integer'},
+            'why': _arr(_text()),
+            'values': _arr(_text()),
+        })),
+        'resourceInputs': _arr(_obj({'input': _text(), 'how': _text(), 'available': {'type': 'boolean'},
+                                     'why': _text()})),
+        'resourceSpecials': _arr(_text()),
+        'resources': _arr(_obj({
+            'resource': _text(),
+            'name': _text(),
+            'kind': _text(),
+            'detail': _text(),
+            'rank': {'type': 'integer'},
+            'why': _arr(_text()),
+            'values': _arr(_text()),
+        })),
+        'notes': _arr(_text()),
+    }),
+    # What to look at first (REFERENCE §4.11): one lead per thing to check, each with the driver command that
+    # shows its evidence. `kind` says whether it came from a finding, a notable or a gap.
+    'recommendations': _obj({
+        'limit': {'type': 'integer'},
+        'rows': _arr(_obj({
+            'rank': {'type': 'integer'},
+            'kind': _text(),
+            'severity': _text(),
+            'do': _text(),
+            'why': _text(),
+            'command': _text(),
+            'eid': {'type': 'integer'},
+            'resource': _text(),
+        })),
+        'notes': _arr(_text()),
+    }),
+    # The rule the findings are grouped by: what each severity means, and why each detector is in its group.
+    'severityTable': _arr(_obj({
+        'severity': _text(),
+        'means': _text(),
+        'members': _arr(_obj({'detector': _text(), 'why': _text()})),
+    })),
     'flags': _arr(_obj({
         'detector': _text(),
         'what': _text(),

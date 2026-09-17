@@ -264,7 +264,7 @@ void ParseEventList(const std::string &text, std::vector<int> &out)
   }
 }
 
-//: The bundle producer (ROADMAP §2): one replay session, everything the engine alone can answer
+//: The bundle producer (ROADMAP §1): one replay session, everything the engine alone can answer
 //: written to disk, so the offline half can analyse a frame without a device. It is also the reason
 //: a crash is survivable: files are written as they are produced, and the manifest lists what was
 //: written, so a partial bundle says so.
@@ -337,7 +337,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   //
   // What bounds the sweep instead is the file: every event is a chunk, so the chunk count is an upper
   // bound on how many events the frame has. The empty-run test still ends a sweep early on a sparse
-  // capture, and `--until` says it exactly. (Deriving the engine's ids from the file is ROADMAP §3.)
+  // capture, and `--until` says it exactly. (Deriving the engine's ids from the file is ROADMAP §2.)
   const int kEmptyRun = 256;    // consecutive ids with nothing bound that end a sweep
   const int kHardCap = 200000;
   const size_t idBudget = ctrl->GetStructuredFile().chunks.size();
@@ -801,7 +801,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     ObjectRow(
         std::string("{\"what\": \"an exact end to the id list\", \"why\": \"ids past the frame's"
                     " last event clamp to it, so the sweep is bounded by the file's chunk count"
-                    " (ROADMAP §3) and may hold a few trailing repeats\"}"));
+                    " (ROADMAP §2) and may hold a few trailing repeats\"}"));
     ArrayClose(false);
 
     ArrayOpen("skipped");

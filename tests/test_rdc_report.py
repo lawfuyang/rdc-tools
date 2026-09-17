@@ -73,7 +73,8 @@ def write_bundle(root: str, events: Optional[List[Dict[str, Any]]] = None,
                  manifest: Optional[Dict[str, Any]] = None,
                  capture: Optional[Dict[str, Any]] = None,
                  states: Optional[Dict[int, Dict[str, Any]]] = None,
-                 cbuffers: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 cbuffers: Optional[Dict[str, Dict[str, Any]]] = None,
+                 counters: Optional[List[str]] = None) -> None:
     """Write a bundle with the files the report requires, plus whatever the test cares about."""
     os.makedirs(root, exist_ok=True)
     base_manifest: Dict[str, Any] = {
@@ -94,6 +95,9 @@ def write_bundle(root: str, events: Optional[List[Dict[str, Any]]] = None,
                                         'total': len(resources or [])})
     write_json(root, 'messages.json', {'capture': RDC, 'messages': messages or [],
                                        'total': len(messages or [])})
+    if counters is not None:
+        write_json(root, 'counters.json', {'capture': RDC, 'counters': counters,
+                                          'total': len(counters)})
     for eid, documents in (states or {}).items():
         if 'state' in documents:
             write_json(root, os.path.join('states', '%d.state.json' % eid), documents['state'])
@@ -362,7 +366,7 @@ class TestReportDocument(BundleCase):
         self.assertEqual(len(self.document(bundle)['caveats']), len(R.report_caveats()))
 
     def test_the_json_twin_is_schema_valid(self):
-        """The report's own schema against the document it describes (the acceptance gate of ROADMAP §1.3).
+        """The report's own schema against the document it describes (the acceptance gate of ROADMAP §6).
 
         The schema lives in `rdc_schemas.py` rather than in `schema/`, because that folder is what the driver
         publishes and the driver does not write this document. It is exhaustive and closed, so a member a
@@ -389,11 +393,11 @@ class TestReportDocument(BundleCase):
         write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
         self.passes(bundle)
         text = self.markdown(bundle)
-        # Each gap points at where its work is tracked: the unproven detectors (§1.3, the acceptance gates),
-        # the notables (§1.1, §1.2) and counters (§4). The marker path is no longer one of the gaps -- the
-        # driver records it -- so the caveat speaks of the *bundle's* age instead, which is what the last
-        # needle checks.
-        for needle in ('ROADMAP §1.3', 'ROADMAP §1.1', 'ROADMAP §4'):
+        # Each gap points at where its work is tracked: the unproven detectors (the verification section), the
+        # ranking's unavailable inputs (the action list) and the counters (the frame's pictures and counters).
+        # The marker path is no longer one of the gaps -- the driver records it -- so the caveat speaks of the
+        # *bundle's* age instead, which is what the last needle checks.
+        for needle in ('ROADMAP §6', 'ROADMAP §1', 'ROADMAP §3'):
             self.assertIn(needle, text)
         self.assertIn('as of 2026-09-17', text)
         # The vocabulary's own two limits: what a name can say, and which names exist at all.
@@ -426,6 +430,241 @@ class TestReportDocument(BundleCase):
 
 
 # =========================================================================== detectors
+# =========================================================================== notables (REFERENCE §4.11)
+class TestReportNotables(BundleCase):
+    """The ranking, the rules that ignore it, and the two claims the notable lists must not make."""
+
+    def two_passes(self) -> str:
+        """Two passes: two draws on a 1000x1000 target, then one draw on a 10x10 one. Enough for the ranking
+        to have an order and for two of the oddity rules to have something to catch."""
+        bundle = self.path('b')
+        write_bundle(bundle,
+                     events=[event(100, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM']),
+                             event(101, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM']),
+                             event(200, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'])],
+                     resources=[resource('10', first=100, name='SceneColour', width=1000, height=1000,
+                                         depth=1, samples=1, format='B8G8R8A8_UNORM'),
+                                resource('11', first=200, name='Tiny', width=10, height=10, depth=1,
+                                         samples=1, format='B8G8R8A8_UNORM')])
+        self.report(bundle)
+        return bundle
+
+    def notable_resource(self, bundle: str, resid: str) -> Dict[str, Any]:
+        rows = [row for row in self.document(bundle)['notables']['resources']
+                if row['resource'] == 'res%s' % resid]
+        self.assertTrue(rows, 'res%s is not in the notable resources' % resid)
+        return rows[0]
+
+    def test_the_ranking_orders_by_the_stated_inputs(self):
+        doc = self.document(self.two_passes())
+        ranked = [row['passIndex'] for row in doc['notables']['passes'] if row['rank']]
+        self.assertEqual(ranked[:2], [1, 2])
+        first = [row for row in doc['notables']['passes'] if row['passIndex'] == 1][0]
+        self.assertEqual(first['values'][0], '2 call(s)')
+        self.assertIn('Mpixel', first['values'][1], 'the footprint is in pixels, not bytes')
+
+    def test_a_single_call_pass_is_listed_by_a_rule_not_by_its_rank(self):
+        doc = self.document(self.two_passes())
+        single = [row for row in doc['notables']['passes'] if row['passIndex'] == 2][0]
+        self.assertTrue(any('single event' in reason for reason in single['why']))
+
+    def test_an_input_the_bundle_cannot_answer_stays_in_the_table_with_its_reason(self):
+        inputs = {entry['input']: entry for entry in self.document(self.two_passes())['notables']['passInputs']}
+        primitives = [entry for entry in inputs.values() if entry['input'].startswith('primitives')][0]
+        self.assertFalse(primitives['available'], 'a bundle carries no action list')
+        self.assertIn('action list', primitives['why'])
+        self.assertFalse(inputs['counter cost']['available'])
+        self.assertTrue(inputs['calls']['available'])
+
+    def test_counter_cost_joins_the_ranking_when_the_bundle_has_counters(self):
+        bundle = self.path('c')
+        write_bundle(bundle, events=[event(100), event(200)], resources=[resource('10', first=100)],
+                     counters=['eid 200  <counter> = 12.5'])
+        self.report(bundle)
+        doc = self.document(bundle)
+        entry = [entry for entry in doc['notables']['passInputs'] if entry['input'] == 'counter cost'][0]
+        self.assertTrue(entry['available'], 'the bundle holds counter results')
+        self.assertEqual(entry['why'], '', 'a reason for an input that *is* available would be a contradiction')
+        costs = [value for row in doc['notables']['passes'] for value in row['values']
+                 if value.startswith('counter cost')]
+        self.assertEqual(costs, ['counter cost 12.500 over 1 row(s)'])
+
+    def test_a_resource_the_engine_recorded_nothing_for_is_not_called_unread(self):
+        bundle = self.path('d')
+        write_bundle(bundle, events=[event(100, targets=['10 C 100x100 B8G8R8A8_UNORM'])],
+                     resources=[resource('10', first=100, name='Unrecorded', width=100, height=100, depth=1,
+                                         samples=1, format='B8G8R8A8_UNORM', usage=[])])
+        self.report(bundle)
+        row = self.notable_resource(bundle, '10')
+        self.assertTrue(any('recorded no usage row' in value for value in row['values']))
+        self.assertFalse(any(value.startswith('read by 0') for value in row['values']),
+                         '"nobody reads it" is not something an empty chain can say')
+        self.assertFalse(any(reason.startswith('never read at all') for reason in row['why']))
+
+    def test_the_unused_marker_is_reported_as_not_tracked(self):
+        bundle = self.path('e')
+        write_bundle(bundle, events=[event(100, targets=['10 C 100x100 B8G8R8A8_UNORM'])],
+                     resources=[resource('10', first=0, name='Untracked', width=100, height=100, depth=1,
+                                         samples=1, format='B8G8R8A8_UNORM',
+                                         usage=[{'eid': 0, 'usage': 0}])])
+        self.report(bundle)
+        row = self.notable_resource(bundle, '10')
+        self.assertTrue(any('did not track it' in value for value in row['values']))
+        self.assertFalse(any(reason.startswith('never read at all') for reason in row['why']))
+
+    def test_a_write_only_resource_is_listed_as_never_read(self):
+        bundle = self.path('f')
+        write_bundle(bundle, events=[event(100, targets=['10 C 100x100 B8G8R8A8_UNORM'])],
+                     resources=[resource('10', first=100, name='BufferedRT', width=100, height=100, depth=1,
+                                         samples=1, format='B8G8R8A8_UNORM',
+                                         usage=[{'eid': 100, 'usage': 32}])])
+        self.report(bundle)
+        row = self.notable_resource(bundle, '10')
+        self.assertTrue(any(reason.startswith('never read at all') for reason in row['why']))
+        self.assertTrue(any(value == 'read by 0 pass(es)' for value in row['values']))
+
+    def test_a_texture_is_measured_in_pixels_and_a_buffer_in_bytes(self):
+        bundle = self.path('g')
+        write_bundle(bundle, events=[event(100, targets=['10 C 1000x1000 B8G8R8A8_UNORM'])],
+                     resources=[resource('10', first=100, name='SceneColour', width=1000, height=1000,
+                                         depth=1, samples=1, format='B8G8R8A8_UNORM'),
+                                resource('11', kind='buffer', first=100, name='Big', bytes=1048576)])
+        self.report(bundle)
+        self.assertTrue(any('Mpixel' in value and 'bytes/pixel' in value
+                            for value in self.notable_resource(bundle, '10')['values']))
+        self.assertEqual(self.notable_resource(bundle, '11')['values'][0], '1.00 MB')
+
+    def test_a_buffer_is_never_called_undecodable(self):
+        # The driver writes a format for a texture and none for a buffer, so "no format" is a fact about
+        # textures: calling every buffer undecodable was wrong on a real capture (149 of them).
+        bundle = self.path('h')
+        write_bundle(bundle, events=[event(100, targets=['11 C 100x100 B8G8R8A8_UNORM'])],
+                     resources=[resource('10', kind='buffer', first=100, name='Plain', bytes=1024),
+                                resource('11', first=100, name='NoFormat', width=100, height=100, depth=1,
+                                         samples=1)])
+        self.report(bundle)
+        self.assertFalse(any('could not decode' in reason for reason in self.notable_resource(bundle, '10')['why']))
+        self.assertTrue(any('could not decode' in reason for reason in self.notable_resource(bundle, '11')['why']))
+
+    def test_a_capped_list_says_what_it_left_out(self):
+        bundle = self.path('i')
+        write_bundle(bundle, events=[event(100)],
+                     resources=[resource(str(100 + index), kind='buffer', first=100, bytes=1024,
+                                         usage=[{'eid': 100, 'usage': 32}]) for index in range(25)])
+        self.report(bundle)
+        doc = self.document(bundle)
+        self.assertEqual(len(doc['notables']['resources']), doc['notables']['limit'] + doc['notables']['oddityLimit'])
+        self.assertTrue(any('not listed below' in note for note in doc['notables']['notes']))
+
+
+# =========================================================================== recommendations (REFERENCE §4.11)
+class TestReportRecommendations(BundleCase):
+    """What to look at first: one row per thing to check, each with the command that shows its evidence."""
+
+    def dead_allocation_bundle(self) -> str:
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(100)],
+                     resources=[resource('10', kind='buffer', first=0, bytes=1024,
+                                         usage=[{'eid': 0, 'usage': 0}])])
+        self.report(bundle)
+        return bundle
+
+    def test_a_finding_becomes_one_row_whose_command_aims_at_its_own_evidence(self):
+        doc = self.document(self.dead_allocation_bundle())
+        rows = [row for row in doc['recommendations']['rows'] if row['kind'] == 'finding']
+        self.assertEqual(len(rows), 1, 'one row per detector, not one per finding')
+        self.assertIn('dead-allocation', rows[0]['do'])
+        self.assertEqual(rows[0]['command'], "replay_dump usage 'fixture.rdc' 10")
+        self.assertEqual(rows[0]['resource'], 'res10')
+        self.assertEqual(rows[0]['severity'], 'medium')
+
+    def test_severity_and_kind_decide_the_order(self):
+        doc = self.document(self.dead_allocation_bundle())
+        rows = doc['recommendations']['rows']
+        self.assertEqual([row['rank'] for row in rows], list(range(1, len(rows) + 1)))
+        keys = [(R.SEVERITY_ORDER.index(row['severity']), R.KIND_ORDER.index(row['kind'])) for row in rows]
+        self.assertEqual(keys, sorted(keys), 'the rows are not in the declared order: %s' % rows)
+
+    def test_a_command_falls_back_to_the_action_tree_when_the_evidence_names_nothing(self):
+        self.assertEqual(R._command('unbound-table-slot', {}, 'cap.rdc'), "replay_dump draws 'cap.rdc'")
+        self.assertEqual(R._command('unbound-table-slot', {'eid': '42'}, 'cap.rdc'),
+                         "replay_dump state 'cap.rdc' 42")
+        self.assertEqual(R._command('all-zero-constant-block',
+                                    {'eid': '12', 'stage': 'ps', 'slot': '3'}, 'cap.rdc'),
+                         "replay_dump cb 'cap.rdc' 12 ps 3")
+
+    def test_the_references_come_out_of_the_evidence_the_driver_wrote(self):
+        flag = R.RedFlag(detector='all-zero-constant-block', what='', certainty='certain', unproven=True,
+                         evidence=['ps stage, slot 3, buffer res30, eid 12..40'])
+        self.assertEqual(R._refs(flag), {'eid': '12', 'resId': '30', 'stage': 'ps', 'slot': '3'})
+
+    def test_a_skipped_detector_becomes_a_gap_with_the_command_that_closes_it(self):
+        bundle = self.path('c')
+        write_bundle(bundle, events=[event(100)], resources=[resource('10', first=100)],
+                     manifest={'resourceUsage': 'not collected'})
+        self.report(bundle)
+        doc = self.document(bundle)
+        gaps = [row for row in doc['recommendations']['rows'] if row['kind'] == 'gap']
+        self.assertTrue(any('dead-allocation' in row['do'] for row in gaps),
+                        'a skipped detector is a gap: %s' % gaps)
+        self.assertTrue(any(row['command'].startswith('replay_dump dump') for row in gaps),
+                        'a bundle gap is fixed by writing a bundle: %s' % gaps)
+        self.assertTrue(any('--with-counters' in row['do'] for row in gaps))
+        self.assertTrue(all(row['command'].startswith('replay_dump') for row in gaps),
+                        'every recommendation carries a command, not a sentence')
+
+    def test_the_severity_table_covers_every_detector(self):
+        doc = self.document(self.dead_allocation_bundle())
+        table = {item['detector'] for row in doc['severityTable'] for item in row['members']}
+        self.assertEqual(len(table), len({run['detector'] for run in doc['detectors']}),
+                         'the table and the run list disagree about which detectors exist')
+        for run in doc['detectors']:
+            self.assertIn(run['detector'], table)
+
+    def test_a_finding_is_grouped_under_its_detectors_group(self):
+        bundle = self.path('d')
+        write_bundle(bundle, events=[event(100)], resources=[resource('10', first=100)],
+                     messages=['eid 100  error  something went wrong'])
+        self.report(bundle)
+        doc = self.document(bundle)
+        group = [row['severity'] for row in doc['severityTable'] for item in row['members']
+                 if item['detector'] == 'debug-message'][0]
+        self.assertEqual(group, 'medium')
+        text = self.markdown(bundle)
+        heading = '### %s — ' % group
+        self.assertIn(heading, text)
+        self.assertLess(text.index(heading), text.index('something went wrong'),
+                        'the finding is not under its group heading')
+
+
+class TestReportEvidence(BundleCase):
+    """ROADMAP §6: no claim without evidence -- every row says which event or resource it is about."""
+
+    def test_every_row_of_every_section_cites_an_event_or_a_resource(self):
+        bundle = self.path('b')
+        write_bundle(bundle,
+                     events=[event(100, targets=['10 SceneColour 100x100 B8G8R8A8_UNORM']),
+                             event(200, kind='compute')],
+                     resources=[resource('10', first=100, name='SceneColour', width=100, height=100,
+                                         depth=1, samples=1, format='B8G8R8A8_UNORM')],
+                     messages=['eid 200  error  a complaint'])
+        self.report(bundle)
+        doc = self.document(bundle)
+        for entry in doc['passes']:
+            self.assertGreater(entry['firstEid'], 0, 'a pass without an eid range: %s' % entry)
+            self.assertGreaterEqual(entry['lastEid'], entry['firstEid'])
+        for row in doc['notables']['passes']:
+            self.assertGreater(row['firstEid'], 0, 'a notable pass with no eid: %s' % row)
+        for row in doc['notables']['resources']:
+            self.assertRegex(row['resource'], r'^res\d+$', 'a notable resource with no id: %s' % row)
+        for row in doc['recommendations']['rows']:
+            self.assertTrue(row['eid'] > 0 or row['resource'] or row['command'],
+                            'a recommendation that says nothing about where to look: %s' % row)
+        for flag in doc['flags']:
+            self.assertTrue(flag['evidence'], 'a finding without evidence: %s' % flag)
+        self.assertTrue(doc['flags'], 'the fixture should produce at least one finding')
+
+
 class TestReportDetectors(BundleCase):
     def test_a_message_becomes_one_finding_per_complaint(self):
         bundle = self.path('b')

@@ -4,8 +4,9 @@ Features that are **not implemented yet** in `rdc_analysis.py` or in its replay 
 REFERENCE §9), in rough priority order. Each item says what it is, why it is wanted, how it would be built, and
 what blocks it.
 
-Landed items are **removed** from this file rather than marked done: their reference moves to `README.md` (or to
-the code), and the remaining sections are renumbered with every cross-reference updated in the same change.
+Landed items are **removed** from this file rather than marked done: their reference moves to `README.md`,
+`REFERENCE.md` or the code, and the remaining sections are renumbered with every cross-reference updated in the
+same change.
 
 Legend: **P0** = do next / unblocks current work · **P1** = high value, moderate effort · **P2** = useful,
 opportunistic · **P3** = nice-to-have.
@@ -52,11 +53,10 @@ Current state for reference: the offline tool parses the `.rdc` container, decom
 (LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (REFERENCE §4.8), walks the
 SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the resource table
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (§4.10) and the root signatures (§3.4), inventories the
-DXBC/DXIL containers, and can check its own parse (`verify`). 22 commands, see `README.md`. The replay driver
-(REFERENCE §9) adds 15 more (`info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
-`debug`, `usage`, `probe`, `batch`, and the bundle pair `dump` + `bundle-verify`) that ask the engine for what no
-file read can answer — including the bundle the report generator reads. Since 2026-09-15 the
-offline tool also has a hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright
+DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
+half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
+rendered image, and the bundle the report generator reads (`dump` + `bundle-verify`). The offline tool has a
+hermetic unittest suite (`python rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
 `build/` folder. `AGENTS.md` holds the coding rules, REFERENCE §4.6/§4.7 how to run both. That suite is the safety
 net for everything below — land the tests with the change, not after it.
@@ -95,130 +95,16 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 1. P0 — Executive summary: what still has to go into it
 
-**Landed** (REFERENCE §4.11, `report <rdc> <bundleDir>`): the command, the bundle interface (versioned, hashed,
-and stated in the report's provenance), state-derived pass reconstruction with a reason per boundary, the
-per-pass roll-ups (work, targets, structure, shaders, constant blocks, resources first used), the deterministic
-Markdown report and its JSON twin, and the appendix that reproduces every claim. The tests are in
-`tests/test_rdc_report.py` — fixture bundles, no GPU, no capture.
+**What remains is what makes it *useful*.** The report (REFERENCE §4.11, `report <rdc> <bundleDir>`) says what
+the frame *is* and — through its twenty detectors — what is *wrong* with it. What it cannot do yet is say what
+to look at *first*, or what any of it is called in the engine's own vocabulary, and those two are the reason it
+exists: the frame-level "what is going on here, and what is suspicious" is the work being done by hand today,
+over a dozen commands, and it is the same work every time. Every item below is offline code over a bundle,
+which is what keeps it testable from fixtures (§7) rather than from a capture. The report's own "what this
+report cannot tell you" section lists each of them as absent, so a reader is never misled about what they are
+looking at — and each item that lands has to keep that section true.
 
-**What remains is what makes it *useful*.** The skeleton says what the frame *is*; nothing in it yet says what
-is *wrong*, what to look at first, or what any of it is called in the engine's own vocabulary — and that gap is
-the reason the report exists: the frame-level "what is going on here, and what is suspicious" is the work being
-done by hand today, over a dozen commands, and it is the same work every time. Every item below is offline code
-over a bundle, which is what keeps it testable from fixtures (§7) rather than from a capture. The report's own
-"what this report cannot tell you" section lists each of them as absent, so a reader is never misled about what
-they are looking at — and each item that lands has to keep that section true.
-
-### 1.1 Detectors — the red flags
-
-Each detector states what it means, what proves it, and how certain it is. A row that has never fired on a
-labelled capture is marked *unproven* (§7) rather than quietly shipped; heuristics that key off names carry
-`[heuristic]` in their output. This is the list as designed (subject to being narrowed by evidence):
-
-Landed, and split by where the evidence lives. **From the bundle**: debug messages (grouped by text, counts and
-eid ranges), all-zero constant blocks — including the "nothing bound for this block" case the driver names
-itself — `unbound-root-parameter` (the `bR sS` a stage reads against the root parameters of the same event's
-state: an unset one prints as `rp1   reg=0 space=0` and nothing more, which is the *root descriptor* half of
-§1.1's flagship row, `question` certainty because root constants can serve the register too — measured on the
-Android capture as 14 findings that agree with the all-zero detector's independent note), `shader-io-mismatch`
-(both halves of *VS out ≠ PS in*: a pixel input the vertex shader does not emit — `SV_` system values are
-ignored on both sides, an interpolation suffix like `_centroid` is the same semantic, and an event with a
-geometry/hull/domain shader is skipped because the rule compares *adjacent* stages, validated against the real
-pair at `PC Renderer.rdc` eid 700 whose fifth-of-six pixel inputs is `SV_IsFrontFace` and must not fire — and,
-from the driver's rows now ending in `c<N>` (the engine's own `SigParameter::compCount`), an input that reads
-*more* components than its producer writes, which cannot be satisfied at pipeline creation while reading fewer
-is a legal prefix subset and stays silent. Measured over a 689-event graphics window of that capture: 52
-shader pairs, all 52 carrying counts, no finding. The component *type* is not in the row, so a type mismatch is
-not claimed), and dead allocations.
-From the **usage chain** (route B below), three more — `read-before-write`, `write-never-read` and
-`load-instead-of-clear` — and the decode they needed is measured rather than assumed: a usage value is *one
-usage, not a bitmask* (the API's own example says one entry per usage, and the real bundle shows one buffer
-with eight `VertexBuffer` rows at one eid), its numbering is the enum's declaration order in
-`renderdoc-src/renderdoc/api/replay/replay_enums.h` (all 17 distinct values in the Android capture land where
-their semantics say they must — 32/33 on the two target kinds, 35/36 on `Clear`/`Discard`, 42/43 on the copy
-halves), and a resource whose only row is `(eid 0, Unused)` is the engine's own "not tracked" marker — 101 of
-that capture's 133 resources — and is never judged. What the three found there: 6 read-before-write (every one
-read and *never* written in the frame — assets, an LUT, the font atlas, an allocator buffer — which is what
-the legitimate case looks like), 15 write-never-read in six groups keyed by the *kind* of last write, and 1 of
-4 targets firing load-instead-of-clear (the other three each have a `Clear` or a `Discard` before their first
-target event).
-**The flagship row's table half, and how it actually landed.** The measurement first: a table's state row
-prints `heap298+0x21cde`, the engine's own pipe state carries no descriptor index (`api/replay/d3d12_pipestate.h`
-defines `D3D12RootTableRange` — a range's `tableByteOffset`, `count` — and not the bound handle), and the
-command payloads that do carry `(heapId, index)` are chunk-numbered while the reflection is per engine event
-id — so the route this section first named was "follow the payloads, after §2's calibration". **It turned out
-not to be needed: the engine can resolve its own table.** `IReplayController::GetDescriptors` takes the store
-and the ranges (which carry `baseRegister`, `count` and `tableByteOffset`), so the driver now prints each *set*
-table's slots — `rp0   t3  s0   cat(3) type(4) res2233`, the *range's* category and the *heap slot's own*
-descriptor type — with `vis=` on the parameter row, because measured at `PC Renderer.rdc` eid 640 the vertex
-and pixel shaders both declare `t0`..`t4` and each is served by its own table. Two rules read those rows: a
-slot the shader reads that resolves to `none` (**nothing bound through a table**, `certain` — the engine's own
-answer rather than an inference) and a slot whose declared range and heap type disagree (`certain`). The first
-draft of the second rule compared the *reflection's* letter against a row of a *different* letter — 60-odd
-false positives on a real capture, because `b0` and `t0` are separate register spaces — which is why what is
-compared now is range against heap, and why "the right register space holding the wrong resource *type*" is
-not claimed at all: a reflection row names a binding, and not its type. Measured: the Android window has one
-genuine disagreement (`cat(3) type(7)`, a UAV descriptor in an SRV range) and the PC window none.
-**From the capture's chunk stream**: marker
-imbalance (a pop with nothing pushed, or markers still open at the end), unattributed draws (a hygiene note,
-counted by chunk), and zero work (0 indices/vertices/instances/groups, read from the same payload decoder
-`draws` uses). `report` prints them under **Red flags**, each with its evidence, and every finding is marked
-*unproven* until a capture with a known bug list confirms it (§1.5). A detector that could not look — no usage
-lists with `--no-usage`, no chunk-name map without the RenderDoc source tree, a capture that has moved — is
-reported as *skipped with the reason*, never as clean. Measured: twelve detectors ran on the Android capture
-and found 21 all-zero constant blocks (18 of them the "no root descriptor is bound" case), 14 unbound root
-parameters, and the usage-chain findings above; over the windows re-dumped for the table work, the two
-binding rules add one finding — a genuine `cat(3) type(7)` disagreement — and the PC capture none.
-`dead compute` closes the table, and the measurement that shaped it is worth keeping: a bundle carries a
-state document for a *state change*, not for every event — 30 of the Android trace's 723 events — while the
-*heap contents* a table points at can change between them, so attributing a UAV write to a register through
-a resolved slot would apply a snapshot to events it was never taken at. The rule therefore takes the write
-from the usage chain itself (a `CS_RWResource` row inside the pass) and reports per *compute pass*, which is
-what a bundle can attribute work to: 4 passes on that capture bind UAVs nothing afterwards reads — the two
-light-culling grids and three SkyAtmosphere LUTs, each with its own last use to check.
-
-**From the pipeline state a bundle now records** (the driver change this section's old route table waited on):
-five more rules — and getting there exposed a bug worth its own line: `psoKind` was guessed from the *bound
-shaders*, and the application leaves a compute shader bound between dispatches, so on `PC Renderer.rdc` all
-2132 events read as compute — draws included — and the offline tool grouped a frame of draws into compute
-passes. It now comes from the capture's action tree (a `Dispatch*` chunk or not, with a non-call event taking
-the kind of the call it follows), which is where the call kind actually lives: 1105 calls classified there, 10
-of them `ExecuteIndirect` and left to the shaders because that one name can be either kind.
-
-The state these rules read is written per state *change* rather than per event — 30 documents for
-the Android trace's 723 events — so each is stated per *range* (from its own eid to the next document's), and
-a dispatch is never judged on it, because the engine reports at a compute event whatever the last draw left
-bound. `depth-logic` (writes on with the test off, so nothing rejects a fragment and each draw's depth
-overwrites the last one's — or a test with no depth target bound at all), `empty-scissor` (an enabled viewport
-or scissor with a zero or negative extent: the draw is issued and shades nothing), `stencil-without-writer`
-(stencil testing a target nothing earlier wrote, with a `Clear` row deliberately *not* counted as a writer
-because it does not say which of depth and stencil it cleared), and two `[heuristic]`s: `blend-in-opaque-pass`
-(blending on while writing a target whose *name* says GBuffer or base pass — a name is the application's
-convention, so the finding says so rather than claiming the pass is opaque) and `format-units-suspicion` (a
-`float` pixel-shader output into an 8-bit-or-narrower linear target: the types are in the bundle, the values
-are not). Plus `mismatched-msaa`, which needs no pipeline state at all: `samples` is in the resource table and
-a resolve is a usage row, so *a multisampled colour target no resolve ever touched* is decidable as it
-stands — the *which subresource did the resolve copy* half needs the `ResolveSubresource` payload, which a
-bundle does not carry, and is stated as unclaimed rather than approximated.
-
-**What is left is one row, and it is not a detector.** *Peak vs total memory* — what the frame holds, what it
-never reads and what could alias — is §5's memory report rather than a red flag, and its evidence (the
-resource table and lifetimes) is already in the bundle. §1.1 itself is complete: **twenty detectors**, every
-one with a fixture that fires it, and every one reporting *skipped with the reason* rather than clean when the
-evidence it reads is missing from a bundle (an older driver's tables or state blocks, a `--no-usage` bundle,
-a capture without its source tree).
-
-All three captures in the corpus were dumped and cross-referenced (the Hobby one as a 600-event window —
-29216 chunks and 11082 resources would make a full bundle of gigabytes): 20 detectors ran on each, and the
-state rules say something on two of the three and nothing on the third for a *checked* reason —
-`depth-logic` fires once on `PC Renderer.rdc` (a depth test with nothing bound), `stencil-without-writer`
-once on the Hobby capture (a read-only depth-stencil target tested with nothing having written it), and both
-heuristics are silent there because the frame binds all 30 of its GBuffer-named targets with blending off and
-binds no 8-bit linear target at all. Android is the quiet one: its graphics ranges are depth-only. The
-findings otherwise: 49 (Android) / 101 (PC) / 64 (Hobby window), all *unproven* until §1.5's labelled capture
-exists.
-
-### 1.2 Notable passes and notable resources
+### 1.1 Notable passes and notable resources
 
 Notability is *stated as a rule*, so a reader can disagree with the ranking: passes are ranked by primitives,
 draw count, RT footprint, resource churn, and counter cost when available; also listed whenever they are odd —
@@ -227,7 +113,7 @@ resource. Resources are ranked by bytes, by how many passes read them, and by "n
 carries the largest RTs, the formats that need special handling (float/HDR, compressed), and the ones the report
 could not decode (say so, do not skip silently).
 
-### 1.3 The report's shape
+### 1.2 The report's shape
 
 Header and provenance (capture hash, API, driver, RenderDoc version, bundle manifest, what was and was not
 analysed) · the frame at a glance · the pipeline map (ordered pass list + a Mermaid graph of pass → RT edges) ·
@@ -237,7 +123,7 @@ reflection, unresolved bindless descriptors, no counters, no shader debug info, 
 the fact that the frame was replayed on this machine's GPU rather than the device that recorded it) · the
 appendix of reproduction commands.
 
-### 1.4 The engine schema table
+### 1.3 The engine schema table
 
 Names like `MobileBasePass`, `IndirectLightingCache` and `Material` are Unreal's, and the summary can only
 speak that vocabulary if it is written down. A small, extendable table (`engine-schemas/*.json` — not the
@@ -245,9 +131,9 @@ driver's `schema/` folder, which is the contract for its documents, REFERENCE §
 constant-block, semantic and marker names onto concepts (`base pass`, `GI cache`, `light`, `material`,
 `shadow pass`). Everything derived from it is labelled as name-based; a capture from an unknown engine simply
 gets no interpretation rather than a wrong one. This is also where the project's original question finally gets
-an answer in one place: the mobile-vs-PC GI investigation is the acceptance case for §1 as a whole (§1.5).
+an answer in one place: the mobile-vs-PC GI investigation is the acceptance case for §1 as a whole (§1.4).
 
-### 1.5 Acceptance gates
+### 1.4 Acceptance gates
 
 * Runs on all three captures in this project, in seconds once the bundle exists, with no unhandled exception and
   no warning on stderr.
@@ -264,9 +150,8 @@ an answer in one place: the mobile-vs-PC GI investigation is the acceptance case
 * **The pilot**: the summary explains the mobile-vs-PC GI difference in the words of the schema table — which
   pass, which cbuffer, which value — and a reader can follow its appendix commands and see the same thing.
 
-**Effort.** ~10 days phased, now that the bundle it reads is landed: pass reconstruction and roll-ups (2 d),
-detectors (2–3 d, the value is in getting them *right* rather than numerous), report + fixtures + gates (2 d),
-schema table and the pilot (2 d).
+**Effort.** ~4 days for what is left: notability ranking and recommendations (1–2 d), the schema table and the
+pilot (2 d). The report skeleton, the roll-ups and the detectors are landed.
 
 **Blockers.** Bundle size on the 1.4 GB capture (mitigated by `--since`/`--until`/`--max-events` and by storing
 full state only for distinct PSOs plus pass boundaries, REFERENCE §9); counters are hardware/driver dependent and slow;
@@ -529,7 +414,7 @@ never silent ones).
 
 * **10.1** (§5 bundled table): names resolve with `renderdoc-src` absent **and** when the capture's version is
   newer than the tree; the table is generated by a checked-in script and carries its RenderDoc version; the
-  §1.1 warning becomes "using bundled names for RenderDoc X".
+  chunk-name warning (README §1.1) becomes "using bundled names for RenderDoc X".
 
 ---
 
@@ -537,33 +422,27 @@ never silent ones).
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, REFERENCE §4.11)**
-1. **The detectors (§1.1)** — **done**: twenty of them (seven over the bundle, four over the usage chain,
-   five over the pipeline state, one over the resource table, three over the chunk stream), including the
-   flagship *nothing bound where the reflection expects something* in all three of its halves, *binding kind
-   mismatch*, *dead compute* and the five state rules the driver change unlocked. Nothing of it waits on §2's
-   eid↔chunk calibration — the engine resolves its own descriptor tables, and the one rule that could not use
-   that resolution takes its evidence from the usage chain instead. What the section still owns is §5's
-   memory/aliasing row, which is a report rather than a red flag.
-2. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
-   own words is the acceptance case for all of the above, and the table is what lets the report name a pass
-   instead of describing its state.
+**Phase 1 — the frame-level answer**
+1. **The engine schema table and the pilot (§1.3–1.4)** — the mobile-vs-PC GI question answered in the report's
+   own words is the acceptance case for the report as a whole, and the table is what lets the report name a
+   pass instead of describing its state.
 
 **Phase 2 — exploration and experiments**
-3. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
+2. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
    navigable; ~2 days for all four, and `--at-marker` in particular is now one walk of `GetRootActions()`
    rather than something to derive (§2's first item).
-4. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
+3. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
-5. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
-6. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
-7. **Dependency graph, memory/aliasing report (§5)** — the evidence behind the remaining detectors.
+4. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
+5. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
+6. **Dependency graph, memory/aliasing report (§5)** — the evidence behind §5's own rows (the bulk of what a
+   detector could use from it has landed as the usage-chain rules).
 
 **Phase 3 — comparisons and the long tail**
-8. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
-9. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
+7. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
+8. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-10. **Bundled chunk names (§5, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+9. **Bundled chunk names (§5, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
     REFERENCE §8 bullet that is not replay's job.
-11. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
+10. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
 12. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.

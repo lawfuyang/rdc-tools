@@ -247,7 +247,7 @@ python rdc_analysis.py validate bundle schema                     # REFERENCE §
 ```
 
 Read it in this order: frame at a glance → pipeline map → pass by pass → the caveats → the appendix of
-reproduction commands. Red flags and recommendations arrive with ROADMAP §1.1; until then the caveats section
+reproduction commands. Red flags are implemented (REFERENCE §4.11) and recommendations are not; until then the caveats section
 is the honest statement of what the report does not know. Each later recipe is a follow-up on one line of the
 report. Offline-only fallback: `sections`, `summary`, `markers`, `draws`, `resources`.
 
@@ -278,7 +278,7 @@ python rdc_analysis.py diff mobile.rdc pc.rdc                      # roadmap §5
 
 Then narrow by name rather than by index: the pass list (aligned by **marker path**, so it survives
 re-captures), the named cbuffer values that moved (`watch <name>` *(ROADMAP §2)* turns that into a table over the whole
-frame), and the schema table *(ROADMAP §1.4)* to say which *concept* the differing block is (`IndirectLightingCache`,
+frame), and the schema table *(ROADMAP §1.3)* to say which *concept* the differing block is (`IndirectLightingCache`,
 `Material`, …). Where the two engines' reflections disagree on names entirely, the offline `resources` and
 `rootsig` views are the fallback: they compare what the *file* recorded. State the GPU caveat (the pitfalls above) in the
 answer: both frames were replayed on *this* machine's GPU.
@@ -305,7 +305,7 @@ diff the renders *(ROADMAP §3, §5)* — if the picture does not change, the te
 
 `cb` answers "what is bound here"; `watch` answers "is it ever different" — the difference between a constant
 that is wrong and a constant that is never set at all. An all-zero buffer where the reflection says the shader
-reads it is a red flag the report generator looks for *(ROADMAP §1.1)*, and `buffer <resId>` *(ROADMAP §2)* shows the raw bytes
+reads it is a red flag the report generator looks for *(REFERENCE §4.11)*, and `buffer <resId>` *(ROADMAP §2)* shows the raw bytes
 when the reflection is not enough (structured buffers, index data, hand-built tables).
 
 **F. "What does the shader actually do?"** Four independent views, cheapest first.

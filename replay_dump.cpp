@@ -1278,9 +1278,9 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
     ArrayClose(false);                              // the pipeline-state blocks follow
 
     // -----------------------------------------------------------------------
-    // The state a capture's *draws* are judged by, which earlier bundles did not carry (ROADMAP §1.1's
-    // route A): viewport and scissor for "draws that can only produce nothing", depth and stencil for
-    // "depth logic" and "stencil without a writer", blend for "blend in an opaque pass".
+    // The state a capture's *draws* are judged by, which earlier bundles did not carry: viewport and
+    // scissor for "draws that can only produce nothing", depth and stencil for "depth logic" and
+    // "stencil without a writer", blend for "blend in an opaque pass".
     //
     // Written as numbers, booleans and names rather than as rows, which is the opposite of the binding rows
     // above -- and for that reason: nothing here is matched against a reflection row, so the offline rules
@@ -2777,13 +2777,15 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
     // By design, not by accident: what this bundle *cannot* contain, said here so a reader does not
     // conclude that the frame has no copies, no markers and no counts.
     ArrayOpen("notInThisBundle");
-    ObjectRow(std::string("{\"what\": \"the kind of each call (draw/copy/clear/marker)\", \"why\": \"the"
-                          " replay API exposes no action list (ROADMAP §3), so an id is only an id with"
-                          " bound state\"}"));
-    ObjectRow(std::string("{\"what\": \"per-event triangle and thread counts\", \"why\": \"the same: those"
-                          " live in the captured call arguments, not in the pipeline state\"}"));
-    ObjectRow(std::string("{\"what\": \"marker and pass names\", \"why\": \"the same: markers are actions,"
-                          " and the action list is not exposed\"}"));
+    ObjectRow(std::string("{\"what\": \"the finer kind of each call (draw against copy, clear or marker)\","
+                          " \"why\": \"`psoKind` says whether the event is a dispatch and nothing more; the"
+                          " rest, and the call's own name, are in the action list the engine exposes and this"
+                          " bundle does not write\"}"));
+    ObjectRow(std::string("{\"what\": \"per-event triangle and thread counts\", \"why\": \"those live in the"
+                          " captured call arguments, not in the pipeline state\"}"));
+    ObjectRow(std::string("{\"what\": \"marker and pass names\", \"why\": \"the action list carries them"
+                          " (`ActionDescription::customName`, reached through `GetRootActions()`) and this"
+                          " bundle does not write them yet\"}"));
     ObjectRow(std::string("{\"what\": \"texture thumbnails\", \"why\": \"the engine decodes textures but"
                           " does not resize them; --textures writes full decodes\"}"));
     ObjectRow(std::string("{\"what\": \"an exact end to the id list\", \"why\": \"ids past the frame's"

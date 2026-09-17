@@ -411,7 +411,7 @@ which is why the checked-in copy cannot quietly go stale after a document change
 | frame at a glance | counts, resources by kind and bytes, the render targets and formats seen, debug messages by severity |
 | pipeline map | the passes in order — eid range, call kind, target, structure — plus a Mermaid graph of pass → target |
 | pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
-| red flags | what the detectors found, each with the evidence that proves it and how certain it is — and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §1.5) |
+| red flags | what the detectors found, each with the evidence that proves it and how certain it is — and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §1.4) |
 | what this report cannot tell you | the report states its own gaps, and every one of them is a roadmap item |
 | appendix | the `replay_dump state` / `shaders` command pair that reproduces each pass |
 
@@ -424,7 +424,7 @@ The **detectors** that run today are the ones the evidence can prove. From the b
 messages, constant blocks whose every value is zero (including the "no descriptor is bound for this block"
 case), constant blocks whose register a root parameter is not set for at all, and — from the descriptor tables
 the driver resolves through the engine — registers whose slot holds nothing or whose declared range and heap
-type disagree (ROADMAP §1.1's *nothing bound where the reflection expects something*, in all three of its
+type disagree (the flagship row: *nothing bound where the reflection expects something*, in all three of its
 halves, and *binding kind mismatch*), pixel inputs the vertex shader does not emit (*VS out ≠ PS in*, ignoring
 the `SV_` system values and interpolation suffixes — and, from the engine's component counts in the reflection
 rows, an input that reads *wider* than the vertex shader writes), and textures or buffers no call in the frame

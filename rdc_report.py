@@ -105,7 +105,7 @@ class ReportPass(TypedDict):
 
 
 #: One red flag. `what` is the *observation*; what it means is the reader's, because a bundle can prove what
-#: the engine held, not what the frame intended. `unproven` is the ROADMAP §1.5 gate: a detector that has
+#: the engine held, not what the frame intended. `unproven` is the ROADMAP §1.4 gate: a detector that has
 #: never been checked against a capture whose bugs are known has not earned a verdict.
 class RedFlag(TypedDict):
     detector: str
@@ -305,7 +305,7 @@ def reconstruct_passes(events: Sequence[BundleEvent],
 
 def _pass_structure(kind: str, targets: Sequence[str], depth: str) -> str:
     """What the pass *is*, from state alone: kind, targets, depth. Not what it is *for* -- naming that
-    (shadow map, G-buffer, UI) needs the engine schema table, ROADMAP §1.4."""
+    (shadow map, G-buffer, UI) needs the engine schema table, ROADMAP §1.3."""
     if kind == 'compute':
         return 'compute'
     has_depth = _is_resource(depth)
@@ -440,7 +440,7 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Detectors (ROADMAP §1.1): the red flags.
+# Detectors: the red flags.
 #
 # A detector is a pure function over the bundle that returns findings -- no printing, no presentation order,
 # no state. What it may say is bounded by what a bundle *proves*, and that is why there are three of them:
@@ -449,7 +449,7 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
 # logic, scissor, MSAA), and a bundle holds none of those. A detector that would have to guess is not written:
 # it would produce exactly the kind of confident wrong answer this tool exists to avoid.
 def detect_messages(bundle: BundleData) -> List[RedFlag]:
-    """The API's own complaints (`debug`), grouped by severity and text (ROADMAP §1.1, certain).
+    """The API's own complaints (`debug`), grouped by severity and text (certain).
 
     Rows are what the driver writes (`eid <n>  <severity>  <text>`), and the grouping key is the text with
     the eid taken out -- the same complaint at forty events is one finding with an eid range, not forty.
@@ -481,7 +481,7 @@ def detect_messages(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_zero_constant_blocks(bundle: BundleData) -> List[RedFlag]:
-    """A constant block whose every numeric value is zero (ROADMAP §1.1, certain).
+    """A constant block whose every numeric value is zero (certain).
 
     The *fact* is certain: the block the engine read holds zeros. What it means is not -- a feature switched
     off looks exactly the same as a buffer that was never filled -- so the wording is the observation and the
@@ -542,7 +542,7 @@ DEAD_ALLOCATION_LIMIT = 20
 
 
 def detect_dead_allocations(bundle: BundleData) -> List[RedFlag]:
-    """A texture or buffer no call in the frame uses (ROADMAP §1.1, certain).
+    """A texture or buffer no call in the frame uses (certain).
 
     "Uses" is the engine's own usage list: a resource whose every record is usage 0 was created and never
     reached a call. Resources of kind `other` -- fences, queues, the descriptor heaps -- are not allocations
@@ -587,7 +587,7 @@ def detect_dead_allocations(bundle: BundleData) -> List[RedFlag]:
 
 
 # ---------------------------------------------------------------------------
-# The usage chain (ROADMAP §1.1, route B): read-before-write, write-never-read, load-instead-of-clear.
+# The usage chain: read-before-write, write-never-read, load-instead-of-clear.
 #
 # `GetUsage` answers, per resource, the events it was used at and *how*. The decode below is measured rather
 # than inferred, and two of its facts are the kind that would be wrong if assumed: the value is *one usage,
@@ -700,7 +700,7 @@ def _usage_flag(detector: str, what: str, lines: List[str]) -> RedFlag:
 
 
 def detect_read_before_write(bundle: BundleData) -> List[RedFlag]:
-    """A resource read with nothing in the frame writing it first (ROADMAP §1.1, route B; `question`).
+    """A resource read with nothing in the frame writing it first (`question`).
 
     "First" is a comparison of eids, and a write at the *same* eid does not count: one call can write and
     read (the RW family is in both sets for exactly that reason), so only a strictly earlier write clears a
@@ -738,7 +738,7 @@ def detect_read_before_write(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_write_never_read(bundle: BundleData) -> List[RedFlag]:
-    """A resource written with nothing afterwards reading it (ROADMAP §1.1, route B; `question`).
+    """A resource written with nothing afterwards reading it (`question`).
 
     "Afterwards" is strict: only a read at a strictly later eid counts, or a copy's own source row would read
     as a reader of what its destination just wrote. Grouped by the *kind* of last write, because that is what
@@ -777,7 +777,7 @@ def detect_write_never_read(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
-    """A render target first used with nothing clearing, discarding or writing it (ROADMAP §1.1, route B).
+    """A render target first used with nothing clearing, discarding or writing it (the usage chain).
 
     A target's *contents* are not in the usage list, but its history is: when nothing cleared, discarded or
     wrote the resource before the first event that binds it as a target, whatever that pass loads is what the
@@ -814,7 +814,7 @@ def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_dead_compute(bundle: BundleData) -> List[RedFlag]:
-    """A compute pass that binds UAVs nothing afterwards reads (ROADMAP §1.1; `question`).
+    """A compute pass that binds UAVs nothing afterwards reads (`question`).
 
     The unit is the *compute pass* the report already derives -- a run of dispatches agreeing on pipeline and
     shaders -- because that is as fine as a bundle can attribute work: the usage chain records *which event*
@@ -868,7 +868,7 @@ def detect_dead_compute(bundle: BundleData) -> List[RedFlag]:
 
 
 # ---------------------------------------------------------------------------
-# The pipeline state a bundle records per state *change* (ROADMAP §1.1's route A): viewport and scissor,
+# The pipeline state a bundle records per state *change*: viewport and scissor,
 # depth, stencil, blend. A state document is written when the state changes, so one document describes a
 # *range* of events -- measured on the Android capture, 30 documents for 723 events -- and every rule below
 # is stated per range for that reason: nothing in the bundle distinguishes two events inside one.
@@ -931,7 +931,7 @@ def _state_flag(detector: str, what: str, lines: List[str], certainty: str) -> R
 
 
 def detect_depth_logic(bundle: BundleData) -> List[RedFlag]:
-    """Depth writes with depth testing off, or a depth test with nothing bound (certain; ROADMAP §1.1).
+    """Depth writes with depth testing off, or a depth test with nothing bound (certain).
 
     The first is the expensive one: with `depthWrites` on and `depthEnable` off, nothing rejects a fragment,
     so every draw writes its depth over whatever was there and later passes occlude against the last writer
@@ -969,7 +969,7 @@ def detect_depth_logic(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_empty_scissor(bundle: BundleData) -> List[RedFlag]:
-    """A bound scissor or viewport that can only produce nothing (certain; ROADMAP §1.1).
+    """A bound scissor or viewport that can only produce nothing (certain).
 
     A rectangle whose `width` or `height` is zero or less, on an *enabled* rectangle: the draw is issued, the
     shaders run for no pixels, and the target keeps what it had. A *disabled* rectangle is the opposite --
@@ -1017,7 +1017,7 @@ def _stencil_writes(state: Dict[str, Any]) -> bool:
 
 
 def detect_stencil_without_writer(bundle: BundleData) -> List[RedFlag]:
-    """Stencil testing where nothing earlier in the frame wrote stencil (question; ROADMAP §1.1).
+    """Stencil testing where nothing earlier in the frame wrote stencil (question).
 
     For a state range that enables stencil *and* binds a depth-stencil target, the question is what put
     anything in that target's stencil: an earlier range that used the same target and wrote stencil (an
@@ -1053,7 +1053,7 @@ def detect_stencil_without_writer(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_mismatched_msaa(bundle: BundleData) -> List[RedFlag]:
-    """A multisampled colour target nothing ever resolves (question; ROADMAP §1.1).
+    """A multisampled colour target nothing ever resolves (question).
 
     `samples` is in the resource table and a resolve is a usage row, so the decidable half of the row needs
     no chunk payload: a texture with more than one sample that was used as a colour target and that no
@@ -1092,13 +1092,13 @@ def detect_mismatched_msaa(bundle: BundleData) -> List[RedFlag]:
 RENDER_TARGET_ROW = re.compile(r'^\s*slot\s+(?P<slot>\d+)\s+res(?P<resource>\d+)\s*$')
 
 #: Target names that say "this pass writes surface data for lighting to read" -- a GBuffer or a base pass.
-#: Blending there is the signal ROADMAP §1.1's *blend in an opaque pass* describes; the list is short on
+#: Blending there is the signal *blend in an opaque pass* describes; the list is short on
 #: purpose, because a name that merely *might* be opaque would make the heuristic noise.
 OPAQUE_TARGET_NAMES = ('gbuffer', 'g_buffer', 'basepass', 'base_pass', 'scenedepth')
 
 
 def detect_blend_in_opaque_pass(bundle: BundleData) -> List[RedFlag]:
-    """Blending enabled on a target whose name says the pass is opaque (`[heuristic]`; ROADMAP §1.1).
+    """Blending enabled on a target whose name says the pass is opaque (`[heuristic]`).
 
     The state says blending is on for slot N and the resource bound there has a name like `GBufferA` or
     `BasePass`, which is surface data for a lighting pass to read: blending in one usually means a stale
@@ -1170,7 +1170,7 @@ def _unorm_bits(format_name: str) -> int:
 
 
 def detect_format_units_suspicion(bundle: BundleData) -> List[RedFlag]:
-    """A float shader output written to a narrow linear target (`[heuristic]`; ROADMAP §1.1).
+    """A float shader output written to a narrow linear target (`[heuristic]`).
 
     The pixel shader's output signature says the component *type* (`float`, since the driver now records the
     engine's `VarType`) and the render target's format says how many bits carry it, so one question is
@@ -1268,7 +1268,7 @@ def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, 
 
 
 def detect_marker_balance(path: str) -> Optional[List[RedFlag]]:
-    """Markers that do not balance (ROADMAP §1.1, certain).
+    """Markers that do not balance (certain).
 
     A `PopMarker` with nothing pushed, or pushes still open at the end of the stream. Evidence is the chunk
     index, never an event id: the two are different spaces and the stream is all this detector can see
@@ -1313,7 +1313,7 @@ def detect_marker_balance(path: str) -> Optional[List[RedFlag]]:
 
 
 def detect_unattributed_draws(path: str) -> Optional[List[RedFlag]]:
-    """Draws and dispatches outside any marker (ROADMAP §1.1, certain).
+    """Draws and dispatches outside any marker (certain).
 
     A hygiene note, not a bug: plenty of engines draw outside markers. It matters here because the report
     attributes work per pass, and a draw with no marker has nothing to be attributed *to*.
@@ -1352,7 +1352,7 @@ def detect_unattributed_draws(path: str) -> Optional[List[RedFlag]]:
 
 
 def detect_zero_work(path: str) -> Optional[List[RedFlag]]:
-    """Draws and dispatches that can only produce nothing (ROADMAP §1.1, certain).
+    """Draws and dispatches that can only produce nothing (certain).
 
     Zero indices, zero vertices, zero instances or a zero dispatch dimension: the call is in the stream and
     the GPU does nothing. The counts come from the same payload decoder `chunks`/`draws` use, so the fields
@@ -1520,7 +1520,7 @@ def _slots_visible_to(parameters: Dict[int, Tuple[str, int, int, str]],
 
 
 def detect_unbound_root_parameters(bundle: BundleData) -> List[RedFlag]:
-    """A root parameter that is not set to anything (ROADMAP §1.1, the root-descriptor half).
+    """A root parameter that is not set to anything (the root-descriptor half).
 
     `shaders` says the stage reads a block at `bR sS`, and `state` says what the root parameter at
     `reg=R space=S` holds -- nothing, when the row ends at the register. Measured on the Android capture,
@@ -1573,7 +1573,7 @@ def detect_unbound_root_parameters(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_unbound_table_slots(bundle: BundleData) -> List[RedFlag]:
-    """A descriptor table that resolves a register the shader reads to nothing (ROADMAP §1.1, the table half,
+    """A descriptor table that resolves a register the shader reads to nothing (the table half,
     `certain`).
 
     The driver resolves every *set* table's slots through the engine (`GetDescriptors`), so a row like
@@ -1626,7 +1626,7 @@ def detect_unbound_table_slots(bundle: BundleData) -> List[RedFlag]:
 
 
 def detect_binding_kind_mismatch(bundle: BundleData) -> List[RedFlag]:
-    """The root signature and the descriptor heap disagree about a slot (ROADMAP §1.1, certain).
+    """The root signature and the descriptor heap disagree about a slot (certain).
 
     Every resolved slot row carries two numbers, and they are different statements: `cat(N)` is the
     *range's* category -- what the root signature declares at that register -- and `type(N)` is the heap
@@ -1733,7 +1733,7 @@ def _semantic_matches(produced: Tuple[str, int], consumed: Tuple[str, int]) -> b
 
 
 def detect_shader_io_mismatch(bundle: BundleData) -> List[RedFlag]:
-    """A pixel shader input the vertex shader does not provide (ROADMAP §1.1, certain).
+    """A pixel shader input the vertex shader does not provide (certain).
 
     Both reflections are in the same document, so this needs no capture, and it answers both halves of the
     row *VS out is not PS in*:
@@ -1846,7 +1846,7 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
 
     # Four detectors read the usage lists, so they share one gate: a bundle written with --no-usage carries
     # `resourceUsage: (not collected...)` and each of them is *skipped with the reason* rather than reported
-    # clean. The three chain rules stay separate detectors (and separate rows of ROADMAP §1.1) rather than one
+    # clean. The three chain rules stay separate detectors (and separate rules) rather than one
     # pass, because each has its own certainty and each can be checked on its own.
     collected = str(bundle['manifest'].get('resourceUsage', '')) == 'collected'
     reason = '' if collected else 'no usage lists in this bundle (written with --no-usage)'
@@ -1924,11 +1924,11 @@ def report_caveats() -> List[str]:
         'is not in a bundle at all.',
         'What a pass is *for* (shadow map, depth prepass, G-buffer, base pass, post-process, UI) is not '
         'inferred: the structure given is only the targets, the depth target and the call kind. Naming '
-        'a purpose needs the engine schema table (ROADMAP §1.4).',
+        'a purpose needs the engine schema table (ROADMAP §1.3).',
         'Twenty detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
         'state, one over the resource table and three over the capture\'s chunk stream -- and every finding '
-        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §1.5). '
-        'What is not checked at all is stated rather than approximated (ROADMAP §1.1): MSAA\'s *which '
+        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §1.4). '
+        'What is not checked at all is stated rather than approximated: MSAA\'s *which '
         'subresource did the resolve copy* half needs the ResolveSubresource payload, and the sRGB/linear half '
         'of the format rule needs a later sampling view\'s sRGB flag -- neither is in a bundle. The pipeline '
         'state is recorded '
@@ -1939,7 +1939,7 @@ def report_caveats() -> List[str]:
         '(texture against buffer -- the row names a binding, not its type), and a range/heap disagreement at '
         'a register no shader reads. A bundle whose driver did not resolve descriptor tables carries no slot '
         'rows, and the rules that read them are then reported as not looked at rather than as clean.',
-        'Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
+        'Ranked notables and recommendations are not implemented yet either (ROADMAP §1.1, §1.2).',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
         'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '
         'next frame or by the CPU afterwards looks exactly like nothing ever reading the resource. A resource '
@@ -2049,7 +2049,7 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('')
     lines.append('`certain` means the bundle proves the observation; `question` would mean the observation is '
                  'real but its meaning depends on what the frame was for. Every finding is **unproven**: none '
-                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §1.5), '
+                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §1.4), '
                  'so they are leads, not verdicts.')
     lines.append('')
     if doc['flags']:
@@ -2177,7 +2177,7 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
           % (doc['frame']['events'], len(passes), doc['frame']['resources']))
     print('written  : %s' % markdown_path)
     print('written  : %s' % json_path)
-    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §1.5)'
+    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §1.4)'
           % (len(flags), sum(1 for run in detectors if run['ran'])))
     return 0
 

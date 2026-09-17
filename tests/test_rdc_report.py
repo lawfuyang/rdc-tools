@@ -365,7 +365,7 @@ class TestReportDocument(BundleCase):
         write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
         self.passes(bundle)
         text = self.markdown(bundle)
-        for needle in ('ROADMAP §2', 'ROADMAP §1.4', 'ROADMAP §1.1', 'ROADMAP §1.2', 'ROADMAP §4'):
+        for needle in ('ROADMAP §2', 'ROADMAP §1.3', 'ROADMAP §1.4', 'ROADMAP §1.1', 'ROADMAP §4'):
             self.assertIn(needle, text)
 
     def test_application_text_cannot_break_a_line_or_a_heading(self):

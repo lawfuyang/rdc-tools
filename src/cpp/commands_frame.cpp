@@ -421,8 +421,8 @@ bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t heig
   return (fclose(f) == 0) && bOk;
 }
 
-//: Defined with the bundle (ROADMAP §1), used here too: `image` and the bundle's `rt/` images save a target
-//: through the same code so the two cannot drift apart.
+//: Defined with the bundle (ROADMAP §1), used here too: `image` and the bundle's `rt/` images save
+//: a target through the same code so the two cannot drift apart.
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
                      std::string &written, int32_t &width, int32_t &height);
 

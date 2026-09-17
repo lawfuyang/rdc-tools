@@ -927,4 +927,57 @@ Three things to know about running it:
   runs at once cannot write into each other's log (a second run in the same second takes `-2`). It
   records the working directory, each phase with a timestamp, every batch command with its own time,
   and why the run stopped. `--log <file>` names one exact file instead, truncated, since it is still
-  that run's log.
+  that run's log. Long loops — the sweep, the per-event pass, `resources.json`, texture decoding — also
+  print a **line every ten seconds** with the rate and what is left (`900/1740 (52%), 47 ms each, ~40 s
+  left`), because the count-based version (`every 2000 ids`) stayed silent for the whole 164 s of a
+  `--max-events 900` sweep: it stopped at id 1740, before the first line was ever due. A loop that
+  finishes in under five seconds prints only its summary.
+* **`$RDC_PROFILE=1` prints where the time went**, one line per measured call site at the end of the run:
+  `SetFrameEvent`, the state copy, the state/shaders/cbuffer documents, the event rows, the action tree,
+  `resources.json`, the usage lists. It is compiled in and off by default (two clock reads per call site,
+  no arithmetic), and it is how the measurements below were taken — the engine is a black box behind a
+  call, so timing the calls is the only way to answer "why is this taking minutes".
+
+**What a bundle dump costs, measured.** On the 1.4 GB hobby capture, 900 events collected out of 1740 ids
+scanned: **47 ms per `SetFrameEvent`**, and it is the same 47 ms whether the id changes or not — the call
+re-derives the state, which is what costs. Everything else is small change: `GetD3D12PipelineState` returns
+a cached pointer (0.0 ms over 1440 calls), an event row is 0.4 ms, and `resources.json` for 11,082
+resources took 10.6 s *before* the id-text lookup replaced two linear scans (`IdText` per comparison, 11k ×
+5.6k) and 0.2 s after. `RDC_PROFILE=1` on that run:
+
+| call site | total | calls | each |
+|---|---|---|---|
+| `SetFrameEvent` | 68.3 s | 1440 | 47.4 ms |
+| state document (`CmdState`) | 1.5 s | 26 | 58.2 ms |
+| shaders document (`CmdShaders`) | 1.5 s | 26 | 58.3 ms |
+| cbuffer documents | 6.2 s | 87 | 71.3 ms |
+| event row (key, hash, targets, JSON) | 0.1 s | 300 | 0.4 ms |
+| everything else, including 11,082 usage lists | ~0 | | |
+
+The state documents each cost ~58 ms because **each one re-positions the replay itself** — 47 ms of that is
+another refresh the caller had already paid for. That redundancy is *load-bearing*, and this is the note
+that matters for anyone tempted by it:
+
+> **Why the bundle reads the state twice per event.** The sweep refreshes each id to ask "is anything bound
+> here?", and the pass after it refreshes the same ids again to build the rows. Building the rows from what
+> the sweep had *already* read produces, for the hobby capture's first event, `"shaders": "cs=11388 "`,
+> `"targets": []`, `"depth": "0"` — where the second read gets `"ps=11402 cs=11388 ms=11368 "`, a 1920x1080
+> target and a depth buffer. The state a `SetFrameEvent` hands back depends on the *direction* the replay
+> travelled to reach that event: the second pass's first move is backwards from where the sweep stopped,
+> which makes the engine replay the frame from its start and produce a complete state, while a forward step
+> onto an event hands back what the sweep's chunk-by-chunk accumulation had reached. Dropping the second read
+> (and the document writers' own re-positioning) cut the run from 89 s to 71 s and changed three files of the
+> bundle; both were reverted after hashing the bundles against a known-good reference. **The second read is
+> not a redundant refresh: it is what makes the state complete.**
+
+**The sweep is cached** (`$RDC_CACHE_DIR` moves the cache, `$RDC_NO_CACHE` disables it,
+`%LOCALAPPDATA%\rdc-tools\cache` by default — the offline tool's own directory, so both halves have one cache
+to inspect). `sweep-<key>.txt` holds a `# key: value` header and one id per line: not JSON, because a JSON
+reader is a parser this program has nowhere else and a cache can also just be ignored. Every header field —
+capture path, size, modification time, engine version, `--since`/`--until`/`--max-events` — is compared
+before an id is trusted, so a stale or truncated file is refused and the sweep runs. On a hit the driver
+still makes **one** `SetFrameEvent` to the last scanned id before starting the writing pass, which is what
+reproduces the position the sweep would have left and keeps the state complete (without it, the warm bundle
+differed from the cold one in five files — the same trap as above, one call cheaper than falling into it).
+Measured on the hobby capture, `--max-events 300`: **94.7 s cold, 36.9 s warm**, both bundles byte-identical
+to the cold one (143 files, no differing sha256).

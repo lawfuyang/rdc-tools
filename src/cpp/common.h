@@ -174,6 +174,59 @@ private:
 ULONGLONG Millis();
 void Log(const char *fmt, ...);
 void Trace(const char *step);
+
+//: Where a long run's time went, one slot per thing that can dominate it.
+//:
+//: The engine is a single-threaded black box behind a call, so "why does this take minutes" is
+//: answered by timing the calls -- and the answer is not the obvious one: on the hobby capture a
+//: *cold jump* over 1400 chunks costs 0.2 s while 400 swept ids cost 18.8 s, so the cost is
+//: per-call refresh, not replay. Measured rather than reasoned about is the whole point of these
+//: slots.
+//:
+//: Compiled in but off unless `$RDC_PROFILE=1`: a run that does not ask pays two clock reads per
+//: call site, and none of the arithmetic.
+enum ProfileSlot
+{
+  kProfileSetFrameEvent,    // the engine moving to (and refreshing) an event
+  kProfilePipelineState,    // copying the state out to read it
+  kProfileStateDoc,         // CmdState: the state document
+  kProfileShadersDoc,       // CmdShaders: the shader/reflection document
+  kProfileCBuffers,         // the constant-block documents (descriptor resolution is in here)
+  kProfileEventRow,         // the per-event row: key, hash, marker, targets, JSON
+  kProfileImages,           // SaveTexture at a state change
+  kProfileActions,          // walking the engine's action tree (draws, kinds, markers)
+  kProfileResources,        // resources.json
+  kProfileMessages,         // messages.json
+  kProfileTextures,         // textures.json and texture decoding
+  kProfileUsage,            // the usage lists the bundle carries
+  kProfileCount
+};
+
+void ProfileAdd(ProfileSlot slot, unsigned long long since);
+void ProfileReport();
+
+//: Real-time progress for a loop that can run for minutes.
+//:
+//: Time-based, not count-based: the count-based version (one line per 2000 ids) stayed silent for
+//: 164 s on the hobby capture, because `--max-events 900` stopped the sweep at id 1740 -- before
+//: the first line was ever due. A line carries the rate and what is left, which is what a reader
+//: wants while waiting: not "how far", but "how much longer".
+class Progress
+{
+public:
+  Progress() : m_Total(0), m_Start(0), m_Last(0), m_Logged(false) {}
+
+  void Begin(const char *what, int total);
+  void Tick(int done);
+  void Done(int done);
+
+private:
+  std::string m_What;
+  int m_Total;
+  ULONGLONG m_Start;
+  ULONGLONG m_Last;
+  bool m_Logged;
+};
 int Fail(int code, _Printf_format_string_ const char *fmt, ...);
 std::string AbsolutePath(const char *path);
 std::string WorkingDirectory();

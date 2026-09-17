@@ -177,22 +177,26 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
   const std::string stem = Fmt("%s\\%d", statesDir.c_str(), eid);
 
   {
+    const ULONGLONG tDoc = Millis();
     const JsonDocument bJson;
     const std::string target = stem + ".state.json";
     const CaptureStdout out(target.c_str());
     if(!out.Ok())
       return 1;
     CmdState(ctrl, file, path, eid);
+    ProfileAdd(kProfileStateDoc, tDoc);
     written.push_back(BundleRelative(bundle, target));
   }
 
   {
+    const ULONGLONG tDoc = Millis();
     const JsonDocument bJson;
     const std::string target = stem + ".shaders.json";
     const CaptureStdout out(target.c_str());
     if(!out.Ok())
       return 1;
     CmdShaders(ctrl, file, path, eid, bWantDisasm);
+    ProfileAdd(kProfileShadersDoc, tDoc);
     written.push_back(BundleRelative(bundle, target));
   }
 
@@ -210,6 +214,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
 
     for(size_t b = 0; b < refl->constantBlocks.size() && b < 64; b++)
     {
+      const ULONGLONG tDoc = Millis();
       const JsonDocument bJson;
       const std::string target =
           Fmt("%s\\%d_%s_%d.json", cbuffersDir.c_str(), eid, StageName(stage), (int)b);
@@ -217,6 +222,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
       if(!out.Ok())
         return 1;
       CmdCbuffer(ctrl, file, path, eid, stage, (int)b);
+      ProfileAdd(kProfileCBuffers, tDoc);
       written.push_back(BundleRelative(bundle, target));
     }
   }
@@ -241,6 +247,177 @@ struct DumpOptions
   std::vector<int> m_ForceEvents;
 };
 
+// --------------------------------------------------------------------------- the sweep cache
+//
+// The sweep is the most expensive thing this program does -- 47 ms per id, ~70 s of a 300-event
+// dump on the 1.4 GB capture -- and its answer is a pure function of the capture and the scan
+// range: which ids have bound state, how many were scanned, and what stopped the scan. So it is
+// cached, keyed by everything that answer depends on, in the same cache directory the offline tool
+// uses (`$RDC_CACHE_DIR` moves it, `$RDC_NO_CACHE` turns it off, `%LOCALAPPDATA%\rdc-tools\cache`
+// is the default).
+//
+// The format is a header of `# key: value` lines and then one id per line, deliberately *not* JSON:
+// a JSON reader is a parser this program does not have, needs nowhere else, and would be a
+// liability to add for a cache it can also simply ignore. Every header line is checked before a
+// single id is trusted, so a stale or hand-edited file is refused rather than half-believed.
+//
+// What the cache does *not* claim: that skipping the sweep leaves the engine where the sweep left
+// it. The writing pass then starts from an unreplayed engine and its first `SetFrameEvent` is a
+// cold jump rather than a backwards one, which is why a cached run's bundle is hashed against a
+// cold run's before this is trusted (REFERENCE §9 records that check).
+struct SweepCache
+{
+  std::vector<int> m_Ids;
+  int m_Scanned = 0;
+  std::string m_Stopped;
+};
+
+//: `%LOCALAPPDATA%\rdc-tools\cache` unless `$RDC_CACHE_DIR` says otherwise: the offline tool's
+//: directory, so both halves of the tool have one cache to inspect or clear.
+std::string CacheDir()
+{
+  const char *override = getenv("RDC_CACHE_DIR");
+  if(override != NULL && *override != '\0')
+    return override;
+  const char *local = getenv("LOCALAPPDATA");
+  return std::string(local != NULL ? local : ".") + "\\rdc-tools\\cache";
+}
+
+bool CacheDisabled()
+{
+  const char *off = getenv("RDC_NO_CACHE");
+  return off != NULL && *off != '\0';
+}
+
+//: A short, stable key from everything the sweep's answer depends on: the capture's identity (path,
+//: size, modification time), the engine that produced the frame, and the scan range. FNV-1a,
+//: because this is a cache key and not a signature -- a collision would also have to pass the
+//: header check below, which compares the fields themselves.
+std::string SweepCacheKey(const DumpOptions &opts, const std::string &absolute)
+{
+  WIN32_FILE_ATTRIBUTE_DATA info;
+  unsigned long long bytes = 0, written = 0;
+  std::string identity = absolute;
+  for(size_t i = 0; i < identity.size(); i++)
+    identity[i] = (char)tolower((unsigned char)identity[i]);
+  if(GetFileAttributesExA(absolute.c_str(), GetFileExInfoStandard, &info))
+  {
+    bytes = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+    written = ((unsigned long long)info.ftLastWriteTime.dwHighDateTime << 32) |
+              info.ftLastWriteTime.dwLowDateTime;
+  }
+  const std::string material = Fmt("%s|%llu|%llu|%s|%d|%d|%d", identity.c_str(), bytes, written,
+                                   g_GetVersionString != NULL ? g_GetVersionString() : "?",
+                                   opts.m_Since, opts.m_Until, opts.m_MaxEvents);
+  unsigned long long hash = 1469598103934665603ULL;
+  for(size_t i = 0; i < material.size(); i++)
+  {
+    hash ^= (unsigned char)material[i];
+    hash *= 1099511628211ULL;
+  }
+  return Fmt("%016llx", hash);
+}
+
+//: The cache file for this capture and range, or an empty string when caching is off.
+std::string SweepCachePath(const char *path, const DumpOptions &opts)
+{
+  if(CacheDisabled())
+    return std::string();
+  return CacheDir() + "\\sweep-" + SweepCacheKey(opts, AbsolutePath(path)) + ".txt";
+}
+
+//: Reads a cache file, refusing it unless every header line says what this run is asking for. A
+//: missing file, a stale one, a truncated one and one for another range are all the same answer --
+//: sweep -- which is always correct and only slow.
+bool ReadSweepCache(const std::string &cachePath, const char *path, const DumpOptions &opts,
+                    SweepCache &out)
+{
+  if(cachePath.empty())
+    return false;
+  FILE *f = fopen(cachePath.c_str(), "rb");
+  if(f == NULL)
+    return false;
+  char line[1024];
+  const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).c_str());
+  const std::string wantRange =
+      Fmt("# range: since %d until %d maxEvents %d", opts.m_Since, opts.m_Until, opts.m_MaxEvents);
+  const std::string wantEngine =
+      Fmt("# engine: %s", g_GetVersionString != NULL ? g_GetVersionString() : "?");
+  bool bCapture = false, bRange = false, bEngine = false, bScanned = false;
+  while(fgets(line, sizeof(line), f) != NULL)
+  {
+    std::string text(line);
+    while(!text.empty() && (text[text.size() - 1] == '\n' || text[text.size() - 1] == '\r'))
+      text.erase(text.size() - 1);
+    if(text.compare(0, 2, "# ") == 0)
+    {
+      if(text == wantCapture)
+        bCapture = true;
+      else if(text == wantRange)
+        bRange = true;
+      else if(text == wantEngine)
+        bEngine = true;
+      else if(text.compare(0, 10, "# scanned:") == 0)
+      {
+        int scanned = 0;
+        char stopped[512];
+        stopped[0] = '\0';
+        if(sscanf(text.c_str(), "# scanned: %d stopped: %511[^\n]", &scanned, stopped) >= 1)
+        {
+          out.m_Scanned = scanned;
+          out.m_Stopped = stopped[0] != '\0' ? std::string(stopped) : std::string("the cache");
+          bScanned = true;
+        }
+      }
+      continue;
+    }
+    if(text.empty())
+      continue;
+    int eid = 0;
+    if(sscanf(text.c_str(), "%d", &eid) != 1 || eid <= 0)
+    {
+      fclose(f);
+      return false;    // a body this file should not have: refuse all of it
+    }
+    out.m_Ids.push_back(eid);
+  }
+  fclose(f);
+  const bool bOk = bCapture && bRange && bEngine && bScanned && !out.m_Ids.empty();
+  if(!bOk)
+  {
+    out.m_Ids.clear();
+    out.m_Scanned = 0;
+    out.m_Stopped.clear();
+  }
+  return bOk;
+}
+
+//: Writes the cache, best effort: one that cannot be written is not a failure, it is a run that
+//: sweeps again next time. Written to a temporary name and renamed, so a killed run cannot leave a
+//: half file behind.
+void WriteSweepCache(const std::string &cachePath, const char *path, const DumpOptions &opts,
+                     const std::vector<int> &ids, int scanned, const char *stopped)
+{
+  if(cachePath.empty())
+    return;
+  MakeDir(CacheDir());
+  const std::string temp = cachePath + ".part";
+  FILE *f = fopen(temp.c_str(), "wb");
+  if(f == NULL)
+    return;
+  fprintf(f, "# rdc-tools sweep cache v1\n");
+  fprintf(f, "# capture: %s\n", AbsolutePath(path).c_str());
+  fprintf(f, "# engine: %s\n", g_GetVersionString != NULL ? g_GetVersionString() : "?");
+  fprintf(f, "# range: since %d until %d maxEvents %d\n", opts.m_Since, opts.m_Until,
+          opts.m_MaxEvents);
+  fprintf(f, "# scanned: %d stopped: %s\n", scanned, stopped);
+  for(size_t i = 0; i < ids.size(); i++)
+    fprintf(f, "%d\n", ids[i]);
+  fclose(f);
+  remove(cachePath.c_str());
+  rename(temp.c_str(), cachePath.c_str());
+}
+
 //: Defined with the CLI helpers further down; `dump`'s options take integers, and `atoi` would turn
 //: a typo into a plausible number (`--since` becoming 0) instead of saying that it is not a number.
 
@@ -262,6 +439,63 @@ void ParseEventList(const std::string &text, std::vector<int> &out)
       break;
     start = comma + 1;
   }
+}
+
+//: Walks the ids looking for bound state, and keeps only the ids it found.
+//:
+//: A function of its own so the cache can skip it: `CmdDump` either reads this answer from a cache
+//: file or pays for it here. `--max-events` stops the *sweep*, not just the writing -- on a big
+//: capture the sweep is the expensive part (each id is a `SetFrameEvent`, measured at 12 ms on the
+//: PC capture and 47 ms on the hobby one) and walking 29216 ids before anything is written is
+//: minutes of silence.
+void SweepForEvents(IReplayController *ctrl, const DumpOptions &opts, int until, size_t idBudget,
+                    std::vector<int> &ids, int &scanned, int &lastEid, std::string &stopped)
+{
+  const int kEmptyRun = 256;    // consecutive ids with nothing bound that end a sweep
+  int emptyRun = 0;
+  Progress sweep;
+  // The bound a reader can act on: the scan range, or the file's chunk count when that is smaller. With
+  // `--max-events` the id count is not knowable up front, and a percentage against the hard cap said
+  // "~2 h 33 min left" while the sweep was about to stop at id 1140 of a nominal 200000.
+  const int scanBound = (until < (int)idBudget) ? until : (int)idBudget;
+  sweep.Begin("bundle: sweep", opts.m_MaxEvents > 0 ? 0 : scanBound - opts.m_Since + 1);
+  for(int eid = opts.m_Since; eid <= until; eid++)
+  {
+    const ULONGLONG tMove = Millis();
+    ctrl->SetFrameEvent(eid, true);
+    ProfileAdd(kProfileSetFrameEvent, tMove);
+    const ULONGLONG tState = Millis();
+    const D3D12Pipe::State *st = ctrl->GetD3D12PipelineState();
+    ProfileAdd(kProfilePipelineState, tState);
+    scanned++;
+    // Before the state test, not after it: the ids *without* state `continue` past the rest of the
+    // body, so a tick at the end of the loop reports nothing at all on a capture whose first event
+    // is id 841 -- the exact silence this line exists to break.
+    sweep.Tick(scanned);
+    if(!HasBoundState(st))
+    {
+      if(lastEid > 0 && ++emptyRun >= kEmptyRun)
+      {
+        stopped = "a run of ids with nothing bound";
+        break;
+      }
+      continue;
+    }
+    emptyRun = 0;
+    lastEid = eid;
+    ids.push_back(eid);
+    if(opts.m_MaxEvents > 0 && (int)ids.size() >= opts.m_MaxEvents)
+    {
+      stopped = "--max-events";
+      break;
+    }
+    if(ids.size() >= idBudget)
+    {
+      stopped = "the id budget (the file's chunk count)";
+      break;
+    }
+  }
+  sweep.Done(scanned);
 }
 
 //: The bundle producer (ROADMAP §1): one replay session, everything the engine alone can answer
@@ -325,69 +559,87 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // ------------------------------------------------------------------ the id sweep (first, always)
   //
   // Which ids are events is asked *before* anything else touches the engine, because it is the one
-  // question whose answer stops being true afterwards: `SetFrameEvent(n, true)` on an id that is not an
-  // event leaves the last replayed event's state in place, so once anything has replayed a real event
-  // every forced non-event looks like it has state -- the sweep then never sees an empty run and never
-  // ends. (Measured on this capture: `probe 120` alone finds 25-32 ids, and the same `probe 120` after
-  // other commands finds ~120. `CmdProbe` carries the same warning.)
-  // The sweep cannot *find* the end of a frame: `SetFrameEvent(n, true)` past the last event clamps to
-  // it, so every id beyond the frame reports the last event's state and a "no state any more" test never
-  // fires. Measured on this capture: ids 1..120 hold 25-32 events, while `probe 4500` reports 4405 ids
-  // with state -- and the structured file has 723 chunks, so those extra ids are clamped, not real.
+  // question whose answer stops being true afterwards: `SetFrameEvent(n, true)` on an id that is
+  // not an event leaves the last replayed event's state in place, so once anything has replayed a
+  // real event every forced non-event looks like it has state -- the sweep then never sees an empty
+  // run and never ends. (Measured on this capture: `probe 120` alone finds 25-32 ids, and the same
+  // `probe 120` after other commands finds ~120. `CmdProbe` carries the same warning.) The sweep
+  // cannot *find* the end of a frame: `SetFrameEvent(n, true)` past the last event clamps to it, so
+  // every id beyond the frame reports the last event's state and a "no state any more" test never
+  // fires. Measured on this capture: ids 1..120 hold 25-32 events, while `probe 4500` reports 4405
+  // ids with state -- and the structured file has 723 chunks, so those extra ids are clamped, not
+  // real.
   //
-  // What bounds the sweep instead is the file: every event is a chunk, so the chunk count is an upper
-  // bound on how many events the frame has. The empty-run test still ends a sweep early on a sparse
-  // capture, and `--until` says it exactly. (Deriving the engine's ids from the file is ROADMAP §2.)
-  const int kEmptyRun = 256;    // consecutive ids with nothing bound that end a sweep
+  // What bounds the sweep instead is the file: every event is a chunk, so the chunk count is an
+  // upper bound on how many events the frame has. The empty-run test still ends a sweep early on a
+  // sparse capture, and `--until` says it exactly. (Deriving the engine's ids from the file is
+  // ROADMAP §2.)
+  //
+  // **Why the pass below reads the state again instead of keeping what the sweep saw.** Because the
+  // sweep's own refreshes leave an *incomplete* state, and that is measured, not assumed. Building
+  // each row from the state the sweep had just refreshed produced `"shaders": "cs=11388 "`,
+  // `"targets": []`, `"depth": "0"` for id 841 -- where the pass below, reading the same id *after*
+  // the sweep has finished, gets
+  // `"ps=11402 cs=11388 ms=11368 "`, a 1920x1080 target and a depth buffer. The difference is the
+  // direction of travel: the pass's first move is *backwards* from where the sweep stopped, which
+  // makes the engine replay the frame from its start and hand back a complete state, while a
+  // forward step onto an event gives whatever the sweep's chunk-by-chunk accumulation had reached.
+  // That restructure cut the dump from 89 s to 71 s and changed three files of the bundle, which is
+  // how it was caught -- so the second read is not a redundant refresh to be optimised away: it is
+  // what makes the state complete. (Both bundles were hashed against the reference to prove it; the
+  // numbers are in REFERENCE §9.)
   const int kHardCap = 200000;
   const size_t idBudget = ctrl->GetStructuredFile().chunks.size();
   const int until = opts.m_Until > 0 ? opts.m_Until : kHardCap;
-  int scanned = 0, emptyRun = 0, lastEid = 0;
-  const char *stopped = "the end of the scan range";
+  int scanned = 0, lastEid = 0;
+  std::string stopped = "the end of the scan range";
   std::vector<int> ids;
 
-  Log("bundle: sweeping ids %d..%d for bound state, at most %d id(s) (the file's chunk count)",
-      opts.m_Since, until, (int)idBudget);
-  for(int eid = opts.m_Since; eid <= until; eid++)
+  // The cached answer first: the sweep is the expensive part and its answer is a pure function of
+  // the capture and the range (see the sweep cache above). A hit saves the scan and nothing else --
+  // the pass below still walks every collected id, because the state it reads there is not the
+  // state the sweep saw.
+  const std::string sweepCache = SweepCachePath(path, opts);
+  SweepCache cached;
+  if(ReadSweepCache(sweepCache, path, opts, cached))
   {
-    ctrl->SetFrameEvent(eid, true);
-    scanned++;
-    if(!HasBoundState(ctrl->GetD3D12PipelineState()))
-    {
-      if(lastEid > 0 && ++emptyRun >= kEmptyRun)
-      {
-        stopped = "a run of ids with nothing bound";
-        break;
-      }
-      continue;
-    }
-    emptyRun = 0;
-    lastEid = eid;
-    ids.push_back(eid);
-    // `--max-events` stops the *sweep*, not just the writing: the sweep is the expensive part on a big
-    // capture (each id is a `SetFrameEvent`, ~12 ms here), and on the 1.4 GB capture the file's chunk
-    // count -- the budget -- is 29216, which is minutes of walking before anything is written.
-    if(opts.m_MaxEvents > 0 && (int)ids.size() >= opts.m_MaxEvents)
-    {
-      stopped = "--max-events";
-      break;
-    }
-    if(ids.size() >= idBudget)
-    {
-      stopped = "the id budget (the file's chunk count)";
-      break;
-    }
-    if(scanned % 2000 == 0)
-      Log("bundle: swept %d id(s), %d collected so far", scanned, (int)ids.size());
+    ids = cached.m_Ids;
+    scanned = cached.m_Scanned;
+    lastEid = ids.back();
+    stopped = cached.m_Stopped;
+    Log("bundle: sweep answered from the cache: %d id(s) out of %d scanned (%s)", (int)ids.size(),
+        scanned, stopped.c_str());
+    Log("bundle:   (set $RDC_NO_CACHE, or delete %s, to scan again)", sweepCache.c_str());
+    // The sweep also left the engine at the *end* of the scan, and the writing pass depends on
+    // that: its first `SetFrameEvent` has to move *backwards* for the state to come out complete
+    // (see the note above the sweep -- a forward step onto the first event gives one bound shader
+    // and no render targets). One call puts the engine where the sweep would have left it, which is
+    // the whole cost of a cache hit: 47 ms instead of the scan. Measured: without it, the warm
+    // bundle differed from the cold one in five files.
+    const ULONGLONG tWarm = Millis();
+    ctrl->SetFrameEvent(lastEid, true);
+    ProfileAdd(kProfileSetFrameEvent, tWarm);
   }
-  Log("bundle: %d id(s) collected out of %d scanned (%s)", (int)ids.size(), scanned, stopped);
+  else
+  {
+    Log("bundle: sweeping ids %d..%d for bound state, at most %d id(s) (the file's chunk count)",
+        opts.m_Since, until, (int)idBudget);
+    SweepForEvents(ctrl, opts, until, idBudget, ids, scanned, lastEid, stopped);
+    WriteSweepCache(sweepCache, path, opts, ids, scanned, stopped.c_str());
+  }
+  Log("bundle: %d id(s) collected out of %d scanned (%s)", (int)ids.size(), scanned, stopped.c_str());
 
   // Formats and dimensions come from the resource list, not from the pipeline state: the state
-  // names a target, the description says what it is.
-  std::vector<std::pair<std::string, const TextureDescription *>> textures;
+  // names a target, the description says what it is. Indexed by id text once, because both readers
+  // below look resources up per event and per row: the linear scans this replaces built an `IdText`
+  // string per comparison, which on the hobby capture's 11082 resources is 11k x (5.6k buffers + 96
+  // textures) of string churn -- measured, that alone was 10.6 s of a 312 s run.
+  std::map<std::string, const TextureDescription *> textures;
   for(size_t i = 0; i < ctrl->GetTextures().size(); i++)
-    textures.push_back(
-        std::make_pair(IdText(ctrl->GetTextures()[i].resourceId), &ctrl->GetTextures()[i]));
+    textures[IdText(ctrl->GetTextures()[i].resourceId)] = &ctrl->GetTextures()[i];
+  std::map<std::string, const BufferDescription *> buffers;
+  for(size_t i = 0; i < ctrl->GetBuffers().size(); i++)
+    buffers[IdText(ctrl->GetBuffers()[i].resourceId)] = &ctrl->GetBuffers()[i];
 
   // ------------------------------------------------------------------ capture.json
   {
@@ -425,12 +677,16 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // The call kind of every event, worked out once before anything is written: the sweep above established
   // which ids are events, and this says which of those are dispatches (`DispatchByEid` explains why).
   int callCount = 0;
+  const ULONGLONG tKinds = Millis();
   const std::map<int, bool> dispatchKinds = DispatchByEid(ctrl, callCount);
+  ProfileAdd(kProfileActions, tKinds);
   Log("bundle: %d call(s) classified from the engine's action flags", callCount);
 
   // The marker path of every event, from the same action list: one walk for the whole bundle rather
   // than one per event, because the tree is walked once per `MarkerPathAt` call.
+  const ULONGLONG tMarkers = Millis();
   const std::map<int, std::string> markerPaths = MarkerPaths(ctrl);
+  ProfileAdd(kProfileActions, tMarkers);
   Log("bundle: %d event(s) sit inside a marker", (int)markerPaths.size());
 
   int eventsWritten = 0;
@@ -447,11 +703,18 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     std::string previousKey;
     // The kind of the last call, for the events the action list does not name (`DispatchByEid`).
     bool bLastKindWasDispatch = false;
+    Progress progress;
+    progress.Begin("bundle: events, states and cbuffers", (int)ids.size());
     for(size_t index = 0; index < ids.size(); index++)
     {
       const int eid = ids[index];
+      const ULONGLONG tMove = Millis();
       ctrl->SetFrameEvent(eid, true);
+      ProfileAdd(kProfileSetFrameEvent, tMove);
+      const ULONGLONG tState = Millis();
       const D3D12Pipe::State *st = ctrl->GetD3D12PipelineState();
+      ProfileAdd(kProfilePipelineState, tState);
+      const ULONGLONG tRow = Millis();
 
       // Everything the state can be compared and hashed by, so the offline side does not have to
       // guess which fields matter.
@@ -481,14 +744,12 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       {
         const ResourceId rt = st->outputMerger.renderTargets[slot].resource;
         std::string detail = IdText(rt);
-        for(size_t t = 0; t < textures.size(); t++)
+        const std::map<std::string, const TextureDescription *>::const_iterator found =
+            textures.find(detail);
+        if(found != textures.end())
         {
-          if(textures[t].first == IdText(rt))
-          {
-            const TextureDescription &td = *textures[t].second;
-            detail += Fmt(" %ux%ux%u %s", td.width, td.height, td.depth, td.format.Name().c_str());
-            break;
-          }
+          const TextureDescription &td = *found->second;
+          detail += Fmt(" %ux%ux%u %s", td.width, td.height, td.depth, td.format.Name().c_str());
         }
         targets += Fmt("%s\"%s\"", targets.empty() ? "" : ", ", detail.c_str());
       }
@@ -514,6 +775,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
           shaderIds.c_str(), targets.c_str(), depth.c_str(),
           (unsigned)st->rootSignature.parameters.size(), stateHash.c_str()));
       eventsWritten++;
+      ProfileAdd(kProfileEventRow, tRow);
 
       // A state file per distinct state rather than per event: the documents are kilobytes each and
       // most events repeat the previous one's, but the *first* event and every change are exactly
@@ -552,7 +814,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
             TextureSave save;
             save.resourceId = rt;
             save.destType = FileType::PNG;
+            const ULONGLONG tImage = Millis();
             const ResultDetails res = ctrl->SaveTexture(save, rdcstr(png.c_str()));
+            ProfileAdd(kProfileImages, tImage);
             unsigned long long bytes = 0;
             if(res.OK() && FileBytes(png.c_str(), bytes) && bytes > 0)
               written.push_back(BundleRelative(opts.m_OutDir, png));
@@ -563,7 +827,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
           }
         }
       }
+      progress.Tick((int)index + 1);
     }
+    progress.Done((int)ids.size());
 
     ArrayClose(false);    // the scan block and the totals below
     g_Indent = 1;
@@ -571,7 +837,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("scanned", (long long)scanned);
     Field("scanFrom", (long long)opts.m_Since);
     Field("scanTo", (long long)lastEid);
-    Field("scanStopped", std::string(stopped));
+    Field("scanStopped", stopped);
     Field("stateFiles", (long long)stateFiles, true);
     g_Indent = 0;
     printf("}\n");
@@ -591,30 +857,18 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     ArrayOpen("resources");
 
     const rdcarray<ResourceDescription> &resources = ctrl->GetResources();
-    const rdcarray<BufferDescription> &buffers = ctrl->GetBuffers();
+    Progress progress;
+    progress.Begin("bundle: resources.json", (int)resources.size());
     for(size_t i = 0; i < resources.size(); i++)
     {
       const ResourceDescription &r = resources[i];
       const std::string id = IdText(r.resourceId);
 
-      const TextureDescription *tex = NULL;
-      for(size_t t = 0; t < textures.size(); t++)
-      {
-        if(textures[t].first == id)
-        {
-          tex = textures[t].second;
-          break;
-        }
-      }
-      const BufferDescription *buf = NULL;
-      for(size_t b = 0; b < buffers.size(); b++)
-      {
-        if(IdText(buffers[b].resourceId) == id)
-        {
-          buf = &buffers[b];
-          break;
-        }
-      }
+      const std::map<std::string, const TextureDescription *>::const_iterator texIt =
+          textures.find(id);
+      const TextureDescription *tex = (texIt == textures.end()) ? NULL : texIt->second;
+      const std::map<std::string, const BufferDescription *>::const_iterator bufIt = buffers.find(id);
+      const BufferDescription *buf = (bufIt == buffers.end()) ? NULL : bufIt->second;
 
       ObjectOpen();
       Field("resource", id);
@@ -644,7 +898,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       }
       else
       {
+        const ULONGLONG tUsage = Millis();
         const rdcarray<EventUsage> usage = ctrl->GetUsage(r.resourceId);
+        ProfileAdd(kProfileUsage, tUsage);
         uint32_t first = 0, last = 0;
         ArrayOpen("usage");
         for(size_t u = 0; u < usage.size(); u++)
@@ -662,7 +918,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
         Field("lastEvent", (long long)last, true);
       }
       ObjectClose();
+      progress.Tick((int)i + 1);
     }
+    progress.Done((int)resources.size());
 
     ArrayClose(false);
     g_Indent = 1;
@@ -681,6 +939,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       return Fail(1, "cannot write messages.json in %s", opts.m_OutDir.c_str());
 
     PrintCaptureHeader(file, path);
+    const ULONGLONG tMessages = Millis();
     const rdcarray<DebugMessage> &msgs = ctrl->GetDebugMessages();
     ArrayOpen("messages");
     for(size_t i = 0; i < msgs.size(); i++)
@@ -698,7 +957,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     g_Indent = 0;
     printf("}\n");
     written.push_back("messages.json");
+    ProfileAdd(kProfileMessages, tMessages);
   }
+  Log("bundle: messages.json written (%d message(s))", (int)ctrl->GetDebugMessages().size());
 
   // ------------------------------------------------------------------ counters.json (optional)
   if(opts.m_bWithCounters)
@@ -727,8 +988,11 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   if(opts.m_bWithTextures)
   {
     Log("bundle: saving %d texture(s) through the engine's decoder", (int)ctrl->GetTextures().size());
+    Progress progress;
+    progress.Begin("bundle: textures", (int)ctrl->GetTextures().size());
     for(size_t i = 0; i < ctrl->GetTextures().size(); i++)
     {
+      const ULONGLONG tTexture = Millis();
       const TextureDescription &t = ctrl->GetTextures()[i];
       TextureSave save;
       save.resourceId = t.resourceId;
@@ -744,7 +1008,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
         skipped.push_back(std::make_pair(
             BundleRelative(opts.m_OutDir, out),
             res.OK() ? std::string("the engine wrote an empty file") : ResultText(res)));
+      ProfileAdd(kProfileTextures, tTexture);
+      progress.Tick((int)i + 1);
     }
+    progress.Done((int)ctrl->GetTextures().size());
   }
 
   // ------------------------------------------------------------------ manifest.json

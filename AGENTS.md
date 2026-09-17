@@ -229,6 +229,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   reference, examples, pitfalls, the driver), `ROADMAP.md` (unimplemented work).
 - Never commit `renderdoc-src/` — upstream code fetched on demand, gitignored (`src/py/rdc_renderdoc_src.py`).
 - Never run `git commit` or `git push` unless explicitly asked to.
+- **An engine call's cost is measured, not assumed.** `$RDC_PROFILE=1` prints a per-call-site breakdown at the
+  end of a driver run (REFERENCE §9 has the numbers): on the 1.4 GB capture `SetFrameEvent` is 83% of a bundle
+  dump at 47 ms a call, and it costs the same whether the id changes or not. Anything that looks like redundant
+  engine work there has been tried, measured and reverted — **the bundle's second state read per event is
+  load-bearing** (a forward step gives an incomplete state; only a backwards one makes the engine replay the
+  frame from its start), which is why `REFERENCE §9` carries the hashes of the bundles that proved it. Change
+  it only with a byte-identical-bundle check against a cold run.
 
 # Naming
 

@@ -300,6 +300,15 @@ gives the command for each row (REFERENCE §4.11) → the caveats, which are the
 report does not know → the appendix of reproduction commands. Each later recipe is a follow-up on one line of
 the report. Offline-only fallback: `sections`, `summary`, `markers`, `draws`, `resources`.
 
+**Dumping a big capture takes minutes, and says so.** The driver prints a line every ten seconds with the rate
+and what is left (`bundle: sweep: 641/3000 (21%), 47 ms each, ~1 min 50 s left`) — the cost is one
+`SetFrameEvent` per id, measured at ~47 ms on the 601 MB capture, so nothing else in the run matters. Two
+things make repeats cheap: the sweep's answer is **cached** (`%LOCALAPPDATA%\rdc-tools\cache`, one
+`SetFrameEvent` re-warms it — measured 94.7 s cold against 36.9 s warm, byte-identical bundles), and
+`--max-events`/`--since`/`--until` bound the work. `$RDC_NO_CACHE=1` turns the cache off, `$RDC_NO_BOOTSTRAP`
+turns off the source fetch (§1.1), and `$RDC_PROFILE=1` prints where the time went, per call site
+(REFERENCE §9).
+
 **B. "Why is this object missing, black, or the wrong colour?"** The pixel-level route, in order of cost.
 
 ```powershell

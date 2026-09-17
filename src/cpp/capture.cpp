@@ -43,6 +43,126 @@ void Trace(const char *step)
     Log("%s", step);
 }
 
+// --------------------------------------------------------------------------- profiling (common.h)
+
+namespace
+{
+//: One measured call site. `name` is the only place a slot's name lives, so a name and its position
+//: in the enum cannot drift apart.
+struct ProfileBucket
+{
+  const char *name;
+  unsigned long long ms;
+  unsigned long long calls;
+};
+
+ProfileBucket g_Profile[kProfileCount] = {
+    {"SetFrameEvent", 0, 0},    {"GetD3D12PipelineState", 0, 0}, {"state document", 0, 0},
+    {"shaders document", 0, 0}, {"cbuffer documents", 0, 0},     {"event row", 0, 0},
+    {"images", 0, 0},           {"action tree", 0, 0},           {"resources.json", 0, 0},
+    {"messages.json", 0, 0},    {"textures.json", 0, 0},         {"usage lists", 0, 0},
+};
+
+bool ProfileOn()
+{
+  static const bool bOn = (getenv("RDC_PROFILE") != NULL);
+  return bOn;
+}
+}    // namespace
+
+void ProfileAdd(ProfileSlot slot, unsigned long long since)
+{
+  if(slot < 0 || slot >= kProfileCount || !ProfileOn())
+    return;
+  const unsigned long long now = Millis();
+  g_Profile[slot].ms += (now - since);
+  g_Profile[slot].calls++;
+}
+
+void ProfileReport()
+{
+  if(!ProfileOn())
+    return;
+  bool bAny = false;
+  for(int i = 0; i < kProfileCount; i++)
+  {
+    if(g_Profile[i].calls == 0)
+      continue;
+    if(!bAny)
+    {
+      Log("profile: where the time went (this run has $RDC_PROFILE set)");
+      bAny = true;
+    }
+    Log("profile:   %-22s %8.2fs in %6llu call(s), %6.1f ms each", g_Profile[i].name,
+        g_Profile[i].ms / 1000.0, g_Profile[i].calls,
+        (double)g_Profile[i].ms / (double)g_Profile[i].calls);
+  }
+}
+
+// --------------------------------------------------------------------------- progress (common.h)
+
+namespace
+{
+//: Long enough to be worth a line, short enough that a stuck run is obvious within a coffee sip.
+const ULONGLONG kProgressEveryMs = 10000;
+//: A loop shorter than this says nothing at all: a summary line for two seconds of work is noise.
+const ULONGLONG kProgressSummaryMs = 5000;
+
+std::string HumanTime(unsigned long long ms)
+{
+  const unsigned long long seconds = (ms + 500) / 1000;
+  if(seconds < 90)
+    return Fmt("%llu s", seconds);
+  if(seconds < 5400)
+    return Fmt("%llu min %llu s", seconds / 60, seconds % 60);
+  return Fmt("%llu h %llu min", seconds / 3600, (seconds / 60) % 60);
+}
+}    // namespace
+
+void Progress::Begin(const char *what, int total)
+{
+  m_What = what;
+  m_Total = total;
+  m_Start = Millis();
+  m_Last = m_Start;
+  m_Logged = false;
+}
+
+void Progress::Tick(int done)
+{
+  const ULONGLONG now = Millis();
+  if(now - m_Last < kProgressEveryMs)
+    return;
+  m_Last = now;
+  m_Logged = true;
+
+  const unsigned long long elapsed = now - m_Start;
+  const double each = (done > 0) ? (double)elapsed / (double)done : 0.0;
+  if(m_Total > 0 && done < m_Total && done > 0)
+  {
+    const unsigned long long left = (unsigned long long)(each * (m_Total - done));
+    Log("%s: %d/%d (%d%%), %.0f ms each, ~%s left", m_What.c_str(), done, m_Total,
+        (int)((100LL * done) / m_Total), each, HumanTime(left).c_str());
+  }
+  else
+  {
+    Log("%s: %d done, %.0f ms each", m_What.c_str(), done, each);
+  }
+}
+
+void Progress::Done(int done)
+{
+  const unsigned long long elapsed = Millis() - m_Start;
+  if(!m_Logged && elapsed < kProgressSummaryMs)
+    return;
+  const double each = (done > 0) ? (double)elapsed / (double)done : 0.0;
+  if(m_Total > 0)
+    Log("%s: %d/%d done in %.1fs (%.0f ms each)", m_What.c_str(), done, m_Total, elapsed / 1000.0,
+        each);
+  else
+    Log("%s: %d done in %.1fs (%.0f ms each)", m_What.c_str(), done, elapsed / 1000.0, each);
+}
+
 //: A run that stops early has to say so *in the log*, not only on stderr. Without this the log just
 //: ends at whatever step was reached, which is indistinguishable from a run that hung there -- and
 //: that is not hypothetical: a failed `OpenFile`, which logs nothing after it, was read as a hang

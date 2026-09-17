@@ -150,16 +150,16 @@ void Usage();
 
 //: Says so, once, when the offline tool has no RenderDoc source tree to name chunks from.
 //:
-//: This driver does not read that tree -- it asks the installed engine, which is the point of it -- so this
-//: is not a prerequisite for the command about to run. It is a prerequisite for *reading the answer*: the
-//: offline tool names every chunk id from the tree, and a fresh clone that never fetched it prints
-//: `Chunk1203` where a name belongs. The tool fetches it on demand (README 1.1), so the one useful thing
-//: this program can do is say that it has not been fetched yet.
+//: This driver does not read that tree -- it asks the installed engine, which is the point of it --
+//: so this is not a prerequisite for the command about to run. It is a prerequisite for *reading
+//: the answer*: the offline tool names every chunk id from the tree, and a fresh clone that never
+//: fetched it prints `Chunk1203` where a name belongs. The tool fetches it on demand (README 1.1),
+//: so the one useful thing this program can do is say that it has not been fetched yet.
 //:
 //: Deliberately quiet in three ways, because a hint that repeats is noise: nothing is printed when
-//: `$RENDERDOC_SRC` is set (the reader pointed at their own tree, and it is not this program's business
-//: whether it is complete), nothing when the tree is there, and it goes to stderr so `--json` on stdout
-//: stays a document.
+//: `$RENDERDOC_SRC` is set (the reader pointed at their own tree, and it is not this program's
+//: business whether it is complete), nothing when the tree is there, and it goes to stderr so
+//: `--json` on stdout stays a document.
 void WarnIfRenderdocSrcMissing()
 {
   if(getenv("RENDERDOC_SRC") != NULL)
@@ -173,7 +173,7 @@ void WarnIfRenderdocSrcMissing()
   const size_t slash = dir.find_last_of("\\/");
   if(slash == std::string::npos)
     return;
-  dir = dir.substr(0, slash);                    // <root>\bin
+  dir = dir.substr(0, slash);    // <root>\bin
   const size_t parent = dir.find_last_of("\\/");
   const std::string root = parent == std::string::npos ? dir : dir.substr(0, parent);
 
@@ -181,11 +181,14 @@ void WarnIfRenderdocSrcMissing()
   if(GetFileAttributesA(core.c_str()) != INVALID_FILE_ATTRIBUTES)
     return;
 
-  fprintf(stderr,
-          "note: %s\\renderdoc-src has no RenderDoc source, so the offline tool will print chunk ids\n"
-          "      rather than chunk names. It fetches the tree on demand -- the first command that needs\n"
-          "      one, or `python src\\py\\rdc_analysis.py bootstrap` to do it now (README section 1.1).\n",
-          root.c_str());
+  fprintf(
+      stderr,
+      "note: %s\\renderdoc-src has no RenderDoc source, so the offline tool will print chunk ids\n"
+      "      rather than chunk names. It fetches the tree on demand -- the first command that "
+      "needs\n"
+      "      one, or `python src\\py\\rdc_analysis.py bootstrap` to do it now (README section "
+      "1.1).\n",
+      root.c_str());
 }
 
 //: Runs one command against an already-open capture. Shared by `main` and `batch`, so a command
@@ -503,6 +506,10 @@ int main(int argc, char **argv)
                           saveDirAbs.empty() ? NULL : saveDirAbs.c_str());
   }
   Log("done: exit %d after %.1fs", ret, (Millis() - started) / 1000.0);
+
+  // The breakdown goes last, after the exit line, so the log's answer to "what happened" is unchanged and
+  // the answer to "where did the minutes go" is underneath it -- and only when `$RDC_PROFILE` asked.
+  ProfileReport();
 
   // The controller, the capture file and the replay system are torn down by the guards above, in
   // that order, as this function returns.

@@ -45,9 +45,9 @@ def capture_text(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
 
 
 def event(eid: int, kind: str = 'graphics', targets: Sequence[str] = (), depth: str = '0',
-          pso: str = '100', shaders: str = 'vs=2348 ') -> Dict[str, Any]:
+          pso: str = '100', shaders: str = 'vs=2348 ', marker: str = '') -> Dict[str, Any]:
     """One `events.json` record, with the fields the report reads spelled out."""
-    return {'eid': eid, 'pso': pso, 'psoKind': kind, 'shaders': shaders,
+    return {'eid': eid, 'marker': marker, 'pso': pso, 'psoKind': kind, 'shaders': shaders,
             'targets': list(targets), 'depth': depth, 'rootParameters': 1, 'state': 'deadbeef'}
 
 
@@ -236,7 +236,7 @@ class TestReportPasses(BundleCase):
         self.assertIn('the dispatch changed', passes[1]['reason'])
         text = self.markdown(bundle)
         self.assertIn('n/a — a dispatch does not set the output merger', text)
-        self.assertIn('| 1 | 1–2 | compute | 2 | n/a | n/a | compute |', text)
+        self.assertIn('| 1 | 1–2 | — | compute | 2 | n/a | n/a | compute |', text)
 
     def test_shaders_a_pass_does_not_use_are_separated_from_the_ones_it_does(self):
         """The state document lists every bound stage: at a dispatch that includes the vertex and pixel
@@ -361,13 +361,44 @@ class TestReportDocument(BundleCase):
         self.assertIn("`replay_dump shaders '%s' 200`" % RDC, text)
         self.assertEqual(len(self.document(bundle)['caveats']), len(R.report_caveats()))
 
+    def test_the_json_twin_is_schema_valid(self):
+        """The report's own schema against the document it describes (the acceptance gate of ROADMAP §1.3).
+
+        The schema lives in `rdc_schemas.py` rather than in `schema/`, because that folder is what the driver
+        publishes and the driver does not write this document. It is exhaustive and closed, so a member a
+        change dropped or renamed fails here rather than going unnoticed.
+        """
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
+        self.passes(bundle)                       # writes report.json, which is what gets validated
+        document = self.document(bundle)
+        self.assertEqual(R.validate_document(document, R.REPORT_SCHEMA), [])
+
+    def test_the_report_schema_notices_a_member_that_went_missing(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
+        self.passes(bundle)
+        document = self.document(bundle)
+        del document['engine']
+        problems = R.validate_document(document, R.REPORT_SCHEMA)
+        self.assertTrue(problems, 'a missing member is not a valid document')
+        self.assertTrue(any('engine' in problem for problem in problems))
+
     def test_the_caveats_name_what_is_missing_and_why(self):
         bundle = self.path('b')
         write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
         self.passes(bundle)
         text = self.markdown(bundle)
-        for needle in ('ROADMAP §2', 'ROADMAP §1.3', 'ROADMAP §1.4', 'ROADMAP §1.1', 'ROADMAP §4'):
+        # Each gap points at where its work is tracked: the unproven detectors (§1.3, the acceptance gates),
+        # the notables (§1.1, §1.2) and counters (§4). The marker path is no longer one of the gaps -- the
+        # driver records it -- so the caveat speaks of the *bundle's* age instead, which is what the last
+        # needle checks.
+        for needle in ('ROADMAP §1.3', 'ROADMAP §1.1', 'ROADMAP §4'):
             self.assertIn(needle, text)
+        self.assertIn('as of 2026-09-17', text)
+        # The vocabulary's own two limits: what a name can say, and which names exist at all.
+        self.assertIn('name-based', text)
+        self.assertIn('engine-schemas/', text)
 
     def test_application_text_cannot_break_a_line_or_a_heading(self):
         """Resource names and capture paths come from outside the tool: a newline must not split a

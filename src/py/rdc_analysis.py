@@ -67,7 +67,8 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         reconstruct_passes as reconstruct_passes,
                         render_report_markdown as render_report_markdown,
                         report_caveats as report_caveats)
-from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
+from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPORT_SCHEMA,
+                         SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,
                          load_schemas as load_schemas, schema_for_file as schema_for_file,
                          validate_document as validate_document)

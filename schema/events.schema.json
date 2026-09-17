@@ -13,9 +13,10 @@
     "machine": {"type": "string"},
     "events": {"type": "array", "items": {
       "type": "object",
-      "required": ["eid", "pso", "psoKind", "shaders", "targets", "depth", "rootParameters", "state"],
+      "required": ["eid", "marker", "pso", "psoKind", "shaders", "targets", "depth", "rootParameters", "state"],
       "properties": {
         "eid": {"type": "integer"},
+        "marker": {"type": "string", "description": "the engine's marker path for this event, `A > B`, empty outside every marker"},
         "pso": {"type": "string", "description": "the pipeline state object's resource id"},
         "psoKind": {"enum": ["graphics", "compute"]},
         "shaders": {"type": "string", "description": "`vs=2348 ps=2349`, stages in a fixed order"},

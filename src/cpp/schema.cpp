@@ -52,9 +52,10 @@ const SchemaDoc kSchemas[] = {
     "machine": {"type": "string"},
     "events": {"type": "array", "items": {
       "type": "object",
-      "required": ["eid", "pso", "psoKind", "shaders", "targets", "depth", "rootParameters", "state"],
+      "required": ["eid", "marker", "pso", "psoKind", "shaders", "targets", "depth", "rootParameters", "state"],
       "properties": {
         "eid": {"type": "integer"},
+        "marker": {"type": "string", "description": "the engine's marker path for this event, `A > B`, empty outside every marker"},
         "pso": {"type": "string", "description": "the pipeline state object's resource id"},
         "psoKind": {"enum": ["graphics", "compute"]},
         "shaders": {"type": "string", "description": "`vs=2348 ps=2349`, stages in a fixed order"},
@@ -170,8 +171,8 @@ const SchemaDoc kSchemas[] = {
   "title": "state",
   "description": "One event's bound state: the capture header, then that event. The arrays are the driver's own rows, which are text by design -- they carry the engine's names verbatim.",
   "type": "object",
-  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "api",
-               "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters"],
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "marker",
+               "api", "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -180,6 +181,7 @@ const SchemaDoc kSchemas[] = {
     "localReplay": {"type": "integer"},
     "machine": {"type": "string"},
     "eid": {"type": "integer"},
+    "marker": {"type": "string", "description": "the engine's marker path for this event, `A > B`, empty outside every marker"},
     "api": {"type": "integer"},
     "shaders": {"type": "array", "items": {"type": "string"},
                 "description": "`vs  res2348`, one row per bound stage -- including the stages this call kind does not use"},
@@ -225,7 +227,8 @@ const SchemaDoc kSchemas[] = {
   "title": "shaders",
   "description": "The reflection of every stage bound at one event, one object per stage -- an array, because two stages share every member name and a flat object would let a reader keep only the last.",
   "type": "object",
-  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stages"],
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "marker",
+               "stages"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -233,6 +236,7 @@ const SchemaDoc kSchemas[] = {
     "driver": {"type": "string"},
     "localReplay": {"type": "integer"},
     "machine": {"type": "string"},
+    "marker": {"type": "string", "description": "the engine's marker path for this event, `A > B`, empty outside every marker"},
     "eid": {"type": "integer"},
     "stages": {"type": "array", "items": {
       "type": "object",
@@ -331,10 +335,10 @@ const SchemaDoc kSchemas[] = {
 
     {"draws", "draws", R"sc({
   "title": "draws",
-  "description": "The structured file's draw-like chunks in order. `eid` is the *engine's* id where one is known and the chunk index where it is not: the two spaces are not the same (REFERENCE §9), and `probe` lists the ids that have state.",
+  "description": "The engine's action list in frame order: markers and calls, with the engine's own event ids (`probe` lists the same ids, and `SetFrameEvent` takes them). The structured file's chunk numbering is *not* used here (REFERENCE §9): the two spaces are different, and the chunk-derived one is not an id the engine answers to.",
   "type": "object",
-  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
-               "totalChunks", "totalEvents", "shown"],
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "actions",
+               "totalActions", "totalCalls", "shown"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -342,19 +346,21 @@ const SchemaDoc kSchemas[] = {
     "driver": {"type": "string"},
     "localReplay": {"type": "integer"},
     "machine": {"type": "string"},
-    "events": {"type": "array", "items": {
+    "actions": {"type": "array", "items": {
       "type": "object",
-      "required": ["eid", "depth", "chunkID", "name"],
+      "required": ["eid", "depth", "call", "marker", "name", "path"],
       "properties": {
-        "eid": {"type": "integer"},
-        "depth": {"type": "integer"},
-        "chunkID": {"type": "integer"},
-        "name": {"type": "string"}
+        "eid": {"type": "integer", "description": "ActionDescription::eventId"},
+        "depth": {"type": "integer", "description": "how deep in the marker nest"},
+        "call": {"type": "boolean", "description": "a draw/dispatch/copy rather than a marker"},
+        "marker": {"type": "boolean", "description": "this row opens a marker"},
+        "name": {"type": "string", "description": "the marker's custom name, or the call's own name"},
+        "path": {"type": "string", "description": "the markers this row sits inside, `A > B`, empty at the root"}
       },
       "additionalProperties": false
     }},
-    "totalChunks": {"type": "integer"},
-    "totalEvents": {"type": "integer"},
+    "totalActions": {"type": "integer"},
+    "totalCalls": {"type": "integer"},
     "shown": {"type": "integer"},
     "truncated": {"type": "string", "description": "present only when the action tree was deeper than the recursion limit"}
   },
@@ -385,8 +391,8 @@ const SchemaDoc kSchemas[] = {
   "title": "cb",
   "description": "One constant buffer at one event: what it is bound to and one row per reflection variable, with the value read from the data.",
   "type": "object",
-  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stage",
-               "slot", "shader", "buffer", "variables"],
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "marker",
+               "stage", "slot", "shader", "buffer", "variables"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -395,6 +401,7 @@ const SchemaDoc kSchemas[] = {
     "localReplay": {"type": "integer"},
     "machine": {"type": "string"},
     "eid": {"type": "integer"},
+    "marker": {"type": "string", "description": "the engine's marker path for this event, `A > B`, empty outside every marker"},
     "stage": {"type": "string"},
     "slot": {"type": "integer"},
     "shader": {"type": "string"},

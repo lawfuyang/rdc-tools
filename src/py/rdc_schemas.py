@@ -32,6 +32,128 @@ from typing import Any, Dict, List, Optional, Tuple
 SCHEMA_KEYWORDS = frozenset(('title', 'description', 'type', 'required', 'properties', 'items', 'enum',
                              'const', 'additionalProperties'))
 
+def _obj(properties: Dict[str, Any], required: Optional[List[str]] = None,
+         extra: bool = False) -> Dict[str, Any]:
+    """An object schema: its members, which of them are required, and whether strangers are allowed.
+
+    `extra` is False everywhere in this module on purpose -- the driver's schemas make the same choice, and it
+    is the one that catches a member that was renamed or dropped on one side of a change.
+    """
+    return {'type': 'object', 'properties': properties, 'additionalProperties': extra,
+            'required': required if required is not None else sorted(properties)}
+
+def _arr(items: Dict[str, Any]) -> Dict[str, Any]:
+    """An array schema; `items` may be an object schema or a bare type."""
+    return {'type': 'array', 'items': items}
+
+def _text() -> Dict[str, Any]:
+    return {'type': 'string'}
+
+def _num() -> Dict[str, Any]:
+    return {'type': 'number'}
+
+#: The **report's** own schema. It is here rather than in `schema/` because that folder is what the driver
+#: publishes (`schema --out`, checked by `schema --check`) and the driver does not write this document -- the
+#: offline tool does. `validate <report.json> <schemaDir> report` uses it, and so does a bundle-wide
+#: `validate <bundleDir> <schemaDir>`, which is what keeps the report's JSON twin honest: a member that a
+#: change dropped or renamed fails a run instead of going unnoticed. `bundle` is left open on purpose: it is
+#: the bundle's manifest, which has its own schema (`manifest.schema.json`) and is checked there.
+REPORT_SCHEMA: Dict[str, Any] = _obj({
+    'schemaVersion': {'const': 1},
+    'reportVersion': {'type': 'integer'},
+    'capture': _text(),
+    'captureSha256': _text(),
+    'bundleDir': _text(),
+    'bundle': {'type': 'object'},
+    'frame': _obj({
+        'events': {'type': 'integer'},
+        'graphicsEvents': {'type': 'integer'},
+        'computeEvents': {'type': 'integer'},
+        'resources': {'type': 'integer'},
+        'resourcesByKind': {'type': 'object'},
+        'textureBytes': {'type': 'integer'},
+        'bufferBytes': {'type': 'integer'},
+        'targetsSeen': _arr(_text()),
+        'formatsSeen': _arr(_text()),
+        'messages': {'type': 'integer'},
+        'messagesBySeverity': {'type': 'object'},
+        'chunks': {'type': 'integer'},
+        'stateDocuments': {'type': 'integer'},
+        'pipelineType': {'type': 'integer'},
+        'localRenderer': {'type': 'integer'},
+        'vendor': {'type': 'integer'},
+    }),
+    'passes': _arr(_obj({
+        'index': {'type': 'integer'},
+        'firstEid': {'type': 'integer'},
+        'lastEid': {'type': 'integer'},
+        'marker': _text(),
+        'kind': _text(),
+        'reason': _text(),
+        'events': {'type': 'integer'},
+        'graphics': {'type': 'integer'},
+        'compute': {'type': 'integer'},
+        'targets': _arr(_text()),
+        'depth': _text(),
+        'structure': _text(),
+        'shaders': _arr(_text()),
+        'otherShaders': _arr(_text()),
+        'blocks': _arr(_text()),
+        'firstTouched': _arr(_text()),
+    })),
+    'engine': _obj({
+        'engine': _text(),
+        'schema': _text(),
+        'basis': _text(),
+        'detected': _arr(_obj({'kind': _text(), 'name': _text(), 'where': _text()})),
+        'concepts': _arr(_obj({
+            'concept': _text(),
+            'kind': _text(),
+            'evidence': _arr(_obj({'kind': _text(), 'name': _text(), 'where': _text()})),
+            'note': _text(),
+            'passIndex': {'type': 'integer'},
+            'firstEid': {'type': 'integer'},
+        })),
+        'questions': _arr(_obj({
+            'id': _text(),
+            'title': _text(),
+            'ask': _text(),
+            'conceptRows': _arr(_obj({
+                'concept': _text(),
+                'kind': _text(),
+                'evidence': _arr(_obj({'kind': _text(), 'name': _text(), 'where': _text()})),
+                'note': _text(),
+                'passIndex': {'type': 'integer'},
+                'firstEid': {'type': 'integer'},
+            })),
+            'values': _arr(_obj({
+                'concept': _text(),
+                'block': _text(),
+                'member': _text(),
+                'value': _text(),
+                'firstEid': {'type': 'integer'},
+                'passIndex': {'type': 'integer'},
+                'bound': {'type': 'boolean'},
+            })),
+        })),
+        'notInterpreted': _arr(_text()),
+    }),
+    'flags': _arr(_obj({
+        'detector': _text(),
+        'what': _text(),
+        'evidence': _arr(_text()),
+        'certainty': _text(),
+        'unproven': {'type': 'boolean'},
+    })),
+    'detectors': _arr(_obj({'detector': _text(), 'ran': {'type': 'boolean'}, 'why': _text()})),
+    'caveats': _arr(_text()),
+    'appendix': _arr(_text()),
+})
+REPORT_SCHEMA['title'] = 'report'
+REPORT_SCHEMA['description'] = ('The frame report the offline tool writes: the frame, its passes, the engine\'s '
+                                'vocabulary, the red flags and the gaps. Written by `report <rdc> <bundleDir>`; '
+                                'validated by `validate <bundleDir> <schemaDir>`.')
+
 class SchemaError(Exception):
     """A schema file that cannot be used: unreadable, not JSON, or not an object."""
 
@@ -133,6 +255,10 @@ def load_schemas(schema_dir: str) -> Dict[str, Dict[str, Any]]:
         if not isinstance(schema, dict):
             raise SchemaError('%s is not a JSON object' % name)
         schemas[kind] = schema
+    # The report's schema is this module's own data (see `REPORT_SCHEMA`), not a file the driver publishes: the
+    # offline tool writes that document. A folder that carries a `report.schema.json` of its own wins, so a
+    # consumer can pin a different revision without a code change.
+    schemas.setdefault('report', REPORT_SCHEMA)
     return schemas
 
 #: Which schema a bundle file's *name* identifies. The rest of a bundle (PNGs, `cbuffers/`) is not a
@@ -149,6 +275,8 @@ BUNDLE_SCHEMAS = {
 def schema_for_file(name: str) -> Optional[str]:
     """The schema kind for a file name, or None when the name is not a document's."""
     base = os.path.basename(name).lower()
+    if base == 'report.json':
+        return 'report'
     if base in BUNDLE_SCHEMAS:
         return BUNDLE_SCHEMAS[base]
     if base.endswith('.state.json'):
@@ -233,4 +361,4 @@ def cmd_validate(path: str, schema_dir: str, name: Optional[str] = None) -> int:
     print('%d document(s) checked, %d failed, %d JSON file(s) not a document' % (len(targets), failed,
                                                                                 skipped))
     return 1 if failed else 0
-
+

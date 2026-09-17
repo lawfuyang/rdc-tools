@@ -11,10 +11,11 @@ def reconstruct_passes(events: Sequence[BundleEvent],
                        resources: Sequence[BundleResource]) -> List[ReportPass]:
     """Group the bundle's events into passes, and say why each one starts.
 
-    The engine exposes no action list, so a bundle has no marker names and no call kinds: a pass here
-    is a run of consecutive events that agree on the call kind, the render targets and the depth
-    target, and the *reason* is recorded per pass so a reader can disagree with the rule rather than
-    the result. (Deriving real passes needs the action list -- ROADMAP §2.)
+    A pass here is a run of consecutive events that agree on the call kind, the render targets and the depth
+    target, and the *reason* is recorded per pass so a reader can disagree with the rule rather than the
+    result. The engine's marker path of the pass's *first* event is carried along as a label -- the marker the
+    pass starts under -- which is what lets a report name a pass in the engine's own words; the pass
+    boundaries themselves are still drawn from state, not from the markers.
     """
     passes: List[ReportPass] = []
     last_kind = ''
@@ -53,6 +54,7 @@ def reconstruct_passes(events: Sequence[BundleEvent],
         if new_pass:
             passes.append({'index': len(passes) + 1, 'firstEid': int(event['eid']),
                            'lastEid': int(event['eid']), 'kind': kind, 'reason': reason,
+                           'marker': str(event.get('marker', '')),
                            'events': 0, 'graphics': 0, 'compute': 0, 'targets': targets,
                            'depth': depth, 'structure': _pass_structure(kind, targets, depth),
                            'shaders': [], 'otherShaders': [], 'blocks': [], 'firstTouched': []})
@@ -70,8 +72,12 @@ def reconstruct_passes(events: Sequence[BundleEvent],
     return passes
 
 def _pass_structure(kind: str, targets: Sequence[str], depth: str) -> str:
-    """What the pass *is*, from state alone: kind, targets, depth. Not what it is *for* -- naming that
-    (shadow map, G-buffer, UI) needs the engine schema table, ROADMAP §1.3."""
+    """What the pass *is*, from state alone: kind, targets, depth.
+
+    Not what it is *for*: that is claimed in the report's engine-vocabulary section, where the capture's own
+    names are read against the tables in `engine-schemas/` (REFERENCE §4.11), and this string can be one of the
+    names a concept matches on (`depth only (no colour target)` for a shadow pass).
+    """
     if kind == 'compute':
         return 'compute'
     has_depth = _is_resource(depth)

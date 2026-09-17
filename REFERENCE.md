@@ -238,11 +238,12 @@ fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and 
 | `python src\py\rdc_analysis.py selftest` | run the whole suite (`test` is an alias) |
 | `python src\py\rdc_analysis.py selftest -v` | per-test output |
 | `python src\py\rdc_analysis.py selftest -k Draws` | only tests whose id contains `Draws` |
-| `python tests/test_rdc_analysis.py` | the container, the compression and the cache (95 tests) |
+| `python tests/test_rdc_analysis.py` | the container, the compression and the cache (95) |
 | `python tests/test_rdc_chunks.py` | the chunk stream, the payloads and the shader containers (112) |
 | `python tests/test_rdc_resources.py` | the resource table, descriptor heaps and the enum parsing (93) |
 | `python tests/test_rdc_commands.py` | commands and CLI dispatch (151) |
-| `python tests/test_rdc_report.py` | the report and its detectors (50) |
+| `python tests/test_rdc_report.py` | the report, its detectors and the report schema (52) |
+| `python tests/test_rdc_engine_schema.py` | the engine table: recognition, concepts, markers, values, no match (21) |
 | `python tests/test_rdc_validate.py` | the schema validator (17) |
 | `python -m unittest discover -s tests -t tests` | the same suite through unittest |
 
@@ -382,7 +383,11 @@ slot was never written during the capture (§8). The layouts are in §3.4; what 
 ### 4.12 Schema validation
 
 `validate <file|bundleDir> <schemaDir|one.schema.json> [kind]` checks documents against the schemas the
-driver publishes — `schema/` in this repo, written by `replay_dump schema --out schema` and checked in, so the
+driver publishes — `schema/` in this repo, written by `replay_dump schema --out schema` and checked in —
+plus the **report's own** schema, which is `REPORT_SCHEMA` in `rdc_schemas.py` rather than a file, because the
+driver does not write `report.json`: the offline tool does. A folder that carries a `report.schema.json` of its
+own wins, and `validate <bundleDir> <schemaDir>` checks `report.json` along with everything else, which is what
+keeps the report's JSON twin honest. The so the
 contract is a file a consumer can read rather than something reverse-engineered from a writer.
 
 ```powershell
@@ -419,7 +424,8 @@ which is why the checked-in copy cannot quietly go stale after a document change
 | frame at a glance | counts, resources by kind and bytes, the render targets and formats seen, debug messages by severity |
 | pipeline map | the passes in order — eid range, call kind, target, structure — plus a Mermaid graph of pass → target |
 | pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
-| red flags | what the detectors found, each with the evidence that proves it and how certain it is — and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §1.4) |
+| the engine's vocabulary | which engine the capture's own names identify, every concept those names claim (with the name behind it), and the values the table tags for them — see below |
+| red flags | what the detectors found, each with the evidence that proves it and how certain it is — and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §1.3) |
 | what this report cannot tell you | the report states its own gaps, and every one of them is a roadmap item |
 | appendix | the `replay_dump state` / `shaders` command pair that reproduces each pass |
 
@@ -427,6 +433,50 @@ It is **deterministic** — byte-stable for a fixed bundle (sorted tables, no ti
 so two runs diff cleanly and an analysis change shows up as a reviewable diff. It reads only the bundle's own
 files: no capture, no GPU, no device, no `renderdoc-src`. `tests/test_rdc_report.py` tests it from fixture
 bundles written by hand, which is what keeps the analysis honest without a capture to hand.
+
+### The engine's vocabulary (`engine-schemas/*.json`)
+
+A pass is described by its state everywhere else in the report. To say what it is *for* — `mobile base pass`,
+`indirect lighting cache`, `shadow depth pass` — the report needs the meaning of the names, and those are the
+engine's, so the mapping lives in a table a reader can check, extend or disagree with:
+`engine-schemas/*.json` at the repository root (this is not the driver's `schema/`, §4.12 — that is the
+contract for the driver's own documents). `$RDC_ENGINE_SCHEMAS` or a folder named `engine-schemas` in any folder
+above `src/py/` overrides the location.
+
+Three rules, and the section in the report is written to show all three:
+
+* **Name-based, nothing else.** A concept is claimed because the capture itself contains a name the table
+  lists: a constant-block name, a shader entry point, a resource name, a marker name, or the pass *structure*
+  string the report itself computed. Nothing is inferred from values, order or timing.
+* **Every claim carries its evidence.** Each row names the pass or the frame it was claimed for and the exact
+  string that matched, so a reader can open `states/<eid>.shaders.json` and see it.
+* **A marker matches by its own name, not by the whole path.** The driver records the engine's marker path per
+  event (`Scene > BasePass`), and a table lists `BasePass`: every element of a path counts, because the paths
+  carry dynamic text (`CullLights 22x14x8 NumLights 0`) that no table could enumerate. A bundle written before
+  2026-09-17 carries no marker at all, and then a marker-based concept is reported as *not claimed for want of
+  evidence* rather than as absent.
+* **No match, no claim.** An engine whose names the table does not list gets no interpretation at all, and the
+  report says so instead of guessing. A table with fewer than two name matches is not an identification.
+  A concept is claimed only when *every* kind it asks about matches: `{"constantBlocks": ["MobileBasePass"],
+  "shaderEntries": ["MainVertexShader", "MainPixelShaderMRT"]}` needs both, because a block that is merely
+  *bound* in a pass is a leftover from an earlier call as often as it is a fact about that pass.
+
+The values under a concept are the members the table **tags** (`"members": ["IndirectLightingSHCoefficients",
+…]`, matched by name or by the `Name[0]` / `Name_Field` spelling of one), read from the bundle's cbuffer
+documents, each with the eid its document was written at and the report pass that event falls in — which is what
+makes the claim checkable: `replay_dump cb <capture> <eid> <stage> <slot>` prints the same numbers.
+
+The project's original question is the acceptance case, and it is two lines of the same section. On
+`Android Renderer.rdc` the table claims **mobile base pass** (`MainVertexShader`/`MainPixelShaderMRT` with
+`MobileBasePass` bound) plus the **indirect lighting cache** and **mobile reflection capture** blocks: at eid 262
+nothing is bound to the cache (every member reads its default, and the row says so), and at eid 313
+`IndirectLightingCacheMaxUV = 1, 1, 1` with `DirectionalLightShadowing = 1` — the cache is filled from the
+frame's own state, not left at zero. On `PC Renderer.rdc` it claims **base pass** (`MainVS`/`MainPS` with
+`Scene`, `Material`) plus **reflection capture (SM5)** and **forward lighting**, with
+`ForwardLightData.NumReflectionCaptures = 0`, and the marker concepts name the passes outright
+(`BasePass (engine marker)` for pass 24, `depth prepass` for pass 9). That is the difference between the two
+frames in the engine's own words — a mobile forward base pass reading a cached indirect lighting volume against
+an SM5 base pass with no reflection captures — and every number is one `replay_dump cb` away.
 
 The **detectors** that run today are the ones the evidence can prove. From the bundle: the engine's own debug
 messages, constant blocks whose every value is zero (including the "no descriptor is bound for this block"
@@ -703,7 +753,7 @@ cmake -S . -B build -A x64 && cmake --build build --config Release   # MSVC + th
 | Command | Gives |
 |---|---|
 | `info <rdc>` | RenderDoc version, driver, API properties, resource/texture/buffer/chunk counts |
-| `draws <rdc> [max] [filter]` | the action tree (markers and calls) out of the structured file |
+| `draws <rdc> [max] [filter]` | the engine's action list (`GetRootActions`) in frame order: markers and calls, each with the engine's **event id**, its depth in the marker nest, and the marker path it sits inside. The filter matches a call's name *or* a marker path, so a marker is a handle for the events under it |
 | `state <rdc> <eid>` | bound shaders per stage, render targets, depth target, root signature and every root parameter with its register, space and what is bound |
 | `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, and the disassembly on request |
 | `cb <rdc> <eid> <stage> <slot>` | the **named values** of one constant buffer, structs and arrays expanded |
@@ -780,13 +830,20 @@ uninitialised global state and dies inside `OpenCapture` with an access violatio
 log, nothing. The build script also has to make an import library from the DLL's exports (the
 installer ships none) and put a copy of `renderdoc.dll` beside the exe.
 
-**Event ids are the engine's, not the file's.** The offline tool prints *chunk indices* and calls
-them event ids; on the two Unreal captures that happened to be true, and on the hobby-renderer
-capture it is not: `probe` shows the engine's first event with pipeline state at id 842 while the
-structured file's first draw is at chunk 316, because RenderDoc numbers only what a *command list*
-recorded (resource and PSO creation, `SetName` and descriptor writes are in the file but are not
-events). `probe <rdc> <maxEid>` lists the ids that do have state, so an id can be checked rather than
-assumed. `state`/`shaders`/`cb`/`mesh`/`image` all take the engine's ids.
+**Event ids are the engine's, not the file's.** `draws` takes its ids from the engine's own action list
+(`ActionDescription::eventId`), and so do `probe`, the bundle and every command that takes an `<eid>`; the
+*offline* tool's `chunks`/`summary` print their own **chunk indices**, which are a different numbering. On the
+two Unreal captures the two happened to agree, and on the hobby-renderer capture they do not: `probe` shows
+the engine's first event with pipeline state at 842 while the structured file's first draw is at chunk 316,
+because RenderDoc numbers only what a *command list* recorded (resource and PSO creation, `SetName` and
+descriptor writes are in the file but are not events). `probe <rdc> <maxEid>` lists the ids that do have state,
+so an id can be checked rather than assumed; a wrong id silently returns an *empty* state rather than failing.
+
+**Marker paths come from the same list.** Every event carries the markers it sits inside (`Scene > BasePass`),
+written by `state`/`shaders`/`cb` as a `marker` field and by `dump` into `events.json`, because a marker path
+survives a re-capture where an event id does not and it is what lets an offline rule name a pass in the
+engine's vocabulary. A bundle written before 2026-09-17 has no `marker` member at all: a reader asks for it
+with a default rather than by index.
 
 **The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path). RenderDoc's own
 stringisers for `ResultCode`, `ResourceUsage`, `MessageSeverity` and `GPUCounter` are not exported, so

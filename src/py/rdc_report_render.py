@@ -19,12 +19,19 @@ def report_caveats() -> List[str]:
         'depth are given as not applicable: a dispatch does not set the output-merge state, so what the '
         'engine reports there is leftover from an earlier call. What a dispatch *does* write (its UAVs) '
         'is not in a bundle at all.',
-        'What a pass is *for* (shadow map, depth prepass, G-buffer, base pass, post-process, UI) is not '
-        'inferred: the structure given is only the targets, the depth target and the call kind. Naming '
-        'a purpose needs the engine schema table (ROADMAP §1.3).',
+        'What a pass is *for* is claimed only where the engine\'s own names say so, and every such claim is '
+        'marked name-based: the tables in `engine-schemas/` map a name the capture contains -- a constant '
+        'block, a shader entry point, a resource name, a marker name, a pass structure string -- onto a '
+        'concept, and a concept with no name behind it is never claimed. A bundle whose names match no table '
+        'gets no interpretation at all rather than a guess, and the section says so.',
+        'A marker name is evidence only once a bundle carries one: the driver records the engine\'s marker '
+        'path per event as of 2026-09-17, so a bundle written before that claims no marker-based concept, '
+        'and the section says which concepts that costs. The values printed with a concept are the members '
+        'the table tags, as the bundle\'s cbuffer documents hold them: what the engine reported at that '
+        'event, not what the shader made of it.',
         'Twenty detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
         'state, one over the resource table and three over the capture\'s chunk stream -- and every finding '
-        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §1.4). '
+        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §1.3). '
         'What is not checked at all is stated rather than approximated: MSAA\'s *which '
         'subresource did the resolve copy* half needs the ResolveSubresource payload, and the sRGB/linear half '
         'of the format rule needs a later sampling view\'s sRGB flag -- neither is in a bundle. The pipeline '
@@ -54,6 +61,92 @@ def report_caveats() -> List[str]:
         'was written, the manifest still carries the hash of the capture it was written from (the '
         'provenance table above), and the report is about that capture.',
     ]
+
+def _engine_section(engine: EngineInterpretation) -> List[str]:
+    """The engine's vocabulary: what the capture's own names said, and the values the table tags for them.
+
+    Nothing here is computed twice -- the interpretation arrives assembled (see `rdc_engine_schema`) and this
+    only lays it out. Every row keeps the name it rests on in the same line as the concept, because a reader
+    who disagrees with a concept needs to see what it was claimed from without leaving the report.
+    """
+    lines: List[str] = []
+    if not engine['engine']:
+        lines.append('No engine was recognised by name in this bundle, so no pass is named for one: a frame is '
+                     'described in an engine\'s vocabulary only when the capture itself carries names the '
+                     'table lists. The structure above and the passes below are what can be said without it.')
+        lines.append('')
+        for reason in engine['notInterpreted']:
+            lines.append('- %s' % _md(reason))
+        lines.append('')
+        return lines
+
+    lines.append('**%s**, read from `engine-schemas/%s` — %s.'
+                 % (_md(engine['engine']), _md(engine['schema']), _md(engine['basis'])))
+    lines.append('')
+    lines.append('| recognised by | name | where |')
+    lines.append('|---|---|---|')
+    for item in engine['detected']:
+        lines.append('| %s | `%s` | %s |' % (_md(item['kind']), _md(item['name']), _md(item['where'])))
+    lines.append('')
+    if engine['concepts']:
+        lines.append('| concept | kind | claimed for | because |')
+        lines.append('|---|---|---|---|')
+        for row in engine['concepts']:
+            where = ('pass %d (eid %d)' % (row['passIndex'], row['firstEid'])
+                     if row['passIndex'] else 'the frame')
+            because = '; '.join('%s `%s`' % (_md(item['kind']), _md(item['name']))
+                                for item in row['evidence'])
+            lines.append('| %s | %s | %s | %s |' % (_md(row['concept']), _md(row['kind']), where, because))
+    else:
+        lines.append('No concept in the table matched this frame\'s names.')
+    lines.append('')
+    # What a concept *is* does not depend on the pass it was claimed for, so its note is printed once however
+    # many rows it produced.
+    said: List[str] = []
+    for row in engine['concepts']:
+        if row.get('note') and row['concept'] not in said:
+            said.append(row['concept'])
+            lines.append('- `%s`: %s' % (_md(row['concept']), _md(str(row['note']))))
+    if said:
+        lines.append('')
+
+    for question in engine['questions']:
+        lines.append('### %s' % _md(question['title']))
+        lines.append('')
+        if question['ask']:
+            lines.append(_md(question['ask']))
+            lines.append('')
+        if not question['conceptRows']:
+            lines.append('Nothing in this frame\'s names speaks to it.')
+            lines.append('')
+            continue
+        lines.append('The table\'s concepts for it, as this frame\'s names claim them:')
+        lines.append('')
+        for row in question['conceptRows']:
+            where = ('pass %d (eid %d)' % (row['passIndex'], row['firstEid'])
+                     if row['passIndex'] else 'the frame')
+            lines.append('- %s — %s' % (_md(row['concept']), where))
+        lines.append('')
+        if question['values']:
+            lines.append('| pass | eid | cbuffer | member | value |')
+            lines.append('|---|---|---|---|---|')
+            for item in question['values']:
+                # A member read while nothing was bound is its default, not its value: the row says which one
+                # it is, because "this block is zero" and "this block was not bound here" are different facts.
+                value = _md(item['value']) if item['bound'] else '*not bound* (the read is every member\'s default)'
+                lines.append('| %s | %d | `%s` | `%s` | %s |'
+                             % (item['passIndex'] or '—', item['firstEid'], _md(item['block']),
+                                _md(item['member']), value))
+            lines.append('')
+        else:
+            lines.append('The table tags no member of the blocks this frame binds for that question, so the '
+                         'values behind it are not read.')
+            lines.append('')
+    for reason in engine['notInterpreted']:
+        lines.append('- not interpreted: %s' % _md(reason))
+    if engine['notInterpreted']:
+        lines.append('')
+    return lines
 
 def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     """The report as Markdown. Deterministic: same bundle in, same bytes out."""
@@ -110,15 +203,18 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('')
     lines.append('## Pipeline map')
     lines.append('')
-    lines.append('| # | eids | kind | events | targets | depth | structure |')
-    lines.append('|---|---|---|---|---|---|---|')
+    lines.append('| # | eids | marker | kind | events | targets | depth | structure |')
+    lines.append('|---|---|---|---|---|---|---|---|')
     for entry in doc['passes']:
         # The depth column says the same thing the pass section does for a dispatch: not applicable,
         # for the same reason the targets do.
         depth = ('n/a' if entry['kind'] == 'compute' else
                  'res%s' % _res_id(entry['depth']) if _is_resource(entry['depth']) else 'none')
-        lines.append('| %d | %d–%d | %s | %d | %s | %s | %s |'
-                     % (entry['index'], entry['firstEid'], entry['lastEid'], entry['kind'],
+        # The marker's *own* name, not the whole path: the column's job is to say which of the frame's
+        # markers this pass opens under, and the nest is in the section below.
+        leaf = str(entry.get('marker', '')).split(' > ')[-1] if entry.get('marker') else '—'
+        lines.append('| %d | %d–%d | %s | %s | %d | %s | %s | %s |'
+                     % (entry['index'], entry['firstEid'], entry['lastEid'], _md(leaf), entry['kind'],
                         entry['events'], _targets_text(entry, True), depth, entry['structure']))
     lines.append('')
     lines.append('Passes and the targets they write:')
@@ -135,6 +231,9 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
             lines.append('  %s --> T%s["res%s"]' % (node, idtext, idtext))
     lines.append('```')
     lines.append('')
+    lines.append('## The engine\'s vocabulary')
+    lines.append('')
+    lines.extend(_engine_section(doc['engine']))
     lines.append('## Red flags')
     lines.append('')
     ran = [run['detector'] for run in doc['detectors'] if run['ran']]
@@ -145,7 +244,7 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('')
     lines.append('`certain` means the bundle proves the observation; `question` would mean the observation is '
                  'real but its meaning depends on what the frame was for. Every finding is **unproven**: none '
-                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §1.4), '
+                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §1.3), '
                  'so they are leads, not verdicts.')
     lines.append('')
     if doc['flags']:
@@ -166,6 +265,9 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
                      % (entry['index'], entry['firstEid'], entry['lastEid'], entry['kind']))
         lines.append('')
         lines.append('- starts here because %s' % entry['reason'])
+        if entry.get('marker'):
+            lines.append('- the engine put it under `%s` (from the action list, not from state)'
+                         % _md(str(entry['marker'])))
         lines.append('- work: %d event(s) (%d graphics, %d compute) — events, not vertices: the bundle '
                      'carries no counts' % (entry['events'], entry['graphics'], entry['compute']))
         lines.append('- targets: %s' % _targets_text(entry))

@@ -56,6 +56,7 @@ rdc-tools/
   .clang-format       RenderDoc's own C++ style, copied (the driver is a RenderDoc client)
   tools/              deploy_dlls.cmake — copies the engine's DLLs next to the exe
   schema/             the driver's schemas, checked in (`schema --check` fails when they drift, §4.12)
+  engine-schemas/     a known engine's names and what each one means (REFERENCE §4.11; `$RDC_ENGINE_SCHEMAS`)
   bin/                the built driver and the DLLs it loads (gitignored)
   build/              the CMake build tree (gitignored)
   README.md           this file — setup, quick start, and the playbook for an AI agent
@@ -309,7 +310,7 @@ python src\py\rdc_analysis.py diff mobile.rdc pc.rdc                      # road
 
 Then narrow by name rather than by index: the pass list (aligned by **marker path**, so it survives
 re-captures), the named cbuffer values that moved (`watch <name>` *(ROADMAP §2)* turns that into a table over the whole
-frame), and the schema table *(ROADMAP §1.3)* to say which *concept* the differing block is (`IndirectLightingCache`,
+frame), and the tables in `engine-schemas/` *(REFERENCE §4.11)* to say which *concept* the differing block is (`IndirectLightingCache`,
 `Material`, …). Where the two engines' reflections disagree on names entirely, the offline `resources` and
 `rootsig` views are the fallback: they compare what the *file* recorded. State the GPU caveat (the pitfalls above) in the
 answer: both frames were replayed on *this* machine's GPU.

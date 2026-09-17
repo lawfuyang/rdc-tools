@@ -8,12 +8,20 @@ from typing import Any, Dict, List, TypedDict, Union
 
 BUNDLE_VERSION = 1
 REPORT_VERSION = 1
+#: The report *document's* format version, which every document the tool writes carries as `schemaVersion`
+#: (`REPORT_SCHEMA` pins it with `const`). It is not `REPORT_VERSION`: that one tracks what the report says,
+#: this one the shape it says it in, and the two can move independently.
+REPORT_SCHEMA_VERSION = 1
 
 class BundleError(Exception):
     """A directory that cannot be read as a bundle: a missing file, a wrong version, invalid JSON."""
 
 class BundleEvent(TypedDict):
     eid: int
+    #: The engine's marker path for this event (`A > B`), which a driver from 2026-09-17 on writes and an
+    #: older one does not: read it with `.get('marker', '')` rather than by index, because a bundle outlives
+    #: the driver that wrote it.
+    marker: str
     pso: str
     psoKind: str
     shaders: str
@@ -65,6 +73,9 @@ class ReportPass(TypedDict):
     index: int
     firstEid: int
     lastEid: int
+    #: The marker path of the pass's first event, empty when that event is inside no marker (or when the
+    #: bundle came from a driver that did not write them).
+    marker: str
     kind: str
     reason: str
     events: int
@@ -79,7 +90,7 @@ class ReportPass(TypedDict):
     firstTouched: List[str]
 
 #: One red flag. `what` is the *observation*; what it means is the reader's, because a bundle can prove what
-#: the engine held, not what the frame intended. `unproven` is the ROADMAP §1.4 gate: a detector that has
+#: the engine held, not what the frame intended. `unproven` is the ROADMAP §1.3 gate: a detector that has
 #: never been checked against a capture whose bugs are known has not earned a verdict.
 class RedFlag(TypedDict):
     detector: str
@@ -95,7 +106,60 @@ class DetectorRun(TypedDict):
     ran: bool
     why: str
 
+#: One name a concept rests on, and where it was read. `kind` is what sort of name it is -- a constant block, a
+#: shader entry point, a resource, a marker, a pass structure string or a member of a block -- because "this
+#: pass is a mobile base pass" and "this block is the indirect lighting cache" are claims of different shapes.
+class EngineEvidence(TypedDict):
+    kind: str
+    name: str
+    where: str
+
+#: One concept the table's vocabulary recognises in this frame, with the evidence that claimed it. `passIndex`
+#: and `firstEid` are 0 for a concept claimed for the whole frame rather than for one pass -- a real value is
+#: never 0, because an event id starts at 1 -- so "which pass" is readable without an optional key.
+class EngineConceptRow(TypedDict):
+    concept: str
+    kind: str
+    evidence: List[EngineEvidence]
+    note: str
+    passIndex: int
+    firstEid: int
+
+#: One tagged member of one block, at one event: the "which pass, which cbuffer, which value" half of an
+#: interpretation. `firstEid` is the event the document was written at, which is what makes a value checkable
+#: (`replay_dump cb <capture> <eid> <stage> <slot>`); `passIndex` is the report's pass that event falls in.
+#: `bound` is false when nothing was bound to the block at that event -- and then every member reads zero,
+#: which is a fact about the *binding*, not about the value, so a reader has to be told which it is.
+class EngineValue(TypedDict):
+    concept: str
+    block: str
+    member: str
+    value: str
+    firstEid: int
+    passIndex: int
+    bound: bool
+
+#: A question the table asks of a frame, answered with the concepts and values its group claimed.
+class EngineQuestion(TypedDict):
+    id: str
+    title: str
+    ask: str
+    conceptRows: List[EngineConceptRow]
+    values: List[EngineValue]
+
+#: The whole interpretation. Empty `engine` means no table claimed the frame's names, and then there is nothing
+#: in `concepts` or `questions` -- the report says why in `notInterpreted` rather than guessing an engine.
+class EngineInterpretation(TypedDict):
+    engine: str
+    schema: str
+    basis: str
+    detected: List[EngineEvidence]
+    concepts: List[EngineConceptRow]
+    questions: List[EngineQuestion]
+    notInterpreted: List[str]
+
 class ReportDocument(TypedDict):
+    schemaVersion: int
     reportVersion: int
     capture: str
     captureSha256: str
@@ -103,6 +167,7 @@ class ReportDocument(TypedDict):
     bundle: Dict[str, Any]
     frame: Dict[str, Any]
     passes: List[ReportPass]
+    engine: EngineInterpretation
     flags: List[RedFlag]
     detectors: List[DetectorRun]
     caveats: List[str]
@@ -216,6 +281,12 @@ __all__ = [
     'BundleResource',
     'BundleUsage',
     'DetectorRun',
+    'EngineConceptRow',
+    'EngineEvidence',
+    'EngineInterpretation',
+    'EngineQuestion',
+    'EngineValue',
+    'REPORT_SCHEMA_VERSION',
     'REPORT_VERSION',
     'RedFlag',
     'ReportDocument',

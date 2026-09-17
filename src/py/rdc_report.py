@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 
 from rdc_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_passes import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_engine_schema import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_common import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_usage import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -146,9 +147,15 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     for entry in passes:
         _state_rollup(bundle, entry)
 
+    # The engine's own vocabulary: the names the capture wrote, read against the tables in `engine-schemas/`.
+    # It never guesses an engine and never invents a concept -- a bundle whose names match no table comes back
+    # with an empty interpretation and the reason, which is a statement the report prints.
+    engine = interpret_frame(bundle, passes)
+
     flags, detectors = detect_all(bundle, path)
 
     doc: ReportDocument = {
+        'schemaVersion': REPORT_SCHEMA_VERSION,
         'reportVersion': REPORT_VERSION,
         'capture': recorded or path,
         'captureSha256': str(bundle['manifest'].get('captureSha256', '')),
@@ -156,6 +163,7 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
         'bundle': bundle['manifest'],
         'frame': frame_facts(bundle),
         'passes': passes,
+        'engine': engine,
         'flags': flags,
         'detectors': detectors,
         'caveats': report_caveats(),
@@ -183,9 +191,14 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     print('bundle   : %s' % bundle_dir)
     print('events   : %d with bound state, %d pass(es), %d resource(s)'
           % (doc['frame']['events'], len(passes), doc['frame']['resources']))
+    print('engine   : %s' % (
+        '%s (%d concept(s) by name, %d question(s))' % (engine['engine'], len(engine['concepts']),
+                                                        len(engine['questions']))
+        if engine['engine'] else 'not interpreted: %s' % (
+            engine['notInterpreted'][0] if engine['notInterpreted'] else 'no engine table matched')))
     print('written  : %s' % markdown_path)
     print('written  : %s' % json_path)
-    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §1.4)'
+    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §1.3)'
           % (len(flags), sum(1 for run in detectors if run['ran'])))
     return 0
-
+

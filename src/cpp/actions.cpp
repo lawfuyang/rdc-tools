@@ -4,75 +4,114 @@
 
 #include "common.h"
 
-//: One chunk of the structured file. `eid` is the depth-first index over *chunks* (parameters are
-//: descended through without numbering), which is exactly the event id `SetFrameEvent` takes and the
-//: UI shows -- and it is the same number the offline tool prints as its chunk index.
-//: Whether a chunk is an *event*. RenderDoc's event ids number what the command list recorded --
-//: draws, dispatches, copies, markers -- while device-level calls (resource and PSO creation,
-//: `SetName`, descriptor writes) are in the structured file but are not events. So the event id is
-//: **not** the chunk index the offline tool prints: on one capture those agreed (its command-list
-//: chunks start early), on another they were off by tens of thousands. `probe` shows which ids the
-//: engine really has.
-bool IsAction(const rdcstr &name)
+//: An action's kind comes from the engine's own `ActionFlags` (`Dispatch`, `Drawcall`, `PushMarker`, ...), the
+//: way its name comes from `ActionDescription::GetName`. Nothing here classifies by *name* any more: the old
+//: text test (`"Draw"` at the head of the chunk name) existed only for the structured-file walk, which this
+//: file no longer does -- and the structured file's *numbering* is not the engine's either (its chunks are
+//: numbered by index, and on `PC Renderer.rdc` those run to millions where the event ids run to 2132).
+//:
+//: Whether an action opens a marker: `PushMarker` and `SetMarker` both start one; `PopMarker` closes it and
+//: carries no name of its own.
+bool IsMarkerPush(ActionFlags flags)
 {
-  return name.beginsWith("ID3D12GraphicsCommandList") || name.beginsWith("ID3D12CommandList") ||
-         name.beginsWith("ID3D12VideoCommandList") ||
-         name.beginsWith("ID3D12VideoEncodeCommandList");
+  return (flags & (ActionFlags::PushMarker | ActionFlags::SetMarker)) != ActionFlags::NoFlags;
 }
 
-//: Walks one object and everything below it, numbering every *structured-data object* -- chunks and
-//: their parameters alike -- which is what makes the ids line up with the engine's (`probe` is how
-//: that was established). `truncated` records whether the depth cap was ever reached, so a command
-//: can say so rather than present a partial tree as the whole one.
-void Flatten(const SDObject *obj, int depth, int &next, std::vector<ActionRow> &rows, bool &truncated)
+bool IsCallFlags(ActionFlags flags)
 {
-  const int id = next++;
-  if(obj->type.basetype == SDBasic::Chunk)
-  {
-    // The tag says this object is a chunk; the cast says which kind. `static_cast` rather than a
-    // C-style cast, so only the derived-to-base relationship can be involved ([expr.cast]).
-    const SDChunk *chunk = static_cast<const SDChunk *>(obj);
-    ActionRow row;
-    row.eid = IsAction(chunk->name) ? id : 0;
-    row.depth = depth;
-    row.name = chunk->name;
-    row.chunkID = chunk->metadata.chunkID;
-    rows.push_back(row);
-    depth++;
-  }
+  return (flags & (ActionFlags::Drawcall | ActionFlags::Dispatch | ActionFlags::MeshDispatch |
+                   ActionFlags::Copy | ActionFlags::Resolve | ActionFlags::Clear | ActionFlags::Present |
+                   ActionFlags::DispatchRay | ActionFlags::BuildAccStruct | ActionFlags::GenMips)) !=
+         ActionFlags::NoFlags;
+}
 
-  if(depth >= kMaxTreeDepth)
+void CollectActionNodes(const rdcarray<ActionDescription> &actions, const SDFile &file, const rdcstr &prefix,
+                        int depth, std::vector<ActionNode> &rows, bool &truncated)
+{
+  if(depth >= kMaxActionDepth)
   {
     truncated = true;
     return;
   }
+  for(size_t i = 0; i < actions.size(); i++)
+  {
+    const ActionDescription &action = actions[i];
+    const bool push = IsMarkerPush(action.flags);
 
-  const size_t children = obj->NumChildren();
-  for(size_t i = 0; i < children; i++)
-    Flatten(obj->GetChild(i), depth, next, rows, truncated);
+    ActionNode node;
+    node.eid = (int)action.eventId;
+    node.depth = depth;
+    node.call = IsCallFlags(action.flags);
+    node.marker = push;
+    node.name = action.GetName(file);
+    node.path = prefix;
+    rows.push_back(node);
+
+    // A push becomes part of the path for everything below it; the marker's own row keeps the path it opens
+    // *from*, which is what makes "this marker sits inside that one" readable.
+    rdcstr nested = prefix;
+    if(push)
+    {
+      if(!nested.empty())
+        nested += " > ";
+      nested += node.name;
+    }
+    CollectActionNodes(action.children, file, nested, depth + (push ? 1 : 0), rows, truncated);
+  }
 }
 
-//: A draw, dispatch or copy: what a frame is *read* through, as opposed to the state and marker
-//: chunks that also carry an event id.
-bool IsCall(const rdcstr &name)
+std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &truncated)
 {
-  const char *n = strstr(name.c_str(), "::");
-  n = (n != NULL) ? n + 2 : name.c_str();
-  return strncmp(n, "Draw", 4) == 0 || strncmp(n, "Dispatch", 8) == 0 ||
-         strncmp(n, "ExecuteIndirect", 15) == 0 || strncmp(n, "Copy", 4) == 0 ||
-         strncmp(n, "Clear", 5) == 0 || strncmp(n, "Present", 7) == 0 ||
-         strncmp(n, "ResolveSubresource", 18) == 0 || strncmp(n, "BeginRenderPass", 15) == 0;
-}
-
-std::vector<ActionRow> Actions(IReplayController *ctrl, bool &truncated)
-{
-  const SDFile &sd = ctrl->GetStructuredFile();
-  std::vector<ActionRow> rows;
-  int next = 1;
+  const SDFile &file = ctrl->GetStructuredFile();
+  std::vector<ActionNode> rows;
   truncated = false;
-  for(size_t i = 0; i < sd.chunks.size(); i++)
-    Flatten(sd.chunks[i], 0, next, rows, truncated);
+  CollectActionNodes(ctrl->GetRootActions(), file, rdcstr(), 0, rows, truncated);
+  calls = 0;
+  for(size_t i = 0; i < rows.size(); i++)
+  {
+    if(rows[i].call)
+      calls++;
+  }
   return rows;
+}
+
+std::map<int, std::string> MarkerPaths(IReplayController *ctrl)
+{
+  // The action tree is a property of the *capture*, not of the event: walking it once and keeping the result
+  // is what stops a bundle, which asks for the path of every event it writes (`state`, `shaders` and each
+  // `cb`), from walking the same 560 actions 440 times. Measured: 200 s of a 350 s dump. The driver opens one
+  // capture per process, so a cache that lives for the process cannot go stale.
+  static std::map<int, std::string> cached;
+  static bool walked = false;
+  if(walked)
+    return cached;
+
+  int ignored = 0;
+  bool ignored_truncated = false;
+  const std::vector<ActionNode> rows = ActionTree(ctrl, ignored, ignored_truncated);
+  std::map<int, std::string> paths;
+  for(size_t i = 0; i < rows.size(); i++)
+  {
+    rdcstr path = rows[i].path;
+    if(rows[i].marker)
+    {
+      if(!path.empty())
+        path += " > ";
+      path += rows[i].name;
+    }
+    if(!path.empty())
+      paths[rows[i].eid] = std::string(path.c_str());
+  }
+  cached = paths;
+  walked = true;
+  return cached;
+}
+
+std::string MarkerPathAt(IReplayController *ctrl, int eid)
+{
+  const std::map<int, std::string> paths = MarkerPaths(ctrl);
+  const std::map<int, std::string>::const_iterator found = paths.find(eid);
+  return found == paths.end() ? std::string() : found->second;
 }
 
 //: Whether each event id is a *dispatch* rather than a draw, from the engine's own action list.

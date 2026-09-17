@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "engine": "Unreal Engine",
+  "aliases": ["Unreal", "UE4", "UE5"],
+  "notes": [
+    "Unreal's names, taken from the engine's own shaders and its on-disk sources: `MobileBasePass`, `Material`,",
+    "`View`, `Scene`, `ReflectionCaptureSM5` and `IndirectLightingCache` are names of its uniform buffers,",
+    "`MainVS`/`MainPS`/`MainCS`/`*CS` those of its shader entry points, `*LUT*`/`*Volume*` those of its render",
+    "targets. A name is matched exactly and case-sensitively, never by substring guessing: `MobileBasePass` is",
+    "a concept, `MobileBasePassSomethingElse` is not.",
+    "Marker names are the engine's own, read from the action list the driver records per event as of 2026-09-17;",
+    "a marker matches by its own name -- any element of a `A > B` path -- because the paths carry dynamic text",
+    "(`CullLights 22x14x8 NumLights 0`) that no table could list, and a bundle written before that date carries",
+    "no marker at all, which the report reports as a gap rather than as a clean frame."
+  ],
+  "detect": {
+    "constantBlocks": ["_RootShaderParameters", "Material", "View", "Scene", "MobileBasePass", "ForwardLightData"],
+    "shaderEntries": ["MainVS", "MainPS", "MainCS", "GammaAlphaOnlyMain", "ClearTranslucentLightingVolumeCS"],
+    "resources": ["SceneColor", "SceneDepth"],
+    "markers": ["FRDGBuilder::Execute", "BasePassParallel", "ShadowDepths", "SkyAtmosphereLUTs"]
+  },
+  "concepts": [
+    {
+      "concept": "mobile base pass",
+      "kind": "pass",
+      "group": "global illumination",
+      "match": {
+        "constantBlocks": ["MobileBasePass", "MobileDirectionalLight", "MobileReflectionCapture"],
+        "shaderEntries": ["MainVertexShader", "MainPixelShaderMRT"]
+      },
+      "note": "Unreal's mobile forward base pass. Its indirect lighting is read from the indirect lighting cache and the mobile reflection capture, not from the SM5 deferred path."
+    },
+    {
+      "concept": "base pass",
+      "kind": "pass",
+      "group": "global illumination",
+      "match": {
+        "constantBlocks": ["Scene", "Material", "ForwardLightData"],
+        "shaderEntries": ["MainVS", "MainPS"]
+      },
+      "note": "The SM5 base pass: scene-wide constants, the material's own, and the forward light data."
+    },
+    {
+      "concept": "shadow depth pass",
+      "kind": "pass",
+      "match": {"structure": "depth only (no colour target)", "shaderEntries": ["MainVS"]},
+      "note": "A depth-only draw: state alone says 'depth only', the entry point names it a shadow pass."
+    },
+    {
+      "concept": "indirect lighting cache",
+      "kind": "constant-block",
+      "match": {"constantBlocks": ["IndirectLightingCache"]},
+      "members": ["IndirectLightingSHCoefficients", "IndirectLightingCacheTexture", "IndirectLightingCachePrimitive",
+                  "IndirectLightingCacheMinUV", "IndirectLightingCacheMaxUV", "PointSkyBentNormal",
+                  "DirectionalLightShadowing"],
+      "group": "global illumination",
+      "note": "The mobile GI input: spherical-harmonic coefficients and a 3D texture of cached indirect lighting."
+    },
+    {
+      "concept": "reflection capture (SM5)",
+      "kind": "constant-block",
+      "match": {"constantBlocks": ["ReflectionCaptureSM5"]},
+      "members": ["ReflectionCapture"],
+      "group": "global illumination",
+      "note": "The SM5 path's reflection captures: the probes' cubemaps and their box transforms."
+    },
+    {
+      "concept": "mobile reflection capture",
+      "kind": "constant-block",
+      "match": {"constantBlocks": ["MobileReflectionCapture", "ReflectionCaptureES31"]},
+      "members": ["CapturePositionHighAndRadius", "BoxTransform", "Params"],
+      "group": "global illumination"
+    },
+    {
+      "concept": "forward lighting",
+      "kind": "constant-block",
+      "match": {"constantBlocks": ["ForwardLightData"]},
+      "members": ["DirectionalLight", "NumReflectionCaptures", "CulledReflectionCapture"],
+      "group": "global illumination"
+    },
+    {
+      "concept": "sky light",
+      "kind": "semantic",
+      "match": {"members": ["SkyLightColor", "SkyLightAffectGlobalIlluminationFlag", "IndirectLightingColorScale",
+                            "PrecomputedIndirectLightingColorScale", "AmbientCubemapTint",
+                            "VolumetricLightmapWorldToUVScale"]},
+      "members": ["SkyLightColor", "SkyLightAffectGlobalIlluminationFlag", "IndirectLightingColorScale",
+                  "PrecomputedIndirectLightingColorScale", "AmbientCubemapTint", "VolumetricLightmapWorldToUVScale"],
+      "group": "global illumination",
+      "note": "The view's own indirect-lighting parameters, in whichever uniform buffer carries them (`View` in both measured captures)."
+    },
+    {
+      "concept": "sky atmosphere",
+      "kind": "pass",
+      "match": {
+        "constantBlocks": ["Atmosphere", "SkyAtmosphere"],
+        "shaderEntries": ["RenderSkyAtmosphereRayMarchingPS", "RenderTransmittanceLutCS",
+                          "RenderMultiScatteredLuminanceLutCS", "RenderSkyViewLutCS", "RenderDistantSkyLightLutCS"]
+      },
+      "note": "Unreal's sky atmosphere: the LUT chain and the ray-marching pass."
+    },
+    {
+      "concept": "eye adaptation",
+      "kind": "pass",
+      "match": {"shaderEntries": ["BasicEyeAdaptationCS", "BasicEyeAdaptationSetupPS", "CopyEyeAdaptationToTextureCS"]}
+    },
+    {
+      "concept": "screen space reflections",
+      "kind": "pass",
+      "match": {"shaderEntries": ["ScreenSpaceReflectionsPS"]}
+    },
+    {
+      "concept": "light grid injection",
+      "kind": "pass",
+      "match": {"shaderEntries": ["LightGridInjectionCS", "LightGridCompactCS"]}
+    },
+    {
+      "concept": "hierarchical Z-buffer",
+      "kind": "pass",
+      "match": {"shaderEntries": ["HZBBuildCS"]}
+    },
+    {
+      "concept": "translucency lighting volume",
+      "kind": "pass",
+      "match": {"shaderEntries": ["ClearTranslucentLightingVolumeCS"]}
+    },
+    {
+      "concept": "instance culling",
+      "kind": "pass",
+      "match": {"shaderEntries": ["InstanceCullBuildInstanceIdBufferCS", "RayTracingBuildInstanceBufferCS"]}
+    },
+    {
+      "concept": "render graph pass",
+      "kind": "pass",
+      "match": {"markers": ["FRDGBuilder::Execute"]},
+      "note": "The marker UE5 puts around the whole render-graph execution; everything inside it is the frame's work."
+    },
+    {
+      "concept": "base pass (engine marker)",
+      "kind": "pass",
+      "match": {"markers": ["BasePass", "BasePassParallel"]},
+      "note": "UE's own name for the pass, from its action list. This is the marker half of *base pass*: the other claims it from the blocks and entry points, and a bundle written before 2026-09-17 has no markers to match."
+    },
+    {
+      "concept": "depth prepass",
+      "kind": "pass",
+      "match": {"markers": ["DepthPassParallel"]},
+      "note": "UE's depth-only prepass, named by the engine rather than inferred from a depth-only target."
+    },
+    {
+      "concept": "shadow depths",
+      "kind": "pass",
+      "match": {"markers": ["ShadowDepths"]},
+      "note": "The shadow-map pass, named by the engine."
+    },
+    {
+      "concept": "post processing",
+      "kind": "pass",
+      "match": {"markers": ["PostProcessing"]}
+    },
+    {
+      "concept": "translucency",
+      "kind": "pass",
+      "match": {"markers": ["Translucency"]}
+    },
+    {
+      "concept": "sky atmosphere LUTs",
+      "kind": "pass",
+      "match": {"markers": ["SkyAtmosphereLUTs"]},
+      "note": "The LUT chain of the sky atmosphere, under UE's own marker."
+    },
+    {
+      "concept": "light grid",
+      "kind": "pass",
+      "match": {"markers": ["ComputeLightGrid"]}
+    },
+    {
+      "concept": "gpu scene",
+      "kind": "semantic",
+      "match": {"members": ["GPUSceneInstanceSceneData", "GPUSceneInstancePayloadData", "GPUSceneLightData",
+                            "GPUSceneLightmapData"]},
+      "members": ["GPUSceneInstanceSceneData", "GPUSceneInstancePayloadData", "GPUSceneLightData",
+                  "GPUSceneLightmapData"],
+      "note": "The bindless handles a shader uses to reach the GPU scene buffers, in whichever block carries them (`Scene` in both measured captures)."
+    }
+  ],
+  "questions": [
+    {
+      "id": "global-illumination",
+      "title": "where the frame's indirect lighting comes from",
+      "group": "global illumination",
+      "ask": "Which pass and which constant block carry the indirect lighting, and what do the members the table tags say?"
+    }
+  ]
+}

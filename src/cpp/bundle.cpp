@@ -428,6 +428,11 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   const std::map<int, bool> dispatchKinds = DispatchByEid(ctrl, callCount);
   Log("bundle: %d call(s) classified from the engine's action flags", callCount);
 
+  // The marker path of every event, from the same action list: one walk for the whole bundle rather than one
+  // per event, because the tree is walked once per `MarkerPathAt` call.
+  const std::map<int, std::string> markerPaths = MarkerPaths(ctrl);
+  Log("bundle: %d event(s) sit inside a marker", (int)markerPaths.size());
+
   int eventsWritten = 0;
   size_t stateFiles = 0;
   {
@@ -496,10 +501,14 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
               (unsigned)st->rootSignature.parameters.size());
       const std::string stateHash = StateHash(key);
 
+      // `marker` is the engine's own marker path for this event (`A > B`), from the action list: it is what
+      // lets an offline rule name a pass in the engine's vocabulary instead of describing its state, and it
+      // survives a re-capture where an event id does not.
       ObjectRow(
-          Fmt("{\"eid\": %d, \"pso\": \"%s\", \"psoKind\": \"%s\", \"shaders\": \"%s\","
+          Fmt("{\"eid\": %d, \"marker\": \"%s\", \"pso\": \"%s\", \"psoKind\": \"%s\", \"shaders\": \"%s\","
               " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, \"state\": \"%s\"}",
-              eid, IdText(st->pipelineResourceId).c_str(), compute ? "compute" : "graphics",
+              eid, JsonEscape(markerPaths.count(eid) ? markerPaths.find(eid)->second : std::string()).c_str(),
+              IdText(st->pipelineResourceId).c_str(), compute ? "compute" : "graphics",
               shaderIds.c_str(), targets.c_str(), depth.c_str(),
               (unsigned)st->rootSignature.parameters.size(), stateHash.c_str()));
       eventsWritten++;
@@ -781,9 +790,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
         "{\"what\": \"per-event triangle and thread counts\", \"why\": \"those live in the"
         " captured call arguments, not in the pipeline state\"}"));
     ObjectRow(std::string(
-        "{\"what\": \"marker and pass names\", \"why\": \"the action list carries them"
-        " (`ActionDescription::customName`, reached through `GetRootActions()`) and this"
-        " bundle does not write them yet\"}"));
+        "{\"what\": \"the marker *path* of an event that is outside every marker\", \"why\": \"the"
+        " path is empty there, which is the truth rather than a missing measurement; `draws`"
+        " prints the same tree\"}"));
     ObjectRow(
         std::string("{\"what\": \"texture thumbnails\", \"why\": \"the engine decodes textures but"
                     " does not resize them; --textures writes full decodes\"}"));

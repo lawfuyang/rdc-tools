@@ -24,8 +24,9 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
   their setup and found nothing.
 - A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
-  `renderdoc-src\PC Renderer.rdc` must still print `2132 events / 47 passes / 493 resources / 101 findings from
-  20 detectors`, and the driver's text output must stay byte-identical.
+  `renderdoc-src\PC Renderer.rdc` must still print `2132 events / 47 passes / 493 resources / 63 findings from
+  20 detectors` and `engine   : Unreal Engine (31 concept(s) by name, 1 question(s))`, and the driver's text
+  output must stay byte-identical.
 - New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix.
 - Never weaken, skip or delete an assertion to make a run pass. Tests pinning behaviour that looks wrong
   are marked `CHARACTERIZATION` — change code and test together, and say so.
@@ -106,9 +107,15 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `cat` is the range's declared category and `type` is the heap slot's own descriptor type; the mismatch rule
   compares those two and **never** the reflection's letter against a row of a different letter -- `b0` and
   `t0` are separate register spaces, and that mistake cost ~60 false positives on a real capture.
-- Never assume an event id is a chunk index: `probe` is the authority (`REFERENCE.md` §9). The offline tool's
-  chunk numbering matched the engine on the Unreal captures and not on the hobby-renderer one, and a wrong id
-  silently returns an *empty* state rather than failing.
+- Never assume an event id is a chunk index: `probe` is the authority (`REFERENCE.md` §9), and since
+  2026-09-17 `draws` prints the engine's own ids too (`ActionDescription::eventId`, from `GetRootActions`),
+  which is the numbering `SetFrameEvent`, `probe` and a bundle all use. The offline tool's `chunks`/`summary`
+  keep their own chunk numbering; the two agreed on the Unreal captures and do not on the hobby-renderer one,
+  and a wrong id silently returns an *empty* state rather than failing.
+- A **marker path** is available with the ids: every event carries the markers it sits inside, written by
+  `state`/`shaders`/`cb` as a `marker` field and by `dump` into `events.json`, and a bundle older than that
+  member simply has none (read it with a default, never by index). Matching is by the *name inside* a path
+  (`A > B` answers for `B`), because paths carry dynamic text no table could list.
 - The driver must not specialise RenderDoc's function templates (`DoStringise<...>`). RenderDoc defines them in
   its own `stringise.cpp`, unreachable from our translation unit
   (`[ifndr:temp.expl.spec.unreachable.declaration]`, `[basic.def.odr]`); use local, distinctly-named helpers
@@ -126,7 +133,8 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   stream cache and the loaders, `rdc_dxbc.py` the shader containers, `rdc_resources.py` the resource table and
   everything read out of it (formats, heaps, root signatures, `RDEF`), `rdc_payloads.py` the chunk payload
   decoders, `rdc_commands.py` the commands, `rdc_report.py`/`rdc_bundle.py`/`rdc_passes.py`/`rdc_detect_*.py`/
-  `rdc_report_render.py` the report, `rdc_schemas.py` the JSON contract, `rdc_analysis.py` the CLI that re-exports
+  `rdc_report_render.py` the report, `rdc_engine_schema.py` the engine-name interpretation (`engine-schemas/`),
+  `rdc_schemas.py` the JSON contract, `rdc_analysis.py` the CLI that re-exports
   them all. C++: `src/cpp/replay_dump.cpp` the entry point, `common.h` the modules' shared declarations,
   `text.cpp`/`output.cpp` the printing, `capture.cpp` the engine session, `actions.cpp` the action tree,
   `commands_frame.cpp`/`commands_state.cpp` the commands by area, `bundle.cpp` the bundle producer,
@@ -158,6 +166,18 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `tests/test_rdc_report.py` pin the document. A change that alters those bytes is deliberate or it is a bug.
   Its "what this report cannot tell you" section names what is not implemented yet (ROADMAP §1): whatever lands
   there must update that section in the same change, or the report starts lying about its own coverage.
+- The engine vocabulary (`engine-schemas/*.json`, `rdc_engine_schema.py`) keeps three rules, and they are what
+  make it worth reading: a concept is claimed **only** because the capture contains a name the table lists (a
+  constant block, a shader entry point, a resource, a marker, a pass *structure* string), every claim carries
+  the name and the place it came from in the same row, and a frame whose names do not match gets **no**
+  interpretation with the reason printed. Do not add value-based or timing-based inference, do not let a
+  concept match on "some of the kinds it asks for" (a block that is merely bound in a pass is a leftover
+  binding as often as a fact — the match is a conjunction), and do not read a value the table does not tag: a
+  member's number is printed with the eid its document was written at, because a value without a place is not
+  evidence. A member read while **nothing was bound** to its block is not a value: the engine returns every
+  member's default, and the row says `*not bound*` rather than passing a zero off as data. The pilot — the
+  mobile-vs-PC GI question answered in those words — is documented in REFERENCE §4.11 and pinned by
+  `tests/test_rdc_engine_schema.py`.
 - The writer's separator state nests with the arrays: `ArrayOpen` saves the enclosing array's `g_firstRow` and
   `ArrayClose` restores it. Without that, an *empty* nested array leaves the enclosing one looking like it had
   just started, the next item is written with no comma, and the document does not parse — which is exactly how

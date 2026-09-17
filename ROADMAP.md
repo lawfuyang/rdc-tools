@@ -99,13 +99,13 @@ say so explicitly, and should degrade gracefully when it is missing.
 ## 1. P0 — Executive summary: what still has to go into it
 
 **What remains is what makes it *useful*.** The report (REFERENCE §4.11, `report <rdc> <bundleDir>`) says what
-the frame *is* and — through its twenty detectors — what is *wrong* with it. What it cannot do yet is say what
-to look at *first*, or what any of it is called in the engine's own vocabulary, and those two are the reason it
-exists: the frame-level "what is going on here, and what is suspicious" is the work being done by hand today,
-over a dozen commands, and it is the same work every time. Every item below is offline code over a bundle,
-which is what keeps it testable from fixtures (§7) rather than from a capture. The report's own "what this
-report cannot tell you" section lists each of them as absent, so a reader is never misled about what they are
-looking at — and each item that lands has to keep that section true.
+the frame *is*, what it is *called* in the engine's own vocabulary (its names read against `engine-schemas/`),
+and — through its twenty detectors — what is *wrong* with it. What it cannot do yet is say what to look at
+*first*, and that is the reason it exists: the frame-level "what is going on here, and what is suspicious" is
+the work being done by hand today, over a dozen commands, and it is the same work every time. Every item below
+is offline code over a bundle, which is what keeps it testable from fixtures (§7) rather than from a capture.
+The report's own "what this report cannot tell you" section lists each of them as absent, so a reader is never
+misled about what they are looking at — and each item that lands has to keep that section true.
 
 ### 1.1 Notable passes and notable resources
 
@@ -126,17 +126,7 @@ reflection, unresolved bindless descriptors, no counters, no shader debug info, 
 the fact that the frame was replayed on this machine's GPU rather than the device that recorded it) · the
 appendix of reproduction commands.
 
-### 1.3 The engine schema table
-
-Names like `MobileBasePass`, `IndirectLightingCache` and `Material` are Unreal's, and the summary can only
-speak that vocabulary if it is written down. A small, extendable table (`engine-schemas/*.json` — not the
-driver's `schema/` folder, which is the contract for its documents, REFERENCE §4.12) maps a known engine's
-constant-block, semantic and marker names onto concepts (`base pass`, `GI cache`, `light`, `material`,
-`shadow pass`). Everything derived from it is labelled as name-based; a capture from an unknown engine simply
-gets no interpretation rather than a wrong one. This is also where the project's original question finally gets
-an answer in one place: the mobile-vs-PC GI investigation is the acceptance case for §1 as a whole (§1.4).
-
-### 1.4 Acceptance gates
+### 1.3 Acceptance gates
 
 * Runs on all three captures in this project, in seconds once the bundle exists, with no unhandled exception and
   no warning on stderr.
@@ -150,11 +140,9 @@ an answer in one place: the mobile-vs-PC GI investigation is the acceptance case
   known).
 * **Honest coverage**: every detector row is either demonstrated on a labelled capture in the corpus (§7, the
   capture corpus) or marked *unproven* in the report itself.
-* **The pilot**: the summary explains the mobile-vs-PC GI difference in the words of the schema table — which
-  pass, which cbuffer, which value — and a reader can follow its appendix commands and see the same thing.
 
-**Effort.** ~4 days for what is left: notability ranking and recommendations (1–2 d), the schema table and the
-pilot (2 d). The report skeleton, the roll-ups and the detectors are landed.
+**Effort.** ~2 days for what is left: notability ranking and recommendations. The report skeleton, the
+roll-ups, the detectors and the engine vocabulary are landed.
 
 **Blockers.** Bundle size on the 1.4 GB capture (mitigated by `--since`/`--until`/`--max-events` and by storing
 full state only for distinct PSOs plus pass boundaries, REFERENCE §9); counters are hardware/driver dependent and slow;
@@ -165,22 +153,16 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 
 ## 2. P1 — Replay driver: finding your way around a frame
 
-* **Engine event ids in the driver's own output** — *the blocker was a wrong belief*: this item said "no
-  exported accessor exists" for the action list, and `IReplayController::GetRootActions()` has been in
-  `renderdoc_replay.h` the whole time. Measured today, from the field's own use: `ActionDescription::eventId`
-  **is** the engine's event id, `flags` is the engine's call kind (`Dispatch`, `Drawcall`, `MeshDispatch`,
-  `Copy`…), and `customName`/`GetName` carry the marker names — so both of this item's aims are one walk away,
-  no calibration. What remains is small and mechanical: `draws` must print the action's `eventId` instead of the
-  structured file's chunk-derived number (which is a *different* numbering: on the PC capture those run to
-  millions where the engine's ids run to 2132), and the marker path becomes available to every command at the
-  same time. `psoKind` in the bundle already reads the action list for this reason. (~1 h)
 * **`--repl` (and `--stdin`)** — keep the capture open and take commands from the terminal or a pipe, so the
   3–10 s device setup is paid once and exploration becomes interactive instead of a sequence of processes. The
   building blocks exist (`batch` already runs a command list against one open capture); the work is prompt/loop
   plumbing, per-command error recovery, and not leaking the controller between commands. (~2–4 h)
 * **`find <substring>` and `--at-marker <path>`** — find the events whose call name, marker path or resource
-  name matches, and let every command take a marker path instead of an eid. Marker paths survive re-captures
-  where eids do not, so this is also what the summary's appendix and any stored expectations should use. (~3 h)
+  name matches, and let every command take a marker path instead of an eid. The names are there to search:
+  `draws` prints the engine's ids and marker paths, and `events.json` carries a `marker` member per event, so
+  this is one pass over the action list plus the argument plumbing (`--at-marker` resolves a path to an id the
+  same way `probe` resolves an id to state). Marker paths survive re-captures where eids do not, so this is also
+  what the summary's appendix and any stored expectations should use. (~3 h)
 * **`statediff <eidA> <eidB>`** — field-by-field diff of two events' state (RT set, depth, blend, raster, root
   parameters, shaders, viewport), printed as one changed-field-per-line list. "What changed between draw 40 and
   draw 41" is otherwise a manual read of two `state` dumps. (~4 h)
@@ -425,27 +407,22 @@ never silent ones).
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — the frame-level answer**
-1. **The engine schema table and the pilot (§1.3–1.4)** — the mobile-vs-PC GI question answered in the report's
-   own words is the acceptance case for the report as a whole, and the table is what lets the report name a
-   pass instead of describing its state.
-
-**Phase 2 — exploration and experiments**
-2. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
+**Phase 1 — exploration and experiments**
+1. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
    navigable; ~2 days for all four, and `--at-marker` in particular is now one walk of `GetRootActions()`
    rather than something to derive (§2's first item).
-3. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
+2. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
-4. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
-5. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
-6. **Dependency graph, memory/aliasing report (§5)** — the evidence behind §5's own rows (the bulk of what a
+3. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.
+4. **Cross-checks + per-pass counters (§3, §4)** — the deterministic bugs and the cost column.
+5. **Dependency graph, memory/aliasing report (§5)** — the evidence behind §5's own rows (the bulk of what a
    detector could use from it has landed as the usage-chain rules).
 
-**Phase 3 — comparisons and the long tail**
-7. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
-8. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
+**Phase 2 — comparisons and the long tail**
+6. **A/B: `replaydiff`, pass-list diff, image comparison (§6)** — the mobile-vs-PC workflow done properly.
+7. **Golden outputs and the corpus (§7)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-9. **Bundled chunk names (§5, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
-    REFERENCE §8 bullet that is not replay's job.
-10. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
-12. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.
+8. **Bundled chunk names (§5, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+   REFERENCE §8 bullet that is not replay's job.
+9. **Remote replay (§8)** — the honest fix for the desktop-GPU caveat, when a device is available.
+10. **The D3D12 harness (§8.5)** — only when a shader must be run with inputs the capture does not contain.

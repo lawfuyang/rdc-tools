@@ -66,6 +66,9 @@ extern pGetVersionString g_GetVersionString;    // capture.cpp: resolved from th
 // the capture's to choose, and a corrupt or crafted file must not be able to exhaust the stack.
 
 constexpr int kMaxTreeDepth = 256;
+//: How deep the *action* walk goes before it gives up and says so: the marker nest is 3-5 levels in every
+//: capture measured, and a cap is what keeps engine-supplied data from recursing without a bound.
+constexpr int kMaxActionDepth = 64;
 constexpr int kMaxValueDepth = 16;
 
 // --------------------------------------------------------------------------- text (text.cpp)
@@ -218,19 +221,28 @@ struct ControllerGuard
 
 //: One chunk of the structured file. `eid` is the depth-first index over *chunks* (parameters are descended
 //: through without numbering), which is not the engine's event id -- that comes from the action list.
-struct ActionRow
+//: One action from the engine's own list, flattened: its id, its name, and the markers it sits inside.
+//:
+//: `eid` is `ActionDescription::eventId` -- the id `SetFrameEvent`, `probe` and a bundle's ids all use -- and
+//: *not* the structured file's chunk numbering, which is a different one (measured: on `PC Renderer.rdc` the
+//: chunk-derived numbers run to millions where the engine's event ids run to 2132, so the two never meet).
+//: `flags` is the engine's own classification, so a call is a call and a marker is a marker: nothing here is
+//: inferred from a name.
+struct ActionNode
 {
-  int eid;
-  int depth;
-  rdcstr name;
-  uint32_t chunkID;
+  int eid = 0;            // ActionDescription::eventId: the id SetFrameEvent, probe and a bundle all use
+  int depth = 0;          // how deep in the marker nest, 0 at the root
+  bool call = false;      // a draw/dispatch/copy rather than a marker
+  bool marker = false;    // this row opens a marker (PushMarker/SetMarker)
+  rdcstr name;            // the marker's custom name, or the call's own chunk name
+  rdcstr path;            // the markers this row sits inside, `A > B`, empty at the root
 };
 
-std::vector<ActionRow> Actions(IReplayController *ctrl, bool &truncated);
-bool IsAction(const rdcstr &name);
-bool IsCall(const rdcstr &name);
-void Flatten(const SDObject *obj, int depth, int &next, std::vector<ActionRow> &rows,
-             bool &truncated);
+bool IsMarkerPush(ActionFlags flags);
+bool IsCallFlags(ActionFlags flags);
+std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &truncated);
+std::map<int, std::string> MarkerPaths(IReplayController *ctrl);
+std::string MarkerPathAt(IReplayController *ctrl, int eid);
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
 std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 

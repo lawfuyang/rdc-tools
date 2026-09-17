@@ -2,7 +2,8 @@
   "title": "shaders",
   "description": "The reflection of every stage bound at one event, one object per stage -- an array, because two stages share every member name and a flat object would let a reader keep only the last.",
   "type": "object",
-  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "stages"],
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "marker",
+               "stages"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -10,6 +11,7 @@
     "driver": {"type": "string"},
     "localReplay": {"type": "integer"},
     "machine": {"type": "string"},
+    "marker": {"type": "string", "description": "the engine's marker path for this event, `A > B`, empty outside every marker"},
     "eid": {"type": "integer"},
     "stages": {"type": "array", "items": {
       "type": "object",

@@ -32,46 +32,50 @@ int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
              const char *filter)
 {
   PrintCaptureHeader(file, path);
+  int calls = 0;
   bool truncated = false;
-  const std::vector<ActionRow> rows = Actions(ctrl, truncated);
+  const std::vector<ActionNode> rows = ActionTree(ctrl, calls, truncated);
 
-  int shown = 0, events = 0;
-  ArrayOpen("events");
+  int shown = 0;
+  ArrayOpen("actions");
   for(size_t i = 0; i < rows.size(); i++)
   {
-    const ActionRow &r = rows[i];
-    if(r.eid == 0)
-      continue;    // a device-level chunk: not an event
-    const bool call = IsCall(r.name);
-    events++;
-    if(filter != NULL && *filter != '\0' && strstr(r.name.c_str(), filter) == NULL)
+    const ActionNode &row = rows[i];
+    // The filter matches the call's own name *or* the marker path it sits inside, which is what makes a marker
+    // path a handle for a set of events (`--filter BasePass` finds the pass, not a call that spells it).
+    const bool filtered = filter != NULL && *filter != '\0';
+    const bool matches = !filtered || strstr(row.name.c_str(), filter) != NULL ||
+                         strstr(row.path.c_str(), filter) != NULL;
+    if(!matches)
       continue;
-    if(!call && filter == NULL)
-      continue;    // without a filter: calls and markers only
+    if(!filtered && !row.call && !row.marker)
+      continue;    // without a filter: calls and markers only -- the state setters between them are not the tree
     if(maxRows > 0 && shown >= maxRows)
       continue;
 
     if(g_json)
     {
-      ObjectRow(Fmt("{\"eid\": %d, \"depth\": %d, \"chunkID\": %u, \"name\": \"%s\"}", r.eid,
-                    r.depth, r.chunkID, JsonEscape(r.name).c_str()));
+      ObjectRow(Fmt("{\"eid\": %d, \"depth\": %d, \"call\": %s, \"marker\": %s, \"name\": \"%s\", "
+                    "\"path\": \"%s\"}",
+                    row.eid, row.depth, row.call ? "true" : "false", row.marker ? "true" : "false",
+                    JsonEscape(row.name).c_str(), JsonEscape(row.path).c_str()));
     }
     else
     {
-      const std::string pad((size_t)r.depth * 2, ' ');
-      printf("%-7d %-5d %s%s\n", r.eid, r.depth, pad.c_str(), r.name.c_str());
+      const std::string pad((size_t)row.depth * 2, ' ');
+      printf("%-7d %-5d %s%s\n", row.eid, row.depth, pad.c_str(), row.name.c_str());
     }
     shown++;
   }
-  ArrayClose(false);    // totalChunks/totalEvents/shown follow
+  ArrayClose(false);    // totalActions/totalCalls/shown follow
   g_indent = g_json ? 1 : 0;
-  Field("totalChunks", (long long)rows.size());
-  Field("totalEvents", events);
+  Field("totalActions", (long long)rows.size());
+  Field("totalCalls", (long long)calls);
   Field("shown", shown, !truncated);
   if(truncated)
   {
-    // Only reachable on a capture whose action tree is deeper than kMaxTreeDepth: say so rather
-    // than presenting a partial tree as the whole one.
+    // Only reachable on a capture whose action tree is deeper than the recursion limit: say so rather than
+    // presenting a partial tree as the whole one.
     Field("truncated", std::string("action tree deeper than the recursion limit"), true);
   }
   g_indent = 0;

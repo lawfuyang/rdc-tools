@@ -177,26 +177,46 @@ from the usage chain itself (a `CS_RWResource` row inside the pass) and reports 
 what a bundle can attribute work to: 4 passes on that capture bind UAVs nothing afterwards reads — the two
 light-culling grids and three SkyAtmosphere LUTs, each with its own last use to check.
 
-The rows below are what is left, and they are not independent items: each group waits on **one** piece of
-evidence, and *which* piece decides whether the work is a rule or a driver change — so the route is named
-first and the rows follow it. Nothing waits on a decode or a calibration any more: the usage chain and the
-resolved descriptor tables both landed, and §2's eid↔chunk calibration turned out not to be on the path of
-any detector.
+**From the pipeline state a bundle now records** (the driver change this section's old route table waited on):
+five more rules — and getting there exposed a bug worth its own line: `psoKind` was guessed from the *bound
+shaders*, and the application leaves a compute shader bound between dispatches, so on `PC Renderer.rdc` all
+2132 events read as compute — draws included — and the offline tool grouped a frame of draws into compute
+passes. It now comes from the capture's action tree (a `Dispatch*` chunk or not, with a non-call event taking
+the kind of the call it follows), which is where the call kind actually lives: 1105 calls classified there, 10
+of them `ExecuteIndirect` and left to the shaders because that one name can be either kind.
 
-| Route | Rows | The one thing needed |
-|---|---|---|
-| **A — pipeline state a bundle does not carry** | depth logic; empty scissor / degenerate viewport; stencil without a writer; blend in an opaque pass (this one also wants §2's marker names) | a driver change that emits the state — the biggest group. Closest of them is **MSAA**: `samples` is in the bundle and `ResolveSubresource` is nameable from the stream, but the payload is not decoded yet, so it needs one measurement first — and measured, none of the three captures to hand carries a multisampled resource or a resolve at all, so that row would ship fixture-only evidence |
-| **B — heuristics** | format/units suspicion; the name half of blend-in-opaque | the component *type* (not in the signature rows — the count is, and it landed) plus the read/write chain of the usage detectors: a heuristic is worth writing once its inputs are facts |
+The state these rules read is written per state *change* rather than per event — 30 documents for
+the Android trace's 723 events — so each is stated per *range* (from its own eid to the next document's), and
+a dispatch is never judged on it, because the engine reports at a compute event whatever the last draw left
+bound. `depth-logic` (writes on with the test off, so nothing rejects a fragment and each draw's depth
+overwrites the last one's — or a test with no depth target bound at all), `empty-scissor` (an enabled viewport
+or scissor with a zero or negative extent: the draw is issued and shades nothing), `stencil-without-writer`
+(stencil testing a target nothing earlier wrote, with a `Clear` row deliberately *not* counted as a writer
+because it does not say which of depth and stencil it cleared), and two `[heuristic]`s: `blend-in-opaque-pass`
+(blending on while writing a target whose *name* says GBuffer or base pass — a name is the application's
+convention, so the finding says so rather than claiming the pass is opaque) and `format-units-suspicion` (a
+`float` pixel-shader output into an 8-bit-or-narrower linear target: the types are in the bundle, the values
+are not). Plus `mismatched-msaa`, which needs no pipeline state at all: `samples` is in the resource table and
+a resolve is a usage row, so *a multisampled colour target no resolve ever touched* is decidable as it
+stands — the *which subresource did the resolve copy* half needs the `ResolveSubresource` payload, which a
+bundle does not carry, and is stated as unclaimed rather than approximated.
 
-| Detector | What it means | Evidence | Certainty | Route |
-|---|---|---|---|---|
-| Depth logic | depth write on with depth test off (or a depth test with no depth buffer bound) | pipeline state | certain | A |
-| Empty scissor / degenerate viewport | draws that can only produce nothing | viewport/scissor state | certain | A |
-| Stencil without a writer | stencil test enabled where nothing wrote stencil in the frame | state + earlier passes | medium | A |
-| Blend in an opaque pass | blending enabled where the pass name says base/GBuffer/depth | state + marker names | `[heuristic]` | A + B |
-| Mismatched MSAA | samples > 1 with no resolve before present, or a resolve of the wrong subresource | texture descriptions + `ResolveSubresource` events (none of the captures here has either) | certain, once the payload is read | A |
-| Format/units suspicion | a float/HDR shader output written to an 8-bit `_UNORM` target, or sRGB/linear mismatch between write and read | RT format + PS output signature + the RT's later sampling | `[heuristic]` | B |
-| Peak vs total memory | what the frame holds, what it never reads, and what could alias | resource table + lifetimes | advisory | — (§5's report, not a detector) |
+**What is left is one row, and it is not a detector.** *Peak vs total memory* — what the frame holds, what it
+never reads and what could alias — is §5's memory report rather than a red flag, and its evidence (the
+resource table and lifetimes) is already in the bundle. §1.1 itself is complete: **twenty detectors**, every
+one with a fixture that fires it, and every one reporting *skipped with the reason* rather than clean when the
+evidence it reads is missing from a bundle (an older driver's tables or state blocks, a `--no-usage` bundle,
+a capture without its source tree).
+
+All three captures in the corpus were dumped and cross-referenced (the Hobby one as a 600-event window —
+29216 chunks and 11082 resources would make a full bundle of gigabytes): 20 detectors ran on each, and the
+state rules say something on two of the three and nothing on the third for a *checked* reason —
+`depth-logic` fires once on `PC Renderer.rdc` (a depth test with nothing bound), `stencil-without-writer`
+once on the Hobby capture (a read-only depth-stencil target tested with nothing having written it), and both
+heuristics are silent there because the frame binds all 30 of its GBuffer-named targets with blending off and
+binds no 8-bit linear target at all. Android is the quiet one: its graphics ranges are depth-only. The
+findings otherwise: 49 (Android) / 101 (PC) / 64 (Hobby window), all *unproven* until §1.5's labelled capture
+exists.
 
 ### 1.2 Notable passes and notable resources
 
@@ -257,12 +277,15 @@ replayed on *this* machine's GPU, so device-specific behaviour is out of reach (
 
 ## 2. P1 — Replay driver: finding your way around a frame
 
-* **Engine event ids in the driver's own output** — today `draws` numbers the structured file's command-list
-  chunks, which is *not* the engine's event id: on the hobby capture the first draw is chunk 316 while the first
-  event with pipeline state is 842, because RenderDoc numbers only what a command list recorded. `probe` lists
-  the ids that really have state, so an id can be checked, but a draw number from `draws` should work everywhere:
-  either derive the action list (no exported accessor exists) or calibrate once per capture and print both
-  numbers side by side. (~4 h)
+* **Engine event ids in the driver's own output** — *the blocker was a wrong belief*: this item said "no
+  exported accessor exists" for the action list, and `IReplayController::GetRootActions()` has been in
+  `renderdoc_replay.h` the whole time. Measured today, from the field's own use: `ActionDescription::eventId`
+  **is** the engine's event id, `flags` is the engine's call kind (`Dispatch`, `Drawcall`, `MeshDispatch`,
+  `Copy`…), and `customName`/`GetName` carry the marker names — so both of this item's aims are one walk away,
+  no calibration. What remains is small and mechanical: `draws` must print the action's `eventId` instead of the
+  structured file's chunk-derived number (which is a *different* numbering: on the PC capture those run to
+  millions where the engine's ids run to 2132), and the marker path becomes available to every command at the
+  same time. `psoKind` in the bundle already reads the action list for this reason. (~1 h)
 * **`--repl` (and `--stdin`)** — keep the capture open and take commands from the terminal or a pipe, so the
   3–10 s device setup is paid once and exploration becomes interactive instead of a sequence of processes. The
   building blocks exist (`batch` already runs a command list against one open capture); the work is prompt/loop
@@ -515,20 +538,21 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, REFERENCE §4.11)**
-1. **The remaining detectors (§1.1)** — fourteen rows are landed (fourteen detectors: seven over the bundle,
-   four over the usage chain, three over the chunk stream, each with a fixture that fires it), including the
+1. **The detectors (§1.1)** — **done**: twenty of them (seven over the bundle, four over the usage chain,
+   five over the pipeline state, one over the resource table, three over the chunk stream), including the
    flagship *nothing bound where the reflection expects something* in all three of its halves, *binding kind
-   mismatch* and *dead compute*; what is left is seven rows in two groups (the route table there): A is a
-   driver change that emits the pipeline state, B waits until its inputs are facts. Nothing waits on §2's
+   mismatch*, *dead compute* and the five state rules the driver change unlocked. Nothing of it waits on §2's
    eid↔chunk calibration — the engine resolves its own descriptor tables, and the one rule that could not use
-   that resolution takes its evidence from the usage chain instead.
+   that resolution takes its evidence from the usage chain instead. What the section still owns is §5's
+   memory/aliasing row, which is a report rather than a red flag.
 2. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
    own words is the acceptance case for all of the above, and the table is what lets the report name a pass
    instead of describing its state.
 
 **Phase 2 — exploration and experiments**
 3. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§2)** — the cheap commands that make a frame
-   navigable; ~2 days for all four.
+   navigable; ~2 days for all four, and `--at-marker` in particular is now one walk of `GetRootActions()`
+   rather than something to derive (§2's first item).
 4. **Shader patching + differential replay, and RT contact sheets (§3, §4)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
 5. **Pixel history (§3)** — "why is this pixel this colour", gated on the capture supporting it.

@@ -64,6 +64,11 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   register, space, visibility, §3.4) and appends a name only when the capture's `RDEF` reflection offers one
   that every stage agrees on. Never invent a name, and never drop the annotation back to a bare index — an
   index alone is what produced the wrong conclusion in REFERENCE §9.
+- The driver's `psoKind` is the *call kind*, and everything downstream groups by it: it comes from the
+  capture's action tree (a `Dispatch*` chunk or not; an event that is not a call takes the kind of the call it
+  follows), **never** from the bound shaders. Measured: `PC Renderer.rdc` has a compute shader bound at every
+  one of its 2132 events, so the shader-based guess called the whole frame compute and the report grouped a
+  frame of draws into compute passes. A wrong value here is wrong everywhere downstream.
 - The replay driver (`replay_dump.cpp`, REFERENCE §9) keeps the same rule: it prints what the engine returns and
   nothing else. It must keep doing the three things a replay host has to do — `REPLAY_PROGRAM_MARKER()` at file
   scope, `RENDERDOC_InitialiseReplay()` before opening, `RENDERDOC_ShutdownReplay()` on the way out — or it

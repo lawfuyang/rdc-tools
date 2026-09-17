@@ -57,6 +57,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <string>
 #include <type_traits>
 
@@ -418,6 +419,17 @@ static void Field(const char *key, long long value, bool last = false)
     printf("%-18s %lld\n", key, value);
 }
 
+//: A boolean field as JSON's `true`/`false` rather than 1/0: the state blocks below are read by rules that
+//: compare against `true`, and a reader of the bundle should not have to remember which number means on.
+static void Flag(const char *key, bool value, bool last = false)
+{
+  Indent();
+  if(g_json)
+    printf("\"%s\": %s%s\n", key, value ? "true" : "false", last ? "" : ",");
+  else
+    printf("%-18s %s\n", key, value ? "on" : "off");
+}
+
 //: `g_firstRow` is the "this item needs no separator" state of the array *currently* being written.
 //: Arrays nest -- a stage object holds arrays of its own -- so the state nests too: `ArrayOpen` saves the
 //: enclosing array's flag and `ArrayClose` restores it. Without this, writing an *empty* nested array left
@@ -506,14 +518,27 @@ static void ObjectOpen()
 
 //: The matching `}`. Nothing follows it: whether the *enclosing* array has more items is the next
 //: item's separator to write, and whether the array is the last member is its `ArrayClose` to say.
-static void ObjectClose()
+static void ObjectClose(bool last = true)
 {
   if(IsJson())
   {
     g_indent--;
     Indent();
-    fputs("}\n", stdout);
+    printf("}%s\n", last ? "" : ",");
   }
+}
+
+//: A *named* object: `ObjectOpen` above opens an anonymous one, which is what an array element is. A block
+//: of state that belongs under a key of its own (`outputMerger`) writes the key first; the separator rules
+//: are the arrays': the caller says whether it is the last key by what it writes next, and fields inside end
+//: on `Field(..., true)`.
+static void ObjectOpenKey(const char *key)
+{
+  if(!IsJson())
+    return;
+  Indent();
+  printf("\"%s\": {\n", key);
+  g_indent++;
 }
 
 //: printf-style formatting for the output lines. The SAL annotation makes the compiler check every
@@ -836,6 +861,42 @@ static std::vector<ActionRow> Actions(IReplayController *ctrl, bool &truncated)
   return rows;
 }
 
+//: Whether each event id is a *dispatch* rather than a draw, from the engine's own action list.
+//:
+//: Two wrong ways to get this, both measured. The bound shaders: `PC Renderer.rdc` has a compute shader bound
+//: at every one of its 2132 events, so "a cs is bound" called a frame of draws compute -- which is what this
+//: field did before, and the offline tool then grouped draws into compute passes. The structured file's own
+//: numbering: the action tree numbers its objects by *chunk index*, and on that capture those run to millions
+//: while the engine's event ids run to 2132 -- two numberings that never meet, so a map built from them
+//: matched nothing. `ActionDescription::eventId` is the id `SetFrameEvent` takes, and `flags` is the engine's
+//: own classification, so nothing here is inferred from a name or a binding.
+//:
+//: Only the *calls* go into the map. An event the list does not name -- a state setter, a marker, a barrier --
+//: takes the kind of the call it follows, which is what the caller does with this: a root-parameter change
+//: between two draws belongs to the pass those draws are in, and classifying it on its own would cut a
+//: graphics run in two. Mesh dispatches are `Drawcall`-side on purpose: they render to targets like a draw.
+static void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds)
+{
+  for(size_t i = 0; i < actions.size(); i++)
+  {
+    const ActionDescription &action = actions[i];
+    if((action.flags & (ActionFlags::Dispatch | ActionFlags::DispatchRay | ActionFlags::BuildAccStruct)) !=
+       ActionFlags::NoFlags)
+      kinds[(int)action.eventId] = true;
+    else if((action.flags & (ActionFlags::Drawcall | ActionFlags::MeshDispatch)) != ActionFlags::NoFlags)
+      kinds[(int)action.eventId] = false;
+    CollectDispatchKinds(action.children, kinds);
+  }
+}
+
+static std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls)
+{
+  std::map<int, bool> kinds;
+  CollectDispatchKinds(ctrl->GetRootActions(), kinds);
+  calls = (int)kinds.size();
+  return kinds;
+}
+
 // --------------------------------------------------------------------------- value formatting
 
 //: How deep a struct-of-structs is expanded before the rest is elided. The tree comes from the
@@ -1005,6 +1066,117 @@ static int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *pat
   return 0;
 }
 
+//: Names for the pipeline-state enums the offline rules compare and print. The engine's own stringisers are
+//: in its unexported stringise.cpp (see the note at the top of this file), so these are local switches in the
+//: same shape as `StageName` and `RegisterLetter` -- and named by hand on purpose: a finding should read
+//: `LessEqual`, not `2`.
+static const char *CompareFunctionText(CompareFunction fn)
+{
+  switch(fn)
+  {
+    case CompareFunction::Never: return "Never";
+    case CompareFunction::AlwaysTrue: return "AlwaysTrue";
+    case CompareFunction::Less: return "Less";
+    case CompareFunction::LessEqual: return "LessEqual";
+    case CompareFunction::Greater: return "Greater";
+    case CompareFunction::GreaterEqual: return "GreaterEqual";
+    case CompareFunction::Equal: return "Equal";
+    case CompareFunction::NotEqual: return "NotEqual";
+    default: break;
+  }
+  return "?";
+}
+
+static const char *StencilOperationText(StencilOperation op)
+{
+  switch(op)
+  {
+    case StencilOperation::Keep: return "Keep";
+    case StencilOperation::Zero: return "Zero";
+    case StencilOperation::Replace: return "Replace";
+    case StencilOperation::IncSat: return "IncSat";
+    case StencilOperation::DecSat: return "DecSat";
+    case StencilOperation::IncWrap: return "IncWrap";
+    case StencilOperation::DecWrap: return "DecWrap";
+    case StencilOperation::Invert: return "Invert";
+    default: break;
+  }
+  return "?";
+}
+
+static const char *BlendMultiplierText(BlendMultiplier m)
+{
+  switch(m)
+  {
+    case BlendMultiplier::Zero: return "Zero";
+    case BlendMultiplier::One: return "One";
+    case BlendMultiplier::SrcCol: return "SrcCol";
+    case BlendMultiplier::InvSrcCol: return "InvSrcCol";
+    case BlendMultiplier::DstCol: return "DstCol";
+    case BlendMultiplier::InvDstCol: return "InvDstCol";
+    case BlendMultiplier::SrcAlpha: return "SrcAlpha";
+    case BlendMultiplier::InvSrcAlpha: return "InvSrcAlpha";
+    case BlendMultiplier::DstAlpha: return "DstAlpha";
+    case BlendMultiplier::InvDstAlpha: return "InvDstAlpha";
+    case BlendMultiplier::SrcAlphaSat: return "SrcAlphaSat";
+    case BlendMultiplier::FactorRGB: return "FactorRGB";
+    case BlendMultiplier::InvFactorRGB: return "InvFactorRGB";
+    case BlendMultiplier::FactorAlpha: return "FactorAlpha";
+    case BlendMultiplier::InvFactorAlpha: return "InvFactorAlpha";
+    case BlendMultiplier::Src1Col: return "Src1Col";
+    case BlendMultiplier::InvSrc1Col: return "InvSrc1Col";
+    case BlendMultiplier::Src1Alpha: return "Src1Alpha";
+    case BlendMultiplier::InvSrc1Alpha: return "InvSrc1Alpha";
+    default: break;
+  }
+  return "?";
+}
+
+static const char *BlendOperationText(BlendOperation op)
+{
+  switch(op)
+  {
+    case BlendOperation::Add: return "Add";
+    case BlendOperation::Subtract: return "Subtract";
+    case BlendOperation::ReversedSubtract: return "ReversedSubtract";
+    case BlendOperation::Minimum: return "Minimum";
+    case BlendOperation::Maximum: return "Maximum";
+    default: break;
+  }
+  return "?";
+}
+
+//: `VarType` names the *component* type of a signature element; `SignatureText` writes it next to the
+//: component count so a finding can say `float4` or `uint2` without looking an enum number up.
+static const char *VarTypeText(VarType t)
+{
+  switch(t)
+  {
+    case VarType::Float: return "float";
+    case VarType::Double: return "double";
+    case VarType::Half: return "half";
+    case VarType::SInt: return "int";
+    case VarType::UInt: return "uint";
+    case VarType::SShort: return "short";
+    case VarType::UShort: return "ushort";
+    case VarType::SLong: return "long";
+    case VarType::ULong: return "ulong";
+    case VarType::SByte: return "byte";
+    case VarType::UByte: return "ubyte";
+    case VarType::Bool: return "bool";
+    case VarType::Enum: return "enum";
+    case VarType::Struct: return "struct";
+    case VarType::GPUPointer: return "pointer";
+    case VarType::ConstantBlock: return "cbuffer";
+    case VarType::ReadOnlyResource: return "srv";
+    case VarType::ReadWriteResource: return "uav";
+    case VarType::Sampler: return "sampler";
+    case VarType::Unknown: return "unknown";
+    default: break;
+  }
+  return "?";
+}
+
 //: The pipeline state at one event: which shaders are bound (with their entry points), the input
 //: assembler, the outputs, and -- for D3D12 -- the root signature and every root parameter that is
 //: set. This is the "what is bound, exactly" answer the offline tool can only approximate.
@@ -1103,7 +1275,73 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
         }
       }
     }
-    ArrayClose();
+    ArrayClose(false);                              // the pipeline-state blocks follow
+
+    // -----------------------------------------------------------------------
+    // The state a capture's *draws* are judged by, which earlier bundles did not carry (ROADMAP §1.1's
+    // route A): viewport and scissor for "draws that can only produce nothing", depth and stencil for
+    // "depth logic" and "stencil without a writer", blend for "blend in an opaque pass".
+    //
+    // Written as numbers, booleans and names rather than as rows, which is the opposite of the binding rows
+    // above -- and for that reason: nothing here is matched against a reflection row, so the offline rules
+    // want to compare *values*. The names come from the local switches above (`LessEqual`, `Replace`,
+    // `InvSrcAlpha`), because a finding has to read like the state a person set.
+    ArrayOpen("viewports");
+    for(auto &vp : d3d12->rasterizer.viewports)
+      ObjectRow(Fmt("{\"x\": %.2f, \"y\": %.2f, \"width\": %.2f, \"height\": %.2f, \"minDepth\": %.3f, "
+                    "\"maxDepth\": %.3f, \"enabled\": %s}",
+                    vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth,
+                    vp.enabled ? "true" : "false"));
+    ArrayClose(false);
+
+    ArrayOpen("scissors");
+    for(auto &sc : d3d12->rasterizer.scissors)
+      ObjectRow(Fmt("{\"x\": %d, \"y\": %d, \"width\": %d, \"height\": %d, \"enabled\": %s}", (int)sc.x,
+                    (int)sc.y, (int)sc.width, (int)sc.height, sc.enabled ? "true" : "false"));
+    ArrayClose(false);
+
+    ObjectOpenKey("outputMerger");
+    {
+      const auto &ds = d3d12->outputMerger.depthStencilState;
+      const auto &bs = d3d12->outputMerger.blendState;
+      Flag("depthEnable", ds.depthEnable);
+      Flag("depthWrites", ds.depthWrites);
+      Field("depthFunction", std::string(CompareFunctionText(ds.depthFunction)));
+      Flag("stencilEnable", ds.stencilEnable);
+      Flag("stencilReadOnly", d3d12->outputMerger.stencilReadOnly);
+      Flag("alphaToCoverage", bs.alphaToCoverage);
+      Flag("independentBlend", bs.independentBlend);
+
+      // A face's three operations plus its compare and write mask: `Keep` on all three is a face that only
+      // *tests* stencil, which is exactly what "stencil test enabled where nothing wrote stencil" turns on.
+      const auto face = [](const char *key, const StencilFace &f, bool lastInParent) {
+        ObjectOpenKey(key);
+        Field("fail", std::string(StencilOperationText(f.failOperation)));
+        Field("depthFail", std::string(StencilOperationText(f.depthFailOperation)));
+        Field("pass", std::string(StencilOperationText(f.passOperation)));
+        Field("function", std::string(CompareFunctionText(f.function)));
+        Field("compareMask", (long long)f.compareMask);
+        Field("writeMask", (long long)f.writeMask, true);
+        ObjectClose(lastInParent);
+      };
+      face("frontFace", ds.frontFace, false);
+      face("backFace", ds.backFace, false);
+
+      ArrayOpen("blends");
+      for(auto &blend : bs.blends)
+        ObjectRow(Fmt("{\"enabled\": %s, \"writeMask\": %u, \"colorOperation\": \"%s\", \"alphaOperation\": "
+                      "\"%s\", \"srcColor\": \"%s\", \"dstColor\": \"%s\", \"srcAlpha\": \"%s\", "
+                      "\"dstAlpha\": \"%s\"}",
+                      blend.enabled ? "true" : "false", (unsigned)blend.writeMask,
+                      BlendOperationText(blend.colorBlend.operation),
+                      BlendOperationText(blend.alphaBlend.operation),
+                      BlendMultiplierText(blend.colorBlend.source),
+                      BlendMultiplierText(blend.colorBlend.destination),
+                      BlendMultiplierText(blend.alphaBlend.source),
+                      BlendMultiplierText(blend.alphaBlend.destination)));
+      ArrayClose();
+      ObjectClose();
+    }
   }
 
   g_indent = 0;
@@ -1112,17 +1350,19 @@ static int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *pat
   return 0;
 }
 
-//: One signature element as a row: the semantic with its index, the register it starts at, and `c<N>` -- the
-//: component count the engine reports for it (`SigParameter::compCount`), in the same labelled-number style
-//: the binding rows use (`t0 s0 n4`, `b0 s0`).
+//: One signature element as a row: the semantic with its index, the register it starts at, `c<N>` -- the
+//: component count the engine reports for it (`SigParameter::compCount`) -- and the component type
+//: (`SigParameter::varType`), which `VarTypeText` names.
 //:
-//: The count is here for the offline side's sake: a pixel shader that reads *more* components of a semantic
-//: than the stage before it writes is a link error, and that cannot be seen from the semantic name alone. It
-//: is the count rather than a type name because the count is what the comparison needs -- naming the type
-//: would mean carrying RenderDoc's own `VarType` stringiser, which this tool does not link.
+//: Both are here for the offline side's sake. The *count* is what a link comparison needs: a pixel shader
+//: that reads more components of a semantic than the stage before it writes is a mismatch that the semantic
+//: name alone does not show. The *type* is what a format rule needs: a `float4` written into an 8-bit UNORM
+//: target is a different thing from a `uint4` written into the same target, and the target's format is
+//: already in the bundle.
 static std::string SignatureText(const SigParameter &sig)
 {
-  return Fmt("%s%d reg%d c%d", sig.semanticName.c_str(), sig.semanticIndex, sig.regIndex, sig.compCount);
+  return Fmt("%s%d reg%d c%d %s", sig.semanticName.c_str(), sig.semanticIndex, sig.regIndex, sig.compCount,
+             VarTypeText(sig.varType));
 }
 
 //: The shader reflection: constant blocks with their names and bind points, the resource bindings,
@@ -2192,6 +2432,13 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
   Log("bundle: capture.json written");
 
   // ------------------------------------------------------------------ events.json + states/
+  //
+  // The call kind of every event, worked out once before anything is written: the sweep above established
+  // which ids are events, and this says which of those are dispatches (`DispatchByEid` explains why).
+  int callCount = 0;
+  const std::map<int, bool> dispatchKinds = DispatchByEid(ctrl, callCount);
+  Log("bundle: %d call(s) classified from the engine's action flags", callCount);
+
   int eventsWritten = 0;
   size_t stateFiles = 0;
   {
@@ -2204,6 +2451,8 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
     ArrayOpen("events");
 
     std::string previousKey;
+    // The kind of the last call, for the events the action list does not name (`DispatchByEid`).
+    bool lastKindWasDispatch = false;
     for(size_t index = 0; index < ids.size(); index++)
     {
       const int eid = ids[index];
@@ -2213,7 +2462,7 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
       // Everything the state can be compared and hashed by, so the offline side does not have to guess
       // which fields matter.
       std::string shaderIds;
-      bool compute = false;
+      bool computeBound = false;
       for(int i = 0; i < (int)ShaderStage::Count; i++)
       {
         const ShaderStage stage = (ShaderStage)i;
@@ -2222,8 +2471,15 @@ static int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path
           continue;
         shaderIds += Fmt("%s=%s ", StageName(stage), IdText(sh->resourceId).c_str());
         if(stage == ShaderStage::Compute)
-          compute = true;
+          computeBound = true;
       }
+      // The call kind is the action's, not the bound shaders': see `DispatchByEid`. An event the action list
+      // does not name takes the kind of the call it follows, and `computeBound` -- whether a compute shader
+      // happens to be bound -- is only for a capture whose action list came back empty.
+      const std::map<int, bool>::const_iterator kind = dispatchKinds.find(eid);
+      if(kind != dispatchKinds.end())
+        lastKindWasDispatch = kind->second;
+      const bool compute = dispatchKinds.empty() ? computeBound : lastKindWasDispatch;
 
       std::string targets;
       for(size_t slot = 0; slot < st->outputMerger.renderTargets.size(); slot++)

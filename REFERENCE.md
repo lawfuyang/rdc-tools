@@ -434,15 +434,33 @@ with nothing in the frame writing it first, a write nothing afterwards reads, a 
 nothing clearing or writing it, and a compute pass whose UAV bindings nothing afterwards reads. Each is a
 *question*, not a verdict, and the finding says why: a static
 asset, a CPU readback and a present are indistinguishable from a bug in a usage list. From
+the **pipeline state** the driver records per state change — viewport and scissor, depth, stencil, blend —
+five more, each stated per eid *range* because that is what one state document covers (and never at a
+dispatch, which inherits whatever the last draw left bound): depth writes with the test off (or a test with
+nothing bound), an enabled viewport or scissor with no extent, stencil testing a target nothing earlier wrote,
+and two `[heuristic]`s — blending on while writing a target whose *name* says GBuffer or base pass, and a
+`float` pixel-shader output into an 8-bit-or-narrower linear target. `mismatched-msaa` needs none of that
+state: `samples` is in the resource table and a resolve is a usage row, so a multisampled colour target
+nothing ever resolved is decidable as it stands.
+
+Cross-referenced against the three captures to hand, the state rules say something on two of them and
+nothing on the third for a checked reason: `depth-logic` fires once on `PC Renderer.rdc` (depth testing on
+with no depth target bound, eids 888–891), `stencil-without-writer` once on the Hobby capture (eids 841–851
+testing a *read-only* depth-stencil target nothing wrote), and the two heuristics are silent there because
+that frame's 30 GBuffer-named target bindings are all bound with blending *off* and it binds no 8-bit linear
+target at all — an HDR frame, not a gap in the rules. That is the difference between a heuristic and a guess:
+the finding names what it keys off, so its silence is checkable too. The 601 MB Hobby capture is dumped as a
+600-event window (`--max-events`), which the report's provenance states. From
 the capture's chunk stream: marker imbalance,
 unattributed draws, and calls that can only draw nothing (0 vertices/indices/instances/groups). A detector
 that could not look — no usage lists with `--no-usage`, no chunk-name map without the RenderDoc source tree,
 a capture that has moved — is reported as *skipped* with the reason, because "clean" and "not checked" are
 different answers, and a bundle with no findings says so without implying the frame is fine.
 
-What it does **not** do yet (ROADMAP §1): the remaining detectors are the depth-test, scissor and stencil
-rows, which need pipeline state a bundle does not carry (a driver change), and the two heuristics, which wait
-on those — plus ranked notables, recommendations, and the interpretation of engine names. Passes are therefore *state-derived*, not named — a
+What it does **not** do yet (ROADMAP §1): MSAA's *which subresource did the resolve copy* half (the
+`ResolveSubresource` payload is not in a bundle) and the sRGB/linear half of the format rule (a later
+sampling view's sRGB flag is not either), both stated as unclaimed rather than guessed at — plus ranked
+notables, recommendations, and the interpretation of engine names. Passes are therefore *state-derived*, not named — a
 run of events that agree on call kind and
 render targets, or on pipeline and shaders for a dispatch — and the report says so in its own words rather than
 describing a pass as something it has not established.
@@ -710,7 +728,7 @@ half (and a reader) can work without a device. It writes:
 |---|---|
 | `manifest.json` | bundle version, driver and RenderDoc version, the capture's absolute path, byte count and SHA-256, the flags used, the scan result, every written file with its size and hash, and a `notInThisBundle` list saying what it cannot contain and why |
 | `capture.json` | the capture header: API, driver, machine, feature flags (`shaderDebugging`, `pixelHistory`), counts, file size |
-| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash |
+| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash. `psoKind` is the *call kind* from the capture's action tree — a dispatch or not — and not a reading of the bound shaders: on `PC Renderer.rdc` every event has a compute shader bound, so the shaders would call all 2132 of them compute, draws included |
 | `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints |
 | `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant block of every bound stage, at the state events |
 | `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it || `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |

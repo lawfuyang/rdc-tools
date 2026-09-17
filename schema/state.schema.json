@@ -18,7 +18,37 @@
     "renderTargets": {"type": "array", "items": {"type": "string"}},
     "depthTarget": {"type": "string", "description": "a resource id, `0` for none"},
     "rootSignature": {"type": "string"},
-    "rootParameters": {"type": "array", "items": {"type": "string"}}
+    "rootParameters": {"type": "array", "items": {"type": "string"}},
+    "viewports": {"type": "array", "items": {
+      "type": "object",
+      "required": ["x", "y", "width", "height", "minDepth", "maxDepth", "enabled"],
+      "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number"},
+                     "height": {"type": "number"}, "minDepth": {"type": "number"},
+                     "maxDepth": {"type": "number"}, "enabled": {"type": "boolean"}},
+      "additionalProperties": false},
+      "description": "the bound viewports, in the engine's own terms; absent from a bundle written before the pipeline-state rows existed (the offline rules that read them say so rather than reporting clean)"},
+    "scissors": {"type": "array", "items": {
+      "type": "object",
+      "required": ["x", "y", "width", "height", "enabled"],
+      "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "width": {"type": "integer"},
+                     "height": {"type": "integer"}, "enabled": {"type": "boolean"}},
+      "additionalProperties": false}},
+    "outputMerger": {"type": "object",
+      "required": ["depthEnable", "depthWrites", "depthFunction", "stencilEnable", "frontFace", "backFace",
+                   "blends"],
+      "properties": {
+        "depthEnable": {"type": "boolean"},
+        "depthWrites": {"type": "boolean"},
+        "depthFunction": {"type": "string", "description": "the engine's `CompareFunction` name, e.g. LessEqual"},
+        "stencilEnable": {"type": "boolean"},
+        "stencilReadOnly": {"type": "boolean"},
+        "alphaToCoverage": {"type": "boolean"},
+        "independentBlend": {"type": "boolean"},
+        "frontFace": {"type": "object", "description": "fail/depthFail/pass operations, the compare function and the two masks"},
+        "backFace": {"type": "object"},
+        "blends": {"type": "array", "items": {"type": "object", "description": "one per render target: enabled, writeMask, the two operations and their four multipliers"}}
+      },
+      "additionalProperties": false}
   },
   "additionalProperties": false
 }

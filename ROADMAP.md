@@ -169,26 +169,33 @@ reported as *skipped with the reason*, never as clean. Measured: twelve detector
 and found 21 all-zero constant blocks (18 of them the "no root descriptor is bound" case), 14 unbound root
 parameters, and the usage-chain findings above; over the windows re-dumped for the table work, the two
 binding rules add one finding — a genuine `cat(3) type(7)` disagreement — and the PC capture none.
+`dead compute` closes the table, and the measurement that shaped it is worth keeping: a bundle carries a
+state document for a *state change*, not for every event — 30 of the Android trace's 723 events — while the
+*heap contents* a table points at can change between them, so attributing a UAV write to a register through
+a resolved slot would apply a snapshot to events it was never taken at. The rule therefore takes the write
+from the usage chain itself (a `CS_RWResource` row inside the pass) and reports per *compute pass*, which is
+what a bundle can attribute work to: 4 passes on that capture bind UAVs nothing afterwards reads — the two
+light-culling grids and three SkyAtmosphere LUTs, each with its own last use to check.
 
 The rows below are what is left, and they are not independent items: each group waits on **one** piece of
-evidence, and *which* piece decides whether the work is a rule, a calibration or a driver change — so the
-route is named first and the rows follow it:
+evidence, and *which* piece decides whether the work is a rule or a driver change — so the route is named
+first and the rows follow it. Nothing waits on a decode or a calibration any more: the usage chain and the
+resolved descriptor tables both landed, and §2's eid↔chunk calibration turned out not to be on the path of
+any detector.
 
 | Route | Rows | The one thing needed |
 |---|---|---|
-| **A — nothing needed but the rule** | dead compute | both halves of its evidence are in the bundle now: the dispatch's *UAV bindings* come from route-A-style table resolution and the reflection's `uR sS` rows, and the read/write history is the usage chain. This is the one row with no blocker left, so it is next |
-| **B — pipeline state a bundle does not carry** | depth logic; empty scissor / degenerate viewport; stencil without a writer; blend in an opaque pass (this one also wants §2's marker names) | a driver change that emits the state — the biggest group. Closest of them is **MSAA**: `samples` is in the bundle and `ResolveSubresource` is nameable from the stream, but the payload is not decoded yet, so it needs one measurement first — and measured, none of the three captures to hand carries a multisampled resource or a resolve at all, so that row would ship fixture-only evidence |
-| **C — heuristics** | format/units suspicion; the name half of blend-in-opaque | the component *type* (not in the signature rows — the count is, and it landed) plus the read/write chain of route A: a heuristic is worth writing once its inputs are facts |
+| **A — pipeline state a bundle does not carry** | depth logic; empty scissor / degenerate viewport; stencil without a writer; blend in an opaque pass (this one also wants §2's marker names) | a driver change that emits the state — the biggest group. Closest of them is **MSAA**: `samples` is in the bundle and `ResolveSubresource` is nameable from the stream, but the payload is not decoded yet, so it needs one measurement first — and measured, none of the three captures to hand carries a multisampled resource or a resolve at all, so that row would ship fixture-only evidence |
+| **B — heuristics** | format/units suspicion; the name half of blend-in-opaque | the component *type* (not in the signature rows — the count is, and it landed) plus the read/write chain of the usage detectors: a heuristic is worth writing once its inputs are facts |
 
 | Detector | What it means | Evidence | Certainty | Route |
 |---|---|---|---|---|
-| Dead compute | a dispatch whose UAV output nothing reads | usage chain + the dispatch's UAV bindings | medium | A |
-| Depth logic | depth write on with depth test off (or a depth test with no depth buffer bound) | pipeline state | certain | B |
-| Empty scissor / degenerate viewport | draws that can only produce nothing | viewport/scissor state | certain | B |
-| Stencil without a writer | stencil test enabled where nothing wrote stencil in the frame | state + earlier passes | medium | B |
-| Blend in an opaque pass | blending enabled where the pass name says base/GBuffer/depth | state + marker names | `[heuristic]` | B + C |
-| Mismatched MSAA | samples > 1 with no resolve before present, or a resolve of the wrong subresource | texture descriptions + `ResolveSubresource` events (none of the captures here has either) | certain, once the payload is read | B |
-| Format/units suspicion | a float/HDR shader output written to an 8-bit `_UNORM` target, or sRGB/linear mismatch between write and read | RT format + PS output signature + the RT's later sampling | `[heuristic]` | C |
+| Depth logic | depth write on with depth test off (or a depth test with no depth buffer bound) | pipeline state | certain | A |
+| Empty scissor / degenerate viewport | draws that can only produce nothing | viewport/scissor state | certain | A |
+| Stencil without a writer | stencil test enabled where nothing wrote stencil in the frame | state + earlier passes | medium | A |
+| Blend in an opaque pass | blending enabled where the pass name says base/GBuffer/depth | state + marker names | `[heuristic]` | A + B |
+| Mismatched MSAA | samples > 1 with no resolve before present, or a resolve of the wrong subresource | texture descriptions + `ResolveSubresource` events (none of the captures here has either) | certain, once the payload is read | A |
+| Format/units suspicion | a float/HDR shader output written to an 8-bit `_UNORM` target, or sRGB/linear mismatch between write and read | RT format + PS output signature + the RT's later sampling | `[heuristic]` | B |
 | Peak vs total memory | what the frame holds, what it never reads, and what could alias | resource table + lifetimes | advisory | — (§5's report, not a detector) |
 
 ### 1.2 Notable passes and notable resources
@@ -508,13 +515,13 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — the frame-level answer (its skeleton and contract are landed: `report`, REFERENCE §4.11)**
-1. **The remaining detectors (§1.1)** — thirteen rows are landed (twelve detectors: six over the bundle, three
-   over the usage chain, three over the chunk stream, each with a fixture that fires it), including the
-   flagship *nothing bound where the reflection expects something* in all three of its halves and *binding
-   kind mismatch*; what is left is eight rows in three groups (the route table there): `dead compute` needs
-   nothing but the rule, B is a driver change that emits the pipeline state, C waits until its inputs are
-   facts. §2's eid↔chunk calibration is no longer on the path of any detector — the engine resolves its own
-   descriptor tables.
+1. **The remaining detectors (§1.1)** — fourteen rows are landed (fourteen detectors: seven over the bundle,
+   four over the usage chain, three over the chunk stream, each with a fixture that fires it), including the
+   flagship *nothing bound where the reflection expects something* in all three of its halves, *binding kind
+   mismatch* and *dead compute*; what is left is seven rows in two groups (the route table there): A is a
+   driver change that emits the pipeline state, B waits until its inputs are facts. Nothing waits on §2's
+   eid↔chunk calibration — the engine resolves its own descriptor tables, and the one rule that could not use
+   that resolution takes its evidence from the usage chain instead.
 2. **The engine schema table and the pilot (§1.4–1.5)** — the mobile-vs-PC GI question answered in the report's
    own words is the acceptance case for all of the above, and the table is what lets the report name a pass
    instead of describing its state.

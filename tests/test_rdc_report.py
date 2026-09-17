@@ -709,7 +709,8 @@ class TestReportDetectors(BundleCase):
                          ['debug-message', 'all-zero-constant-block', 'unbound-root-parameter',
                           'unbound-table-slot', 'binding-kind-mismatch', 'shader-io-mismatch',
                           'dead-allocation', 'read-before-write', 'write-never-read',
-                          'load-instead-of-clear', 'marker-imbalance', 'unattributed-draws', 'zero-work'],
+                          'load-instead-of-clear', 'dead-compute', 'marker-imbalance',
+                          'unattributed-draws', 'zero-work'],
                          'every detector is listed, whether it ran or was skipped')
         runs = {run['detector']: run for run in self.document(bundle)['detectors']}
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
@@ -795,10 +796,39 @@ class TestReportDetectors(BundleCase):
         document = self.document(bundle)
         runs = {run['detector']: run for run in document['detectors']}
         for detector in ('dead-allocation', 'read-before-write', 'write-never-read',
-                         'load-instead-of-clear'):
+                         'load-instead-of-clear', 'dead-compute'):
             self.assertFalse(runs[detector]['ran'], detector)
             self.assertIn('--no-usage', runs[detector]['why'], detector)
         self.assertEqual([flag for flag in document['flags'] if flag['detector'].endswith('-read')], [])
+
+    def test_a_compute_pass_binding_uavs_nothing_reads_is_a_finding(self):
+        """Per *pass*, because that is what a bundle can attribute work to: the usage chain says which event
+        bound a resource as a compute UAV, and a pass is a run of dispatches agreeing on pipeline and
+        shaders. A UAV read later stays quiet, and so does a UAV in a *graphics* pass -- this rule is about
+        compute passes, and the graphics case is `write-never-read`'s.
+        """
+        bundle = self.path('b')
+        write_bundle(bundle, events=[
+            event(96, kind='compute', pso='2300', shaders='cs=2302 '),
+            event(97, kind='compute', pso='2300', shaders='cs=2302 '),
+            event(200, targets=['11 64x64x1 R8G8B8A8_UNORM']),
+        ], resources=[
+            resource('2266', kind='buffer', name='NumCulledLightsGrid',
+                     usage=[{'eid': 97, 'usage': 27}]),
+            resource('2234', name='MultiScatteredLuminanceLut',
+                     usage=[{'eid': 97, 'usage': 27}, {'eid': 120, 'usage': 18}]),
+            resource('9001', kind='buffer', name='GraphicsUAV',
+                     usage=[{'eid': 200, 'usage': 27}]),
+            resource('9999', name='NotTracked', usage=[{'eid': 0, 'usage': 0}]),
+        ])
+        flags = self.flags(bundle, 'dead-compute')
+        self.assertEqual(len(flags), 1, 'one compute pass with one unread UAV')
+        self.assertIn('the compute pass at eid 96..97 binds 1 resource(s) as UAVs that nothing after eid 97 '
+                      'reads', flags[0]['what'])
+        self.assertEqual(flags[0]['evidence'],
+                         ['res2266 "NumCulledLightsGrid" (buffer, 0.00 MB): bound as a UAV at eid 97, last '
+                          'use eid 97 (CS_RWResource)'])
+        self.assertEqual(flags[0]['certainty'], 'question')
 
 
 # =========================================================================== the .rdc-side detectors

@@ -429,9 +429,10 @@ halves, and *binding kind mismatch*), pixel inputs the vertex shader does not em
 the `SV_` system values and interpolation suffixes — and, from the engine's component counts in the reflection
 rows, an input that reads *wider* than the vertex shader writes), and textures or buffers no call in the frame
 uses. From
-the **usage chain** — the engine's own record of which events used each resource and how — three more: a read
-with nothing in the frame writing it first, a write nothing afterwards reads, and a render target first used
-with nothing clearing or writing it. Each is a *question*, not a verdict, and the finding says why: a static
+the **usage chain** — the engine's own record of which events used each resource and how — four more: a read
+with nothing in the frame writing it first, a write nothing afterwards reads, a render target first used with
+nothing clearing or writing it, and a compute pass whose UAV bindings nothing afterwards reads. Each is a
+*question*, not a verdict, and the finding says why: a static
 asset, a CPU readback and a present are indistinguishable from a bug in a usage list. From
 the capture's chunk stream: marker imbalance,
 unattributed draws, and calls that can only draw nothing (0 vertices/indices/instances/groups). A detector
@@ -439,10 +440,9 @@ that could not look — no usage lists with `--no-usage`, no chunk-name map with
 a capture that has moved — is reported as *skipped* with the reason, because "clean" and "not checked" are
 different answers, and a bundle with no findings says so without implying the frame is fine.
 
-What it does **not** do yet (ROADMAP §1): the remaining detectors — `dead compute` needs a rule rather than
-evidence (its inputs are all in the bundle now) and the depth-test, scissor and stencil rows need pipeline
-state a bundle does not carry (a driver change) — plus ranked notables, recommendations, and the
-interpretation of engine names. Passes are therefore *state-derived*, not named — a
+What it does **not** do yet (ROADMAP §1): the remaining detectors are the depth-test, scissor and stencil
+rows, which need pipeline state a bundle does not carry (a driver change), and the two heuristics, which wait
+on those — plus ranked notables, recommendations, and the interpretation of engine names. Passes are therefore *state-derived*, not named — a
 run of events that agree on call kind and
 render targets, or on pipeline and shaders for a dispatch — and the report says so in its own words rather than
 describing a pass as something it has not established.

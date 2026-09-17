@@ -813,6 +813,60 @@ def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
     return flags
 
 
+def detect_dead_compute(bundle: BundleData) -> List[RedFlag]:
+    """A compute pass that binds UAVs nothing afterwards reads (ROADMAP §1.1; `question`).
+
+    The unit is the *compute pass* the report already derives -- a run of dispatches agreeing on pipeline and
+    shaders -- because that is as fine as a bundle can attribute work: the usage chain records *which event*
+    a resource was used at, but not which dispatch within a pass did it, and a pass is one dispatch's worth
+    of state. The write is evidence rather than inference: a `CS_RWResource` row inside the pass's eid range
+    is the engine recording that the resource was bound as a compute UAV there.
+
+    It needs **no descriptor resolution**, and that is a measurement, not a shortcut: on the Android capture
+    the bundle carries state documents for 30 of 723 events (the driver writes them at state changes), while
+    the *heap contents* a table points at can change between them -- so attributing a write to a register
+    through a resolved slot would apply a snapshot to events it was never taken at. The two shipped binding
+    rules are safe for the same reason this one is not: they compare things that are constant across a state
+    (the signature's range against the heap), while a UAV *target* is not.
+
+    What this adds over `write-never-read` is the work: that detector groups by the kind of last write and
+    asks what consumes the result; this one names the pass that did the writing, which is the thing that
+    costs time. `question` for the reasons a usage list always has: a later frame reading the result, and a
+    CPU readback after the capture, look exactly like nothing ever reading it -- and a UAV bound is not
+    necessarily written, so the finding is about a *binding* nothing read afterwards.
+    """
+    flags: List[RedFlag] = []
+    for entry in reconstruct_passes(bundle['events'], bundle['resources']):
+        if str(entry.get('kind')) != 'compute':
+            continue
+        first, last = int(entry['firstEid']), int(entry['lastEid'])
+        lines: List[str] = []
+        for resource in bundle['resources']:
+            chain = _usage_judged(resource)
+            if chain is None:
+                continue
+            bound = [eid for eid, names in chain if 'CS_RWResource' in names and first <= eid <= last]
+            if not bound:
+                continue
+            if any(names & USAGE_READS for eid, names in chain if eid > last):
+                continue                                # something after the pass might have read it
+            last_use = max(eid for eid, _names in chain)
+            at_last = next(names for eid, names in chain if eid == last_use)
+            lines.append('%s: bound as a UAV at eid %s, last use eid %d (%s)'
+                         % (_resource_label(resource), '/'.join(str(one) for one in bound), last_use,
+                            '/'.join(sorted(at_last))))
+        if not lines:
+            continue
+        flags.append(_usage_flag(
+            'dead-compute',
+            'the compute pass at eid %d..%d binds %d resource(s) as UAVs that nothing after eid %d reads -- '
+            'dispatches whose result is never used. A question, not a verdict: a later frame and a CPU '
+            'readback after the capture look exactly like nothing ever reading it, and a UAV bound is not '
+            'necessarily written' % (first, last, len(lines), last),
+            lines))
+    return flags
+
+
 #: Marker chunk names, by the job they do. The end of a queue-level marker is `Queue_EndEvent`; the offline
 #: tool's own `MARKER_CHUNKS` lists the *beginnings* only, because that is all a marker *tree* needs.
 PUSH_MARKER_CHUNKS = ('PushMarker', 'Queue_BeginEvent')
@@ -1433,7 +1487,8 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     for detector, function in (('dead-allocation', detect_dead_allocations),
                                ('read-before-write', detect_read_before_write),
                                ('write-never-read', detect_write_never_read),
-                               ('load-instead-of-clear', detect_load_instead_of_clear)):
+                               ('load-instead-of-clear', detect_load_instead_of_clear),
+                               ('dead-compute', detect_dead_compute)):
         runs.append({'detector': detector, 'ran': collected, 'why': reason})
         if collected:
             flags.extend(function(bundle))
@@ -1486,17 +1541,16 @@ def report_caveats() -> List[str]:
         'What a pass is *for* (shadow map, depth prepass, G-buffer, base pass, post-process, UI) is not '
         'inferred: the structure given is only the targets, the depth target and the call kind. Naming '
         'a purpose needs the engine schema table (ROADMAP §1.4).',
-        'Thirteen detectors run -- seven over the bundle, three over the usage chain and three over the capture\'s '
-        'chunk stream -- and every finding is unproven: none of them has been checked against a capture whose '
-        'bug list is known (ROADMAP §1.5). What is not checked at all (ROADMAP §1.1): "dead compute" needs the '
-        'read/write history folded per dispatch, which is a rule to write rather than evidence to find; the '
-        'depth-test, scissor and stencil rows need pipeline state a bundle does not carry (a driver change); '
-        'MSAA needs the ResolveSubresource payload read, and none of the captures here carries a multisampled '
-        'resource or a resolve at all; and the two heuristics wait on those. Two things the binding rules '
-        'deliberately do not claim: the *resource type* a reflection row declares (texture against buffer -- '
-        'the row names a binding, not its type), and a range/heap disagreement at a register no shader reads. '
-        'A bundle whose driver did not resolve descriptor tables carries no slot rows, and those two rules are '
-        'then reported as not looked at rather than as clean.',
+        'Fourteen detectors run -- seven over the bundle, four over the usage chain and three over the '
+        'capture\'s chunk stream -- and every finding is unproven: none of them has been checked against a '
+        'capture whose bug list is known (ROADMAP §1.5). What is not checked at all (ROADMAP §1.1): '
+        'the depth-test, scissor and stencil rows need pipeline state a bundle does not carry (a driver '
+        'change); MSAA needs the ResolveSubresource payload read, and none of the captures here carries a '
+        'multisampled resource or a resolve at all; and the two heuristics wait on those. Two things the '
+        'binding rules deliberately do not claim: the *resource type* a reflection row declares (texture '
+        'against buffer -- the row names a binding, not its type), and a range/heap disagreement at a register '
+        'no shader reads. A bundle whose driver did not resolve descriptor tables carries no slot rows, and the '
+        'rules that read them are then reported as not looked at rather than as clean.',
         'Ranked notables and recommendations are not implemented yet either (ROADMAP §1.2, §1.3).',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
         'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '

@@ -213,3 +213,35 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   reference, examples, pitfalls, the driver), `ROADMAP.md` (unimplemented work).
 - Never commit `renderdoc-src/` — vendored upstream code, gitignored.
 - Never run `git commit` or `git push` unless explicitly asked to.
+
+# Naming
+
+* **Types**: `UpperCamelCase` (nouns)
+* **Functions**: `UpperCamelCase` (nouns)
+* **bool**: `b*` (e.g. `bIsValid`)
+* **Local vars**: `lowerCamelCase`
+* **Members**: `m_UpperCamelCase`
+* **Static members**: `ms_UpperCamelCase`
+* **Constants**: `SCREAMING_SNAKE_CASE` or `kLowerCamelCase`
+* **Globals**: `g_UpperCamelCase`
+* **Static globals**: `gs_UpperCamelCase`
+
+- Avoid `auto` (except for container iterators)
+- Max line length: 140 columns
+- Prefer `std::string_view` over `const std::string&`
+- Use `const char*` for guaranteed hardcoded string inputs
+
+**How the two prefixes compose, and where the section applies.** This is for `src/cpp/`; the Python side is
+PEP 8, where `m_`/`b` names would be wrong. Order is scope first, then bool: a global bool is `g_bJson`, a
+struct's bool member is `m_bCall`, a function- or file-scope static is `gs_bWalkedMarkers`. A data member of a
+struct or class takes `m_` (`ActionNode::m_Eid`), and the *same word* used as a parameter does not -- `depth`
+stays `depth` in the walk that fills `m_Depth` -- which is the one thing a mechanical rename gets wrong: it
+cannot tell a member from a local of the same name, so an access rename has to be aimed at the variable
+(`row.m_Name`) and never at the word. `auto` is kept only where there is no type to write: a lambda, or the
+element type of a container the engine declared. A path that reaches `fopen`/`CreateDirectoryA` stays
+`const char*`/`const std::string &` rather than a view, because those want a NUL-terminated string.
+
+**Text output is the contract this refactor had to keep**: `draws`, `state`, `shaders` and `cb` over
+`renderdoc-src\PC Renderer.rdc`, text *and* `--json`, were captured before the rename and diffed after it, and
+came out byte-identical. Do the same for the next one: `batch` a command list into a file, rename, rebuild,
+diff.

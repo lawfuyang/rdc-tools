@@ -5,8 +5,8 @@
 #include "common.h"
 
 //: readable after a run that had to be killed, since no later run can touch this one's file.
-ULONGLONG g_start = 0;
-FILE *g_logFile = NULL;
+ULONGLONG g_Start = 0;
+FILE *g_LogFile = NULL;
 
 ULONGLONG Millis()
 {
@@ -21,17 +21,17 @@ void Log(const char *fmt, ...)
   vsnprintf(text, sizeof(text), fmt, args);
   va_end(args);
 
-  const double seconds = (g_start == 0) ? 0.0 : (Millis() - g_start) / 1000.0;
+  const double seconds = (g_Start == 0) ? 0.0 : (Millis() - g_Start) / 1000.0;
   fprintf(stderr, "[replay_dump] %6.1fs  %s\n", seconds, text);
   fflush(stderr);
 
-  if(g_logFile != NULL)
+  if(g_LogFile != NULL)
   {
     SYSTEMTIME now;
     GetLocalTime(&now);
-    fprintf(g_logFile, "%04d-%02d-%02d %02d:%02d:%02d.%03d  %7.1fs  %s\n", now.wYear, now.wMonth,
+    fprintf(g_LogFile, "%04d-%02d-%02d %02d:%02d:%02d.%03d  %7.1fs  %s\n", now.wYear, now.wMonth,
             now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, seconds, text);
-    fflush(g_logFile);
+    fflush(g_LogFile);
   }
 }
 
@@ -125,10 +125,10 @@ std::string DefaultLogStem()
 //:
 //: `--log <file>` names one exact file, which is opened the ordinary way: truncated, since it is
 //: still *this* run's log and nothing else's.
-FILE *OpenLog(const std::string &requested, bool perRun, std::string &openedAs)
+FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs)
 {
   const std::string stem = AbsolutePath(requested.c_str());
-  if(!perRun)
+  if(!bPerRun)
   {
     openedAs = stem;
     return fopen(openedAs.c_str(), "w");
@@ -240,9 +240,9 @@ ControllerGuard::~ControllerGuard()
 
 void PrintCaptureHeader(ICaptureFile *file, const char *path)
 {
-  if(g_json)
+  if(g_bJson)
     printf("{\n");
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("schemaVersion", (long long)kSchemaVersion);    // every document says what shape it is
   Field("capture", std::string(path));
   Field("renderdoc", std::string(g_GetVersionString ? g_GetVersionString() : "?"));

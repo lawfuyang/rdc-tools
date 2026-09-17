@@ -34,6 +34,7 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -54,10 +55,10 @@ typedef void(RENDERDOC_CC *pShutdownReplay)();
 // Only the state more than one module touches. Each block names the module that *owns* it;
 // everything else is file-static in its owner.
 
-extern bool g_json;          // output.cpp: --json, switched on by the entry point
-extern int g_indent;         // output.cpp: the writer's nesting level
-extern FILE *g_logFile;      // capture.cpp: the log, or NULL for stderr
-extern ULONGLONG g_start;    // capture.cpp: the process start, for the timing column
+extern bool g_bJson;         // output.cpp: --json, switched on by the entry point
+extern int g_Indent;         // output.cpp: the writer's nesting level
+extern FILE *g_LogFile;      // capture.cpp: the log, or NULL for stderr
+extern ULONGLONG g_Start;    // capture.cpp: the process start, for the timing column
 extern pGetVersionString g_GetVersionString;    // capture.cpp: resolved from the DLL, printed in headers
 
 // --------------------------------------------------------------------------- limits
@@ -97,22 +98,22 @@ std::string IdText(ResourceId id);
 // --------------------------------------------------------------------------- the writer (output.cpp)
 
 bool IsJson();
-void SetJson(bool on);
+void SetJson(bool bOn);
 std::string JsonEscape(const char *s);
-std::string JsonEscape(const std::string &s);
+std::string JsonEscape(std::string_view s);
 std::string JsonEscape(const rdcstr &s);
 void Indent();
-void Field(const char *key, const std::string &value, bool last = false);
-void Field(const char *key, const rdcstr &value, bool last = false);
-void Field(const char *key, long long value, bool last = false);
-void Flag(const char *key, bool value, bool last = false);
+void Field(const char *key, std::string_view value, bool bLast = false);
+void Field(const char *key, const rdcstr &value, bool bLast = false);
+void Field(const char *key, long long value, bool bLast = false);
+void Flag(const char *key, bool bValue, bool bLast = false);
 void ArrayOpen(const char *key);
-void ArrayClose(bool last = true);
-void Row(const std::string &text);
-void ObjectRow(const std::string &object);
+void ArrayClose(bool bLast = true);
+void Row(std::string_view text);
+void ObjectRow(std::string_view object);
 void ObjectOpen();
 void ObjectOpenKey(const char *key);
-void ObjectClose(bool last = true);
+void ObjectClose(bool bLast = true);
 std::string FmtV(_Printf_format_string_ const char *fmt, va_list args);
 std::string Fmt(_Printf_format_string_ const char *fmt, ...);
 
@@ -130,28 +131,28 @@ public:
   explicit CaptureStdout(const char *path)
   {
     const int fd = _fileno(stdout);
-    m_saved = _dup(fd);
-    m_file = fopen(path, "wb");
-    if(m_file != NULL && m_saved >= 0)
-      _dup2(_fileno(m_file), fd);
+    m_Saved = _dup(fd);
+    m_File = fopen(path, "wb");
+    if(m_File != NULL && m_Saved >= 0)
+      _dup2(_fileno(m_File), fd);
   }
   ~CaptureStdout()
   {
     fflush(stdout);
-    if(m_saved >= 0)
-      _dup2(m_saved, _fileno(stdout));
-    if(m_file != NULL)
-      fclose(m_file);
-    if(m_saved >= 0)
-      _close(m_saved);
+    if(m_Saved >= 0)
+      _dup2(m_Saved, _fileno(stdout));
+    if(m_File != NULL)
+      fclose(m_File);
+    if(m_Saved >= 0)
+      _close(m_Saved);
   }
   CaptureStdout(const CaptureStdout &) = delete;
   CaptureStdout &operator=(const CaptureStdout &) = delete;
-  bool Ok() const { return m_file != NULL && m_saved >= 0; }
+  bool Ok() const { return m_File != NULL && m_Saved >= 0; }
 
 private:
-  FILE *m_file = NULL;
-  int m_saved = -1;
+  FILE *m_File = NULL;
+  int m_Saved = -1;
 };
 
 //: The bundle's documents are JSON whatever the terminal was asked for: they are read by the offline
@@ -159,13 +160,13 @@ private:
 class JsonDocument
 {
 public:
-  JsonDocument() : m_saved(g_json) { g_json = true; }
-  ~JsonDocument() { g_json = m_saved; }
+  JsonDocument() : m_bSaved(g_bJson) { g_bJson = true; }
+  ~JsonDocument() { g_bJson = m_bSaved; }
   JsonDocument(const JsonDocument &) = delete;
   JsonDocument &operator=(const JsonDocument &) = delete;
 
 private:
-  bool m_saved;
+  bool m_bSaved;
 };
 
 // --------------------------------------------------------------------------- the session (capture.cpp)
@@ -177,7 +178,7 @@ int Fail(int code, _Printf_format_string_ const char *fmt, ...);
 std::string AbsolutePath(const char *path);
 std::string WorkingDirectory();
 std::string DefaultLogStem();
-FILE *OpenLog(const std::string &requested, bool perRun, std::string &openedAs);
+FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs);
 HMODULE LoadReplayDLL();
 bool InitialiseReplay(HMODULE dll, int argc, char **argv);
 ICaptureFile *OpenCaptureFile(HMODULE dll);
@@ -219,28 +220,29 @@ struct ControllerGuard
 
 // --------------------------------------------------------------------------- the action tree (actions.cpp)
 
-//: One chunk of the structured file. `eid` is the depth-first index over *chunks* (parameters are descended
-//: through without numbering), which is not the engine's event id -- that comes from the action list.
-//: One action from the engine's own list, flattened: its id, its name, and the markers it sits inside.
+//: One chunk of the structured file. `eid` is the depth-first index over *chunks* (parameters are
+//: descended through without numbering), which is not the engine's event id -- that comes from the
+//: action list. One action from the engine's own list, flattened: its id, its name, and the markers
+//: it sits inside.
 //:
-//: `eid` is `ActionDescription::eventId` -- the id `SetFrameEvent`, `probe` and a bundle's ids all use -- and
-//: *not* the structured file's chunk numbering, which is a different one (measured: on `PC Renderer.rdc` the
-//: chunk-derived numbers run to millions where the engine's event ids run to 2132, so the two never meet).
-//: `flags` is the engine's own classification, so a call is a call and a marker is a marker: nothing here is
-//: inferred from a name.
+//: `eid` is `ActionDescription::eventId` -- the id `SetFrameEvent`, `probe` and a bundle's ids all
+//: use -- and *not* the structured file's chunk numbering, which is a different one (measured: on
+//: `PC Renderer.rdc` the chunk-derived numbers run to millions where the engine's event ids run to
+//: 2132, so the two never meet). `flags` is the engine's own classification, so a call is a call
+//: and a marker is a marker: nothing here is inferred from a name.
 struct ActionNode
 {
-  int eid = 0;            // ActionDescription::eventId: the id SetFrameEvent, probe and a bundle all use
-  int depth = 0;          // how deep in the marker nest, 0 at the root
-  bool call = false;      // a draw/dispatch/copy rather than a marker
-  bool marker = false;    // this row opens a marker (PushMarker/SetMarker)
-  rdcstr name;            // the marker's custom name, or the call's own chunk name
-  rdcstr path;            // the markers this row sits inside, `A > B`, empty at the root
+  int m_Eid = 0;    // ActionDescription::eventId: the id SetFrameEvent, probe and a bundle all use
+  int m_Depth = 0;           // how deep in the marker nest, 0 at the root
+  bool m_bCall = false;      // a draw/dispatch/copy rather than a marker
+  bool m_bMarker = false;    // this row opens a marker (PushMarker/SetMarker)
+  rdcstr m_Name;             // the marker's custom name, or the call's own chunk name
+  rdcstr m_Path;             // the markers this row sits inside, `A > B`, empty at the root
 };
 
 bool IsMarkerPush(ActionFlags flags);
 bool IsCallFlags(ActionFlags flags);
-std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &truncated);
+std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &bTruncated);
 std::map<int, std::string> MarkerPaths(IReplayController *ctrl);
 std::string MarkerPathAt(IReplayController *ctrl, int eid);
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
@@ -253,7 +255,7 @@ int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
              const char *filter);
 int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid);
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-               bool wantDisasm);
+               bool bWantDisasm);
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                ShaderStage stage, int slot);
 int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *filter,
@@ -273,7 +275,7 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
 // --------------------------------------------------------------------------- the bundle (bundle.cpp)
 
 int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
-            const std::vector<std::string> &args, bool wantDisasm);
+            const std::vector<std::string> &args, bool bWantDisasm);
 int CmdBundleVerify(const char *dir);
 
 //: The small file helpers the bundle (and the self-check reading a schema off disk) share.
@@ -281,13 +283,13 @@ std::string Sha256File(const char *path);
 bool ReadWholeFile(const char *path, std::string &text);
 bool FileBytes(const char *path, unsigned long long &bytes);
 bool MakeDir(const std::string &path);
-bool DirIsEmpty(const std::string &path, bool &empty);
+bool DirIsEmpty(const std::string &path, bool &bEmpty);
 std::string BundleRelative(const std::string &root, const std::string &full);
 
 // --------------------------------------------------------------------------- self-check (selftest.cpp)
 
 int CmdSchema(const char *name, const char *outDir, const char *checkDir);
 int CmdSelftest();
-int CheckSchemasAgainstDir(const std::string &dir, bool report);
-int WriteSchemasTo(const std::string &dir, const char *name, bool report);
+int CheckSchemasAgainstDir(const std::string &dir, bool bReport);
+int WriteSchemasTo(const std::string &dir, const char *name, bool bReport);
 bool ReadSchemaText(const std::string &path, std::string &text);

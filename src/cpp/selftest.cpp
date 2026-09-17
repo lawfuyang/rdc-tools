@@ -25,17 +25,17 @@ bool ReadSchemaText(const std::string &path, std::string &text)
 //: text differs, and a `<name>.schema.json` for a document kind the table no longer has -- which is
 //: worse than useless, because a reader would take it for current. One code path for `schema
 //: --check` and for the selftest, so the mode that is checked is the mode that runs.
-int CheckSchemasAgainstDir(const std::string &dir, bool report)
+int CheckSchemasAgainstDir(const std::string &dir, bool bReport)
 {
   int differences = 0;
   for(int i = 0; i < kSchemaCount; i++)
   {
-    const std::string path = dir + "\\" + kSchemas[i].name + ".schema.json";
+    const std::string path = dir + "\\" + kSchemas[i].m_Name + ".schema.json";
     std::string text;
     if(!ReadSchemaText(path, text))
     {
-      if(report)
-        printf("missing %s (%s)\n", kSchemas[i].name, path.c_str());
+      if(bReport)
+        printf("missing %s (%s)\n", kSchemas[i].m_Name, path.c_str());
       differences++;
       continue;
     }
@@ -44,13 +44,13 @@ int CheckSchemasAgainstDir(const std::string &dir, bool report)
     want += "\n";    // `--out` ends the file with a newline, and so must this
     if(text != want)
     {
-      if(report)
-        printf("stale   %s (differs from this driver's schema)\n", kSchemas[i].name);
+      if(bReport)
+        printf("stale   %s (differs from this driver's schema)\n", kSchemas[i].m_Name);
       differences++;
     }
-    else if(report)
+    else if(bReport)
     {
-      printf("ok      %s\n", kSchemas[i].name);
+      printf("ok      %s\n", kSchemas[i].m_Name);
     }
   }
 
@@ -65,7 +65,7 @@ int CheckSchemasAgainstDir(const std::string &dir, bool report)
       const size_t cut = name.rfind(".schema.json");
       if(FindSchema(name.substr(0, cut).c_str()) == NULL)
       {
-        if(report)
+        if(bReport)
           printf("extra   %s (no document kind of that name any more)\n", name.c_str());
         differences++;
       }
@@ -76,28 +76,28 @@ int CheckSchemasAgainstDir(const std::string &dir, bool report)
 }
 
 //: Write the table to `dir`; `name` limits it to one schema. Returns 0, or the exit code of the failure.
-int WriteSchemasTo(const std::string &dir, const char *name, bool report)
+int WriteSchemasTo(const std::string &dir, const char *name, bool bReport)
 {
   int written = 0;
   for(int i = 0; i < kSchemaCount; i++)
   {
-    if(name != NULL && *name && strcmp(name, kSchemas[i].name) != 0)
+    if(name != NULL && *name && strcmp(name, kSchemas[i].m_Name) != 0)
       continue;
 
-    const std::string path = dir + "\\" + kSchemas[i].name + ".schema.json";
+    const std::string path = dir + "\\" + kSchemas[i].m_Name + ".schema.json";
     FILE *f = fopen(path.c_str(), "wb");
     if(f == NULL)
       return Fail(1, "cannot write %s", path.c_str());
     fputs(kSchemas[i].text, f);
     fputc('\n', f);
     fclose(f);
-    if(report)
+    if(bReport)
       printf("written: %s\n", path.c_str());
     written++;
   }
   if(written == 0)
     return Fail(2, "no schema named '%s' (`schema` lists them)", name == NULL ? "" : name);
-  if(report)
+  if(bReport)
     printf("%d schema file(s), schemaVersion %d\n", written, kSchemaVersion);
   return 0;
 }
@@ -142,7 +142,7 @@ int CmdSchema(const char *name, const char *outDir, const char *checkDir)
 
   printf("schemaVersion %d, %d document kind(s):\n", kSchemaVersion, kSchemaCount);
   for(int i = 0; i < kSchemaCount; i++)
-    printf("  %-14s %s\n", kSchemas[i].name, kSchemas[i].writtenBy);
+    printf("  %-14s %s\n", kSchemas[i].m_Name, kSchemas[i].writtenBy);
   printf(
       "`schema <name>` prints one; `schema --out <dir>` writes them all where a consumer can read "
       "them, which is how the checked-in schema/ folder is made; `schema --check <dir>` fails when "
@@ -182,9 +182,9 @@ struct SelfTest
     printf("FAILED  %s -- %s\n", name, why);
     failed++;
   }
-  void Check(bool condition, const char *name, const char *why)
+  void Check(bool bCondition, const char *name, const char *why)
   {
-    if(condition)
+    if(bCondition)
       Ok(name);
     else
       Failed(name, why);
@@ -216,29 +216,29 @@ bool JsonBalanced(const std::string &text)
     return false;
 
   int depth = 0;
-  bool inString = false, escaped = false;
+  bool bInString = false, escaped = false;
   for(; i < text.size(); i++)
   {
     const char c = text[i];
-    if(inString)
+    if(bInString)
     {
       if(escaped)
         escaped = false;
       else if(c == '\\')
         escaped = true;
       else if(c == '"')
-        inString = false;
+        bInString = false;
       continue;
     }
     if(c == '"')
-      inString = true;
+      bInString = true;
     else if(c == '{' || c == '[')
       depth++;
     else if(c == '}' || c == ']')
       if(--depth < 0)
         return false;
   }
-  return depth == 0 && !inString;
+  return depth == 0 && !bInString;
 }
 
 int CmdSelftest()
@@ -261,11 +261,11 @@ int CmdSelftest()
   {
     const std::string path = DefaultLogStem() + ".selftest.json";
     {
-      const JsonDocument json;    // JSON, whatever the terminal asked for
+      const JsonDocument bJson;    // JSON, whatever the terminal asked for
       const CaptureStdout out(path.c_str());
       if(!out.Ok())
         return Fail(1, "cannot write %s for the selftest", path.c_str());
-      g_indent = 1;
+      g_Indent = 1;
       printf("{\n");
       Field("a", 1);
       Field("b", std::string("x"));
@@ -277,14 +277,14 @@ int CmdSelftest()
       Row(std::string("two"));
       ArrayClose(false);
       Field("n", 3, true);
-      g_indent = 0;
+      g_Indent = 0;
       printf("}\n");
     }
 
     std::string text;
-    const bool read = ReadWholeFile(path.c_str(), text);
+    const bool bRead = ReadWholeFile(path.c_str(), text);
     remove(path.c_str());
-    t.Check(read, "writer-document-written", "the selftest could not read back what it wrote");
+    t.Check(bRead, "writer-document-written", "the selftest could not read back what it wrote");
     t.Check(JsonBalanced(text), "writer-document-balanced", "the writer's document is not balanced");
 
     // The separators are compared with the whitespace removed, because the writer puts a separator
@@ -315,12 +315,12 @@ int CmdSelftest()
 
   // ------------------------------------------------------------------ the schema table
   {
-    bool unique = true, versioned = true, objects = true;
+    bool bUnique = true, versioned = true, objects = true;
     for(int i = 0; i < kSchemaCount; i++)
     {
       for(int j = i + 1; j < kSchemaCount; j++)
-        if(!strcmp(kSchemas[i].name, kSchemas[j].name))
-          unique = false;
+        if(!strcmp(kSchemas[i].m_Name, kSchemas[j].m_Name))
+          bUnique = false;
       const std::string text = kSchemas[i].text;
       if(text.find("\"schemaVersion\"") == std::string::npos ||
          text.find("\"const\": 1") == std::string::npos)
@@ -328,7 +328,7 @@ int CmdSelftest()
       if(text.empty() || text[0] != '{' || text[text.size() - 1] != '}')
         objects = false;
     }
-    t.Check(unique, "schema-names-unique", "two schemas share a name");
+    t.Check(bUnique, "schema-names-unique", "two schemas share a name");
     t.Check(versioned, "schema-declares-version",
             "a schema does not describe schemaVersion as a const");
     t.Check(objects, "schema-is-one-object", "a schema is not a single JSON object");
@@ -376,7 +376,7 @@ int CmdSelftest()
     // Leave the folder as it was found: a leftover file would fail the *next* run's clean check, on
     // another day, in a directory nobody connects to this one.
     for(int i = 0; i < kSchemaCount; i++)
-      remove((dir + "\\" + kSchemas[i].name + ".schema.json").c_str());
+      remove((dir + "\\" + kSchemas[i].m_Name + ".schema.json").c_str());
     remove(extra.c_str());
     RemoveDirectoryA(dir.c_str());
     t.Check(GetFileAttributesA(dir.c_str()) == INVALID_FILE_ATTRIBUTES, "schema-check-cleanup",
@@ -425,7 +425,8 @@ int CmdSelftest()
   printf("\n%d passed, %d failed, %d skipped\n", t.passed, t.failed, t.skipped);
   if(t.failed == 0)
     printf(
-        "the documents themselves are checked with `python src\\py\\rdc_analysis.py validate <bundle> "
+        "the documents themselves are checked with `python src\\py\\rdc_analysis.py validate "
+        "<bundle> "
         "schema`\n");
   return t.failed == 0 ? 0 : 1;
 }

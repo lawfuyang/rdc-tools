@@ -148,12 +148,12 @@ std::string VisibilityText(ShaderStageMask mask)
   if(mask == ShaderStageMask::All)
     return "all";
 
-  static const ShaderStage stages[] = {
+  static const ShaderStage gs_Stages[] = {
       ShaderStage::Vertex, ShaderStage::Hull,    ShaderStage::Domain, ShaderStage::Geometry,
       ShaderStage::Pixel,  ShaderStage::Compute, ShaderStage::Task,   ShaderStage::Mesh};
   const uint32_t bits = (uint32_t)mask;
   std::string text;
-  for(ShaderStage stage : stages)
+  for(ShaderStage stage : gs_Stages)
   {
     if((bits & (1u << (uint32_t)stage)) == 0)
       continue;
@@ -189,8 +189,8 @@ ShaderStage StageFromName(const char *name)
   // the command line cannot drift apart (the order is also the order the commands print them in).
   static const struct
   {
-    const char *name;
-    ShaderStage stage;
+    const char *m_Name;
+    ShaderStage m_Stage;
   } kStages[] = {
       {"vs", ShaderStage::Vertex},        {"hs", ShaderStage::Hull},  {"ds", ShaderStage::Domain},
       {"gs", ShaderStage::Geometry},      {"ps", ShaderStage::Pixel}, {"cs", ShaderStage::Compute},
@@ -198,8 +198,8 @@ ShaderStage StageFromName(const char *name)
   };
 
   for(size_t i = 0; i < sizeof(kStages) / sizeof(kStages[0]); i++)
-    if(strcmp(name, kStages[i].name) == 0)
-      return kStages[i].stage;
+    if(strcmp(name, kStages[i].m_Name) == 0)
+      return kStages[i].m_Stage;
 
   // `ShaderStage::Invalid` is the enum's own sentinel (`Invalid = Count`), so "no such stage" has a
   // defined spelling rather than an out-of-range value.
@@ -217,13 +217,13 @@ const ShaderStage kReportedStages[] = {
 //: in a fixed order, and every command that iterates it wants a range rather than a `sizeof` dance.
 const rdcarray<ShaderStage> &ReportedStages()
 {
-  static rdcarray<ShaderStage> stages;
-  if(stages.empty())
+  static rdcarray<ShaderStage> gs_Stages;
+  if(gs_Stages.empty())
   {
     for(size_t i = 0; i < sizeof(kReportedStages) / sizeof(kReportedStages[0]); i++)
-      stages.push_back(kReportedStages[i]);
+      gs_Stages.push_back(kReportedStages[i]);
   }
-  return stages;
+  return gs_Stages;
 }
 
 // --------------------------------------------------------------------------- renderdoc.dll loading

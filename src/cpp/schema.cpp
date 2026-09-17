@@ -486,7 +486,7 @@ const SchemaDoc *FindSchema(std::string_view name)
 {
   for(int i = 0; i < kSchemaCount; i++)
   {
-    if(name == kSchemas[i].name)
+    if(name == kSchemas[i].m_Name)
       return &kSchemas[i];
   }
   return NULL;

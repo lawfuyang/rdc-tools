@@ -4,20 +4,20 @@
 
 #include "common.h"
 
-bool g_json = false;
-int g_indent = 0;
+bool g_bJson = false;
+int g_Indent = 0;
 
 //: The output format is fixed for the run (it comes from `--json` before anything else happens), so
 //: the commands ask rather than read the flag: a raw global read at thirty call sites is how the
 //: text and JSON paths drift apart.
 bool IsJson()
 {
-  return g_json;
+  return g_bJson;
 }
 
 //: One row of an array. `g_firstRow` is reset by `ArrayOpen` so commas land between rows and never
 //: after the last one -- a trailing comma is not JSON.
-bool g_firstRow = true;
+bool g_bFirstRow = true;
 
 //: The number inside a `ResourceId`. Its value is private and RenderDoc's own stringiser for it is
 //: not exported, so this copies the 8 bytes out exactly the way RenderDoc's
@@ -56,9 +56,14 @@ std::string JsonEscape(const char *s)
   return out;
 }
 
-std::string JsonEscape(const std::string &s)
+std::string JsonEscape(std::string_view s)
 {
-  return JsonEscape(s.c_str());
+  // A view rather than a `const std::string &`: every field and every engine-supplied name goes
+  // through here, and all this does is read. The copy keeps the NUL-terminated walk above unchanged
+  // -- a view may hold an embedded NUL, and escaping that as ordinary text would change a
+  // document's bytes.
+  const std::string owned(s);
+  return JsonEscape(owned.c_str());
 }
 
 std::string JsonEscape(const rdcstr &s)
@@ -68,8 +73,8 @@ std::string JsonEscape(const rdcstr &s)
 
 void Indent()
 {
-  if(g_json)
-    for(int i = 0; i < g_indent; i++)
+  if(g_bJson)
+    for(int i = 0; i < g_Indent; i++)
       fputs("  ", stdout);
 }
 
@@ -78,25 +83,25 @@ void Indent()
 //: The value is escaped: it routinely carries a Windows path (`capture`), an engine-supplied name
 //: or a debug message, and a single unescaped backslash in any of them makes the whole document
 //: unparseable -- which is exactly what `--json` did before this.
-void Field(const char *key, const std::string &value, bool last)
+void Field(const char *key, std::string_view value, bool bLast)
 {
   Indent();
-  if(g_json)
-    printf("\"%s\": \"%s\"%s\n", key, JsonEscape(value).c_str(), last ? "" : ",");
+  if(g_bJson)
+    printf("\"%s\": \"%s\"%s\n", key, JsonEscape(value).c_str(), bLast ? "" : ",");
   else
-    printf("%-18s %s\n", key, value.c_str());
+    printf("%-18s %.*s\n", key, (int)value.size(), value.data());
 }
 
-void Field(const char *key, const rdcstr &value, bool last)
+void Field(const char *key, const rdcstr &value, bool bLast)
 {
-  Field(key, std::string(value.c_str()), last);
+  Field(key, std::string(value.c_str()), bLast);
 }
 
-void Field(const char *key, long long value, bool last)
+void Field(const char *key, long long value, bool bLast)
 {
   Indent();
-  if(g_json)
-    printf("\"%s\": %lld%s\n", key, value, last ? "" : ",");
+  if(g_bJson)
+    printf("\"%s\": %lld%s\n", key, value, bLast ? "" : ",");
   else
     printf("%-18s %lld\n", key, value);
 }
@@ -104,13 +109,13 @@ void Field(const char *key, long long value, bool last)
 //: A boolean field as JSON's `true`/`false` rather than 1/0: the state blocks below are read by
 //: rules that compare against `true`, and a reader of the bundle should not have to remember which
 //: number means on.
-void Flag(const char *key, bool value, bool last)
+void Flag(const char *key, bool bValue, bool bLast)
 {
   Indent();
-  if(g_json)
-    printf("\"%s\": %s%s\n", key, value ? "true" : "false", last ? "" : ",");
+  if(g_bJson)
+    printf("\"%s\": %s%s\n", key, bValue ? "true" : "false", bLast ? "" : ",");
   else
-    printf("%-18s %s\n", key, value ? "on" : "off");
+    printf("%-18s %s\n", key, bValue ? "on" : "off");
 }
 
 //: `g_firstRow` is the "this item needs no separator" state of the array *currently* being written.
@@ -120,28 +125,28 @@ void Flag(const char *key, bool value, bool last)
 //: written with no comma, and the document did not parse: `states/<eid>.shaders.json` was invalid
 //: for the hobby capture for exactly that reason (a stage whose signature arrays were empty), and
 //: `resources.json` would have hit it on any resource with an empty usage list.
-std::vector<bool> g_firstRowStack;
+std::vector<bool> g_FirstRowStack;
 
 void ArrayOpen(const char *key)
 {
   Indent();
-  if(g_json)
+  if(g_bJson)
     printf("\"%s\": [\n", key);
-  g_firstRowStack.push_back(g_firstRow);
-  g_indent++;
-  g_firstRow = true;
+  g_FirstRowStack.push_back(g_bFirstRow);
+  g_Indent++;
+  g_bFirstRow = true;
 }
 
-void ArrayClose(bool last)
+void ArrayClose(bool bLast)
 {
-  g_indent--;
+  g_Indent--;
   Indent();
-  if(g_json)
-    printf("]%s\n", last ? "" : ",");
-  if(!g_firstRowStack.empty())
+  if(g_bJson)
+    printf("]%s\n", bLast ? "" : ",");
+  if(!g_FirstRowStack.empty())
   {
-    g_firstRow = g_firstRowStack.back();
-    g_firstRowStack.pop_back();
+    g_bFirstRow = g_FirstRowStack.back();
+    g_FirstRowStack.pop_back();
   }
 }
 
@@ -150,37 +155,37 @@ void ArrayClose(bool last)
 //: point at which the writer knows an item is last, and a comma after the last one is not JSON.
 const char *TakeSeparator()
 {
-  const char *sep = g_firstRow ? "" : ",\n";
-  g_firstRow = false;
+  const char *sep = g_bFirstRow ? "" : ",\n";
+  g_bFirstRow = false;
   return sep;
 }
 
-void Row(const std::string &text)
+void Row(std::string_view text)
 {
-  if(g_json)
+  if(g_bJson)
   {
     Indent();
-    printf("%s\"%s\"\n", TakeSeparator(), JsonEscape(text.c_str()).c_str());
+    printf("%s\"%s\"\n", TakeSeparator(), JsonEscape(text).c_str());
   }
   else
   {
-    printf("%s\n", text.c_str());
+    printf("%s\n", std::string(text).c_str());
   }
 }
 
 //: An item of the enclosing array that is an object rather than a string -- `draws` writes one row
 //: per event. Sharing `TakeSeparator` with `Row` is what keeps that row from carrying a trailing
 //: comma, which it used to do for every event including the last.
-void ObjectRow(const std::string &object)
+void ObjectRow(std::string_view object)
 {
-  if(g_json)
+  if(g_bJson)
   {
     Indent();
-    printf("%s%s\n", TakeSeparator(), object.c_str());
+    printf("%s%s\n", TakeSeparator(), std::string(object).c_str());
   }
   else
   {
-    printf("%s\n", object.c_str());
+    printf("%s\n", std::string(object).c_str());
   }
 }
 
@@ -195,19 +200,19 @@ void ObjectOpen()
     Indent();
     fputs(TakeSeparator(), stdout);
     fputs("{\n", stdout);
-    g_indent++;
+    g_Indent++;
   }
 }
 
 //: The matching `}`. Nothing follows it: whether the *enclosing* array has more items is the next
 //: item's separator to write, and whether the array is the last member is its `ArrayClose` to say.
-void ObjectClose(bool last)
+void ObjectClose(bool bLast)
 {
   if(IsJson())
   {
-    g_indent--;
+    g_Indent--;
     Indent();
-    printf("}%s\n", last ? "" : ",");
+    printf("}%s\n", bLast ? "" : ",");
   }
 }
 
@@ -221,7 +226,7 @@ void ObjectOpenKey(const char *key)
     return;
   Indent();
   printf("\"%s\": {\n", key);
-  g_indent++;
+  g_Indent++;
 }
 
 //: printf-style formatting for the output lines. The SAL annotation makes the compiler check every

@@ -13,10 +13,10 @@
 // The schemas are hand-written because the writers are hand-written: there is no descriptor to
 // generate both from, and inventing one for fifteen documents is more machinery than it saves. They
 // stay honest by being *used*: `schema --out <dir>` writes them, the copy in `schema/` is checked
-// in, and `python src\py\rdc_analysis.py validate <bundle> schema` validates real documents against that
-// copy -- so a schema that has drifted from its writer fails a run instead of misleading a reader.
-// Writing them found a defect immediately: `bundle-verify` wrote `"files"` twice in one object (the
-// per-file rows, then their count), which every parser resolves to the count.
+// in, and `python src\py\rdc_analysis.py validate <bundle> schema` validates real documents against
+// that copy -- so a schema that has drifted from its writer fails a run instead of misleading a
+// reader. Writing them found a defect immediately: `bundle-verify` wrote `"files"` twice in one
+// object (the per-file rows, then their count), which every parser resolves to the count.
 //
 // The keyword subset is exactly what the offline validator implements -- type, required,
 // properties, items, enum, const, description, additionalProperties. `additionalProperties` is
@@ -31,7 +31,7 @@ constexpr int kSchemaVersion = 1;
 
 struct SchemaDoc
 {
-  const char *name;         // `schema <name>`; what validate matches a file by
+  const char *m_Name;       // `schema <name>`; what validate matches a file by
   const char *writtenBy;    // which command writes it, for the index
   const char *text;
 };

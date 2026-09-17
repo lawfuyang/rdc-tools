@@ -24,12 +24,12 @@ std::string Sha256File(const char *path)
   unsigned char digest[32];
 
   FILE *f = fopen(path, "rb");
-  bool ok = false;
+  bool bOk = false;
   if(f != NULL)
   {
-    ok = BCryptCreateHash(alg, &hash, object.empty() ? NULL : object.data(), (ULONG)object.size(),
-                          NULL, 0, 0) >= 0;
-    if(ok)
+    bOk = BCryptCreateHash(alg, &hash, object.empty() ? NULL : object.data(), (ULONG)object.size(),
+                           NULL, 0, 0) >= 0;
+    if(bOk)
     {
       std::vector<unsigned char> buf(65536);
       size_t n = 0;
@@ -37,11 +37,11 @@ std::string Sha256File(const char *path)
       {
         if(BCryptHashData(hash, (PUCHAR)buf.data(), (ULONG)n, 0) < 0)
         {
-          ok = false;
+          bOk = false;
           break;
         }
       }
-      ok = ok && BCryptFinishHash(hash, digest, (ULONG)sizeof(digest), 0) >= 0;
+      bOk = bOk && BCryptFinishHash(hash, digest, (ULONG)sizeof(digest), 0) >= 0;
     }
   }
 
@@ -51,7 +51,7 @@ std::string Sha256File(const char *path)
     BCryptDestroyHash(hash);
   BCryptCloseAlgorithmProvider(alg, 0);
 
-  if(!ok)
+  if(!bOk)
   {
     fprintf(stderr, "warning: cannot hash %s\n", path);
     return std::string();
@@ -93,19 +93,19 @@ bool MakeDir(const std::string &path)
   return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-bool DirIsEmpty(const std::string &path, bool &empty)
+bool DirIsEmpty(const std::string &path, bool &bEmpty)
 {
   const std::string pattern = path + "\\*";
   WIN32_FIND_DATAA entry;
   HANDLE find = FindFirstFileA(pattern.c_str(), &entry);
   if(find == INVALID_HANDLE_VALUE)
     return false;
-  empty = true;
+  bEmpty = true;
   do
   {
     if(strcmp(entry.cFileName, ".") != 0 && strcmp(entry.cFileName, "..") != 0)
     {
-      empty = false;
+      bEmpty = false;
       break;
     }
   } while(FindNextFileA(find, &entry) != 0);
@@ -169,7 +169,7 @@ bool HasBoundState(const D3D12Pipe::State *st)
 //: intentions. Extracted from `CmdImage` so `image` and the bundle save a target through one code
 //: path.
 int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char *path,
-                        const D3D12Pipe::State *st, int eid, bool wantDisasm,
+                        const D3D12Pipe::State *st, int eid, bool bWantDisasm,
                         const std::string &bundle, std::vector<std::string> &written)
 {
   const std::string statesDir = bundle + "\\states";
@@ -177,7 +177,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
   const std::string stem = Fmt("%s\\%d", statesDir.c_str(), eid);
 
   {
-    const JsonDocument json;
+    const JsonDocument bJson;
     const std::string target = stem + ".state.json";
     const CaptureStdout out(target.c_str());
     if(!out.Ok())
@@ -187,12 +187,12 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
   }
 
   {
-    const JsonDocument json;
+    const JsonDocument bJson;
     const std::string target = stem + ".shaders.json";
     const CaptureStdout out(target.c_str());
     if(!out.Ok())
       return 1;
-    CmdShaders(ctrl, file, path, eid, wantDisasm);
+    CmdShaders(ctrl, file, path, eid, bWantDisasm);
     written.push_back(BundleRelative(bundle, target));
   }
 
@@ -210,7 +210,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
 
     for(size_t b = 0; b < refl->constantBlocks.size() && b < 64; b++)
     {
-      const JsonDocument json;
+      const JsonDocument bJson;
       const std::string target =
           Fmt("%s\\%d_%s_%d.json", cbuffersDir.c_str(), eid, StageName(stage), (int)b);
       const CaptureStdout out(target.c_str());
@@ -229,16 +229,16 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
 //: the caller wants documents for even where the state did not change.
 struct DumpOptions
 {
-  std::string outDir = "bundle";
-  int since = 1;
-  int until = 0;
-  int maxEvents = 0;
-  bool withImages = false;
-  bool withCounters = false;
-  bool withTextures = false;
-  bool overwrite = false;
-  bool noUsage = false;
-  std::vector<int> forceEvents;
+  std::string m_OutDir = "bundle";
+  int m_Since = 1;
+  int m_Until = 0;
+  int m_MaxEvents = 0;
+  bool m_bWithImages = false;
+  bool m_bWithCounters = false;
+  bool m_bWithTextures = false;
+  bool m_bOverwrite = false;
+  bool m_bNoUsage = false;
+  std::vector<int> m_ForceEvents;
 };
 
 //: Defined with the CLI helpers further down; `dump`'s options take integers, and `atoi` would turn
@@ -269,54 +269,54 @@ void ParseEventList(const std::string &text, std::vector<int> &out)
 //: a crash is survivable: files are written as they are produced, and the manifest lists what was
 //: written, so a partial bundle says so.
 int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
-            const std::vector<std::string> &args, bool wantDisasm)
+            const std::vector<std::string> &args, bool bWantDisasm)
 {
   DumpOptions opts;
   for(size_t i = 1; i < args.size(); i++)
   {
     const std::string &a = args[i];
     if(a == "--with-images")
-      opts.withImages = true;
+      opts.m_bWithImages = true;
     else if(a == "--with-counters")
-      opts.withCounters = true;
+      opts.m_bWithCounters = true;
     else if(a == "--textures")
-      opts.withTextures = true;
+      opts.m_bWithTextures = true;
     else if(a == "--overwrite")
-      opts.overwrite = true;
+      opts.m_bOverwrite = true;
     else if(a == "--no-usage")
-      opts.noUsage = true;
+      opts.m_bNoUsage = true;
     else if(a == "--since" && i + 1 < args.size())
-      opts.since = ToInt(args[++i], 1);
+      opts.m_Since = ToInt(args[++i], 1);
     else if(a == "--until" && i + 1 < args.size())
-      opts.until = ToInt(args[++i], 0);
+      opts.m_Until = ToInt(args[++i], 0);
     else if(a == "--max-events" && i + 1 < args.size())
-      opts.maxEvents = ToInt(args[++i], 0);
+      opts.m_MaxEvents = ToInt(args[++i], 0);
     else if(a == "--events" && i + 1 < args.size())
-      ParseEventList(args[++i], opts.forceEvents);
+      ParseEventList(args[++i], opts.m_ForceEvents);
     else if(a.size() > 2 && a[0] == '-' && a[1] == '-')
       return Fail(2, "unknown option '%s' for dump", a.c_str());
     else
-      opts.outDir = a;
+      opts.m_OutDir = a;
   }
 
-  if(opts.since < 1)
-    opts.since = 1;
+  if(opts.m_Since < 1)
+    opts.m_Since = 1;
 
   // The directory has to be ours: writing a bundle into one that already holds another frame's files
   // would leave a mixture no manifest could describe. `--overwrite` says the old contents may be replaced.
-  if(!MakeDir(opts.outDir))
-    return Fail(1, "cannot create the bundle directory %s", opts.outDir.c_str());
-  bool empty = true;
-  if(!DirIsEmpty(opts.outDir, empty))
-    return Fail(1, "cannot read the bundle directory %s", opts.outDir.c_str());
-  if(!empty && !opts.overwrite)
-    return Fail(1, "%s is not empty (pass --overwrite to write into it)", opts.outDir.c_str());
+  if(!MakeDir(opts.m_OutDir))
+    return Fail(1, "cannot create the bundle directory %s", opts.m_OutDir.c_str());
+  bool bEmpty = true;
+  if(!DirIsEmpty(opts.m_OutDir, bEmpty))
+    return Fail(1, "cannot read the bundle directory %s", opts.m_OutDir.c_str());
+  if(!bEmpty && !opts.m_bOverwrite)
+    return Fail(1, "%s is not empty (pass --overwrite to write into it)", opts.m_OutDir.c_str());
 
   static const char *kSubDirs[] = {"states", "cbuffers", "rt", "textures"};
   for(size_t i = 0; i < sizeof(kSubDirs) / sizeof(kSubDirs[0]); i++)
   {
-    if(!MakeDir(opts.outDir + "\\" + kSubDirs[i]))
-      return Fail(1, "cannot create %s\\%s", opts.outDir.c_str(), kSubDirs[i]);
+    if(!MakeDir(opts.m_OutDir + "\\" + kSubDirs[i]))
+      return Fail(1, "cannot create %s\\%s", opts.m_OutDir.c_str(), kSubDirs[i]);
   }
 
   std::vector<std::string> written;    // bundle-relative paths, hashed into the manifest
@@ -341,14 +341,14 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   const int kEmptyRun = 256;    // consecutive ids with nothing bound that end a sweep
   const int kHardCap = 200000;
   const size_t idBudget = ctrl->GetStructuredFile().chunks.size();
-  const int until = opts.until > 0 ? opts.until : kHardCap;
+  const int until = opts.m_Until > 0 ? opts.m_Until : kHardCap;
   int scanned = 0, emptyRun = 0, lastEid = 0;
   const char *stopped = "the end of the scan range";
   std::vector<int> ids;
 
   Log("bundle: sweeping ids %d..%d for bound state, at most %d id(s) (the file's chunk count)",
-      opts.since, until, (int)idBudget);
-  for(int eid = opts.since; eid <= until; eid++)
+      opts.m_Since, until, (int)idBudget);
+  for(int eid = opts.m_Since; eid <= until; eid++)
   {
     ctrl->SetFrameEvent(eid, true);
     scanned++;
@@ -367,7 +367,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     // `--max-events` stops the *sweep*, not just the writing: the sweep is the expensive part on a big
     // capture (each id is a `SetFrameEvent`, ~12 ms here), and on the 1.4 GB capture the file's chunk
     // count -- the budget -- is 29216, which is minutes of walking before anything is written.
-    if(opts.maxEvents > 0 && (int)ids.size() >= opts.maxEvents)
+    if(opts.m_MaxEvents > 0 && (int)ids.size() >= opts.m_MaxEvents)
     {
       stopped = "--max-events";
       break;
@@ -391,10 +391,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
 
   // ------------------------------------------------------------------ capture.json
   {
-    const JsonDocument json;
-    const CaptureStdout out((opts.outDir + "\\capture.json").c_str());
+    const JsonDocument bJson;
+    const CaptureStdout out((opts.m_OutDir + "\\capture.json").c_str());
     if(!out.Ok())
-      return Fail(1, "cannot write capture.json in %s", opts.outDir.c_str());
+      return Fail(1, "cannot write capture.json in %s", opts.m_OutDir.c_str());
 
     PrintCaptureHeader(file, path);
     const APIProperties props = ctrl->GetAPIProperties();
@@ -414,7 +414,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
           FileBytes(AbsolutePath(path).c_str(), captureBytes) ? (long long)captureBytes : 0);
     Field("absPath", AbsolutePath(path),
           true);    // the object's last member: a comma here is not JSON
-    g_indent = 0;
+    g_Indent = 0;
     printf("}\n");
     written.push_back("capture.json");
   }
@@ -428,25 +428,25 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   const std::map<int, bool> dispatchKinds = DispatchByEid(ctrl, callCount);
   Log("bundle: %d call(s) classified from the engine's action flags", callCount);
 
-  // The marker path of every event, from the same action list: one walk for the whole bundle rather than one
-  // per event, because the tree is walked once per `MarkerPathAt` call.
+  // The marker path of every event, from the same action list: one walk for the whole bundle rather
+  // than one per event, because the tree is walked once per `MarkerPathAt` call.
   const std::map<int, std::string> markerPaths = MarkerPaths(ctrl);
   Log("bundle: %d event(s) sit inside a marker", (int)markerPaths.size());
 
   int eventsWritten = 0;
   size_t stateFiles = 0;
   {
-    const JsonDocument json;
-    const CaptureStdout out((opts.outDir + "\\events.json").c_str());
+    const JsonDocument bJson;
+    const CaptureStdout out((opts.m_OutDir + "\\events.json").c_str());
     if(!out.Ok())
-      return Fail(1, "cannot write events.json in %s", opts.outDir.c_str());
+      return Fail(1, "cannot write events.json in %s", opts.m_OutDir.c_str());
 
     PrintCaptureHeader(file, path);
     ArrayOpen("events");
 
     std::string previousKey;
     // The kind of the last call, for the events the action list does not name (`DispatchByEid`).
-    bool lastKindWasDispatch = false;
+    bool bLastKindWasDispatch = false;
     for(size_t index = 0; index < ids.size(); index++)
     {
       const int eid = ids[index];
@@ -456,7 +456,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       // Everything the state can be compared and hashed by, so the offline side does not have to
       // guess which fields matter.
       std::string shaderIds;
-      bool computeBound = false;
+      bool bComputeBound = false;
       for(int i = 0; i < (int)ShaderStage::Count; i++)
       {
         const ShaderStage stage = (ShaderStage)i;
@@ -465,7 +465,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
           continue;
         shaderIds += Fmt("%s=%s ", StageName(stage), IdText(sh->resourceId).c_str());
         if(stage == ShaderStage::Compute)
-          computeBound = true;
+          bComputeBound = true;
       }
       // The call kind is the action's, not the bound shaders': see `DispatchByEid`. An event the
       // action list does not name takes the kind of the call it follows, and `computeBound` --
@@ -473,8 +473,8 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       // came back empty.
       const std::map<int, bool>::const_iterator kind = dispatchKinds.find(eid);
       if(kind != dispatchKinds.end())
-        lastKindWasDispatch = kind->second;
-      const bool compute = dispatchKinds.empty() ? computeBound : lastKindWasDispatch;
+        bLastKindWasDispatch = kind->second;
+      const bool bCompute = dispatchKinds.empty() ? bComputeBound : bLastKindWasDispatch;
 
       std::string targets;
       for(size_t slot = 0; slot < st->outputMerger.renderTargets.size(); slot++)
@@ -501,32 +501,34 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
               (unsigned)st->rootSignature.parameters.size());
       const std::string stateHash = StateHash(key);
 
-      // `marker` is the engine's own marker path for this event (`A > B`), from the action list: it is what
-      // lets an offline rule name a pass in the engine's vocabulary instead of describing its state, and it
-      // survives a re-capture where an event id does not.
-      ObjectRow(
-          Fmt("{\"eid\": %d, \"marker\": \"%s\", \"pso\": \"%s\", \"psoKind\": \"%s\", \"shaders\": \"%s\","
-              " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, \"state\": \"%s\"}",
-              eid, JsonEscape(markerPaths.count(eid) ? markerPaths.find(eid)->second : std::string()).c_str(),
-              IdText(st->pipelineResourceId).c_str(), compute ? "compute" : "graphics",
-              shaderIds.c_str(), targets.c_str(), depth.c_str(),
-              (unsigned)st->rootSignature.parameters.size(), stateHash.c_str()));
+      // `marker` is the engine's own marker path for this event (`A > B`), from the action list: it
+      // is what lets an offline rule name a pass in the engine's vocabulary instead of describing
+      // its state, and it survives a re-capture where an event id does not.
+      ObjectRow(Fmt(
+          "{\"eid\": %d, \"marker\": \"%s\", \"pso\": \"%s\", \"psoKind\": \"%s\", \"shaders\": "
+          "\"%s\","
+          " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, \"state\": \"%s\"}",
+          eid,
+          JsonEscape(markerPaths.count(eid) ? markerPaths.find(eid)->second : std::string()).c_str(),
+          IdText(st->pipelineResourceId).c_str(), bCompute ? "compute" : "graphics",
+          shaderIds.c_str(), targets.c_str(), depth.c_str(),
+          (unsigned)st->rootSignature.parameters.size(), stateHash.c_str()));
       eventsWritten++;
 
       // A state file per distinct state rather than per event: the documents are kilobytes each and
       // most events repeat the previous one's, but the *first* event and every change are exactly
       // the ones a reader wants. `--events` forces extra ids.
-      bool force = false;
-      for(size_t i = 0; i < opts.forceEvents.size(); i++)
+      bool bForce = false;
+      for(size_t i = 0; i < opts.m_ForceEvents.size(); i++)
       {
-        if(opts.forceEvents[i] == eid)
-          force = true;
+        if(opts.m_ForceEvents[i] == eid)
+          bForce = true;
       }
-      if(previousKey.empty() || key != previousKey || force)
+      if(previousKey.empty() || key != previousKey || bForce)
       {
         previousKey = key;
         const int rc =
-            WriteEventDocuments(ctrl, file, path, st, eid, wantDisasm, opts.outDir, written);
+            WriteEventDocuments(ctrl, file, path, st, eid, bWantDisasm, opts.m_OutDir, written);
         if(rc == 0)
           stateFiles++;
         else
@@ -535,7 +537,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
         // Images belong to the same events as the state files, and for the same reason: most events
         // repeat the previous picture. One per event put 715 images (354 MB) in a bundle whose
         // whole point was to be readable; at the state boundaries it is ~30 events' worth.
-        if(opts.withImages)
+        if(opts.m_bWithImages)
         {
           for(size_t slot = 0; slot < st->outputMerger.renderTargets.size() && slot < 4; slot++)
           {
@@ -546,17 +548,17 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
             // resource is ~10x smaller than the BMP the display path writes (a 1920x1080 target is
             // 6 MB as BMP), and the bundle wants the target as it is, not as a viewer would
             // tone-map it.
-            const std::string png = Fmt("%s\\rt\\%d_%d.png", opts.outDir.c_str(), eid, (int)slot);
+            const std::string png = Fmt("%s\\rt\\%d_%d.png", opts.m_OutDir.c_str(), eid, (int)slot);
             TextureSave save;
             save.resourceId = rt;
             save.destType = FileType::PNG;
             const ResultDetails res = ctrl->SaveTexture(save, rdcstr(png.c_str()));
             unsigned long long bytes = 0;
             if(res.OK() && FileBytes(png.c_str(), bytes) && bytes > 0)
-              written.push_back(BundleRelative(opts.outDir, png));
+              written.push_back(BundleRelative(opts.m_OutDir, png));
             else
               skipped.push_back(std::make_pair(
-                  BundleRelative(opts.outDir, png),
+                  BundleRelative(opts.m_OutDir, png),
                   res.OK() ? std::string("the engine wrote an empty file") : ResultText(res)));
           }
         }
@@ -564,14 +566,14 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     }
 
     ArrayClose(false);    // the scan block and the totals below
-    g_indent = 1;
+    g_Indent = 1;
     Field("total", (long long)eventsWritten);
     Field("scanned", (long long)scanned);
-    Field("scanFrom", (long long)opts.since);
+    Field("scanFrom", (long long)opts.m_Since);
     Field("scanTo", (long long)lastEid);
     Field("scanStopped", std::string(stopped));
     Field("stateFiles", (long long)stateFiles, true);
-    g_indent = 0;
+    g_Indent = 0;
     printf("}\n");
     written.push_back("events.json");
   }
@@ -580,10 +582,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
 
   // ------------------------------------------------------------------ resources.json
   {
-    const JsonDocument json;
-    const CaptureStdout out((opts.outDir + "\\resources.json").c_str());
+    const JsonDocument bJson;
+    const CaptureStdout out((opts.m_OutDir + "\\resources.json").c_str());
     if(!out.Ok())
-      return Fail(1, "cannot write resources.json in %s", opts.outDir.c_str());
+      return Fail(1, "cannot write resources.json in %s", opts.m_OutDir.c_str());
 
     PrintCaptureHeader(file, path);
     ArrayOpen("resources");
@@ -636,7 +638,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       // The usage list is what lets the offline side ask "was this ever written, and by whom" without a
       // device. The values are the engine's numeric `ResourceUsage`; the offline tool's `rdc_report.py`
       // carries the name table, taken from the enum's declaration order in RenderDoc's own header.
-      if(opts.noUsage)
+      if(opts.m_bNoUsage)
       {
         Field("usage", std::string("(not collected: --no-usage)"), true);
       }
@@ -663,9 +665,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     }
 
     ArrayClose(false);
-    g_indent = 1;
+    g_Indent = 1;
     Field("total", (long long)resources.size(), true);
-    g_indent = 0;
+    g_Indent = 0;
     printf("}\n");
     written.push_back("resources.json");
   }
@@ -673,10 +675,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
 
   // ------------------------------------------------------------------ messages.json
   {
-    const JsonDocument json;
-    const CaptureStdout out((opts.outDir + "\\messages.json").c_str());
+    const JsonDocument bJson;
+    const CaptureStdout out((opts.m_OutDir + "\\messages.json").c_str());
     if(!out.Ok())
-      return Fail(1, "cannot write messages.json in %s", opts.outDir.c_str());
+      return Fail(1, "cannot write messages.json in %s", opts.m_OutDir.c_str());
 
     PrintCaptureHeader(file, path);
     const rdcarray<DebugMessage> &msgs = ctrl->GetDebugMessages();
@@ -691,21 +693,21 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
                     JsonEscape(msgs[i].description.c_str()).c_str()));
     }
     ArrayClose(false);
-    g_indent = 1;
+    g_Indent = 1;
     Field("total", (long long)msgs.size(), true);
-    g_indent = 0;
+    g_Indent = 0;
     printf("}\n");
     written.push_back("messages.json");
   }
 
   // ------------------------------------------------------------------ counters.json (optional)
-  if(opts.withCounters)
+  if(opts.m_bWithCounters)
   {
     Log("bundle: fetching counters (the slow part, when the driver supports them)");
-    const JsonDocument json;
-    const CaptureStdout out((opts.outDir + "\\counters.json").c_str());
+    const JsonDocument bJson;
+    const CaptureStdout out((opts.m_OutDir + "\\counters.json").c_str());
     if(!out.Ok())
-      return Fail(1, "cannot write counters.json in %s", opts.outDir.c_str());
+      return Fail(1, "cannot write counters.json in %s", opts.m_OutDir.c_str());
 
     PrintCaptureHeader(file, path);
     const rdcarray<CounterResult> results = ctrl->FetchCounters(rdcarray<GPUCounter>());
@@ -714,15 +716,15 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       ObjectRow(Fmt("{\"eid\": %u, \"counter\": %u, \"value\": %g}", (unsigned)results[i].eventId,
                     (unsigned)results[i].counter, results[i].value.d));
     ArrayClose(false);
-    g_indent = 1;
+    g_Indent = 1;
     Field("total", (long long)results.size(), true);
-    g_indent = 0;
+    g_Indent = 0;
     printf("}\n");
     written.push_back("counters.json");
   }
 
   // ------------------------------------------------------------------ textures/ (optional)
-  if(opts.withTextures)
+  if(opts.m_bWithTextures)
   {
     Log("bundle: saving %d texture(s) through the engine's decoder", (int)ctrl->GetTextures().size());
     for(size_t i = 0; i < ctrl->GetTextures().size(); i++)
@@ -731,31 +733,31 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       TextureSave save;
       save.resourceId = t.resourceId;
       save.destType = FileType::PNG;
-      const std::string out = opts.outDir + "\\textures\\" + IdText(t.resourceId) + ".png";
+      const std::string out = opts.m_OutDir + "\\textures\\" + IdText(t.resourceId) + ".png";
       const ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
       // A successful `SaveTexture` can still leave an empty file (measured: one texture in the Android
       // capture), and a 0-byte PNG in the manifest is worse than a line saying it could not be decoded.
       unsigned long long bytes = 0;
       if(res.OK() && FileBytes(out.c_str(), bytes) && bytes > 0)
-        written.push_back(BundleRelative(opts.outDir, out));
+        written.push_back(BundleRelative(opts.m_OutDir, out));
       else
         skipped.push_back(std::make_pair(
-            BundleRelative(opts.outDir, out),
+            BundleRelative(opts.m_OutDir, out),
             res.OK() ? std::string("the engine wrote an empty file") : ResultText(res)));
     }
   }
 
   // ------------------------------------------------------------------ manifest.json
   {
-    const JsonDocument json;
-    const CaptureStdout out((opts.outDir + "\\manifest.json").c_str());
+    const JsonDocument bJson;
+    const CaptureStdout out((opts.m_OutDir + "\\manifest.json").c_str());
     if(!out.Ok())
-      return Fail(1, "cannot write manifest.json in %s", opts.outDir.c_str());
+      return Fail(1, "cannot write manifest.json in %s", opts.m_OutDir.c_str());
 
     unsigned long long captureBytes = 0;
     const std::string captureAbs = AbsolutePath(path);
     printf("{\n");    // this writer builds its own document
-    g_indent = 1;
+    g_Indent = 1;
     Field("schemaVersion", (long long)kSchemaVersion);
     Field("bundleVersion", 1);
     Field("driver", std::string("replay_dump"));
@@ -764,13 +766,13 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("captureAbsolute", captureAbs);
     Field("captureBytes", FileBytes(captureAbs.c_str(), captureBytes) ? (long long)captureBytes : 0);
     Field("captureSha256", Sha256File(captureAbs.c_str()));
-    Field("since", (long long)opts.since);
-    Field("until", (long long)opts.until);
-    Field("maxEvents", (long long)opts.maxEvents);
-    Field("withImages", (long long)(opts.withImages ? 1 : 0));
-    Field("withCounters", (long long)(opts.withCounters ? 1 : 0));
-    Field("withTextures", (long long)(opts.withTextures ? 1 : 0));
-    Field("resourceUsage", std::string(opts.noUsage ? "not collected" : "collected"));
+    Field("since", (long long)opts.m_Since);
+    Field("until", (long long)opts.m_Until);
+    Field("maxEvents", (long long)opts.m_MaxEvents);
+    Field("withImages", (long long)(opts.m_bWithImages ? 1 : 0));
+    Field("withCounters", (long long)(opts.m_bWithCounters ? 1 : 0));
+    Field("withTextures", (long long)(opts.m_bWithTextures ? 1 : 0));
+    Field("resourceUsage", std::string(opts.m_bNoUsage ? "not collected" : "collected"));
     Field("stateHashInputs",
           std::string("pso, shader ids, render targets, depth target, root signature"
                       " id, root parameter count"));
@@ -812,7 +814,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     unsigned long long totalBytes = 0;
     for(size_t i = 0; i < written.size(); i++)
     {
-      const std::string full = opts.outDir + "\\" + written[i];
+      const std::string full = opts.m_OutDir + "\\" + written[i];
       unsigned long long bytes = 0;
       FileBytes(full.c_str(), bytes);    // a '/' in the path is accepted by the Win32 API
       const std::string hash = Sha256File(full.c_str());
@@ -822,23 +824,23 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     }
     ArrayClose(false);
 
-    g_indent = 1;
+    g_Indent = 1;
     Field("fileCount", (long long)written.size());
     Field("fileBytes", (long long)totalBytes, true);
-    g_indent = 0;
+    g_Indent = 0;
     printf("}\n");
   }
   Log("bundle: manifest.json written (%d file(s))", (int)written.size());
 
   PrintCaptureHeader(file, path);
-  Field("out", opts.outDir);
+  Field("out", opts.m_OutDir);
   Field("events", (long long)eventsWritten);
   Field("stateFiles", (long long)stateFiles);
   Field("files", (long long)written.size());
   Field("skipped", (long long)skipped.size());
   Field("scanStopped", std::string(stopped), true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -858,9 +860,9 @@ int CmdBundleVerify(const char *dir)
   if(!ReadWholeFile(manifestPath.c_str(), text))
     return Fail(1, "cannot read %s", manifestPath.c_str());
 
-  if(g_json)
+  if(g_bJson)
     printf("{\n");
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("schemaVersion", (long long)kSchemaVersion);
   Field("manifest", manifestPath);
 
@@ -919,7 +921,7 @@ int CmdBundleVerify(const char *dir)
   }
   ArrayClose(false);
 
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("checked", (long long)checked);
   Field("problems", (long long)bad);
   // `fileCount`, not `files`: the array above already holds that name, and a repeated key in one
@@ -927,8 +929,8 @@ int CmdBundleVerify(const char *dir)
   // Writing the document's schema is what surfaced it (the schema cannot describe two members with
   // one name).
   Field("fileCount", (long long)(checked + bad), true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return bad == 0 ? 0 : 1;
 }

@@ -112,7 +112,8 @@ void Usage()
       "Schema for\n"
       "each kind: `schema --out schema` writes the checked-in copies, and the offline tool "
       "validates real\n"
-      "documents against those (`python src\\py\\rdc_analysis.py validate <bundle> schema`). `schema "
+      "documents against those (`python src\\py\\rdc_analysis.py validate <bundle> schema`). "
+      "`schema "
       "--check <dir>`\n"
       "compares that folder with this driver and exits non-zero when they disagree, which is what "
       "keeps a\n"
@@ -149,7 +150,7 @@ void Usage();
 //: Runs one command against an already-open capture. Shared by `main` and `batch`, so a command
 //: name and its arguments mean the same thing however they were spelled.
 int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
-                    const std::vector<std::string> &args, bool wantDisasm, const char *saveDir)
+                    const std::vector<std::string> &args, bool bWantDisasm, const char *saveDir)
 {
   if(args.empty())
     return 2;
@@ -163,7 +164,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   if(!strcmp(cmd, "state") && args.size() > 1)
     return CmdState(ctrl, file, path, ToInt(args[1], 0));
   if(!strcmp(cmd, "shaders") && args.size() > 1)
-    return CmdShaders(ctrl, file, path, ToInt(args[1], 0), wantDisasm);
+    return CmdShaders(ctrl, file, path, ToInt(args[1], 0), bWantDisasm);
   if(!strcmp(cmd, "cb") && args.size() > 3)
   {
     const ShaderStage stage = StageFromName(args[2].c_str());
@@ -187,7 +188,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   if(!strcmp(cmd, "probe"))
     return CmdProbe(ctrl, file, path, args.size() > 1 ? ToInt(args[1], 2000) : 2000);
   if(!strcmp(cmd, "dump"))
-    return CmdDump(ctrl, file, path, args, wantDisasm);
+    return CmdDump(ctrl, file, path, args, bWantDisasm);
   if(!strcmp(cmd, "bundle-verify") && args.size() > 1)
     return CmdBundleVerify(args[1].c_str());
 
@@ -198,34 +199,34 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
 
 //: Splits a command line into arguments, taking the options out as it goes. Double quotes group a
 //: token, which `--save` and `image` need for a path with spaces.
-void SplitLine(const std::string &line, std::vector<std::string> &args, bool &json, bool &disasm,
+void SplitLine(const std::string &line, std::vector<std::string> &args, bool &bJson, bool &bDisasm,
                std::string &saveDir)
 {
   std::string token;
-  bool quoted = false;
-  bool wantSaveDir = false;
+  bool bQuoted = false;
+  bool bWantSaveDir = false;
   for(size_t i = 0; i <= line.size(); i++)
   {
     const char c = (i < line.size()) ? line[i] : ' ';
     if(c == '"')
     {
-      quoted = !quoted;
+      bQuoted = !bQuoted;
       continue;
     }
-    if(!quoted && (c == ' ' || c == '\t'))
+    if(!bQuoted && (c == ' ' || c == '\t'))
     {
       if(token.empty())
         continue;
       if(token == kJsonFlag)
-        json = true;
+        bJson = true;
       else if(token == kDisasmFlag)
-        disasm = true;
+        bDisasm = true;
       else if(token == kSaveFlag)
-        wantSaveDir = true;
-      else if(wantSaveDir)
+        bWantSaveDir = true;
+      else if(bWantSaveDir)
       {
         saveDir = token;
-        wantSaveDir = false;
+        bWantSaveDir = false;
       }
       else
         args.push_back(token);
@@ -246,7 +247,7 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     return Fail(2, "cannot read batch file %s", batchPath);
 
   int ret = 0, ran = 0;
-  bool sawProbe = false, sawOther = false;
+  bool bSawProbe = false, sawOther = false;
   std::string line;
   for(;;)
   {
@@ -263,16 +264,16 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     if(first != std::string::npos && line[first] != '#')
     {
       std::vector<std::string> args;
-      bool json = false, disasm = false;
+      bool bJson = false, bDisasm = false;
       std::string saveDir;
-      SplitLine(line.substr(first), args, json, disasm, saveDir);
+      SplitLine(line.substr(first), args, bJson, bDisasm, saveDir);
 
       // `probe` forces non-events, and a forced non-event leaves the last real event's state in
       // place; whichever ran second, one of the two answers would be wrong. It belongs in its own
       // run, and saying so here is cheaper than explaining a mysteriously different answer.
-      const bool isProbe = !args.empty() && args[0] == "probe";
-      sawProbe = sawProbe || isProbe;
-      sawOther = sawOther || !isProbe;
+      const bool bIsProbe = !args.empty() && args[0] == "probe";
+      bSawProbe = bSawProbe || bIsProbe;
+      sawOther = sawOther || !bIsProbe;
 
       // The marker is what lets a caller split the stream back into one output per command. It is
       // printed in both formats: JSON has no comment syntax, and guessing where one object ends and
@@ -280,10 +281,10 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
       printf("#=== %s\n", line.substr(first).c_str());
       fflush(stdout);
 
-      g_json = json;
+      g_bJson = bJson;
       const ULONGLONG started = Millis();
       const int code =
-          DispatchCommand(ctrl, file, path, args, disasm, saveDir.empty() ? NULL : saveDir.c_str());
+          DispatchCommand(ctrl, file, path, args, bDisasm, saveDir.empty() ? NULL : saveDir.c_str());
       ran++;
       ret = (code != 0) ? code : ret;
       Log("batch %d: %s -> exit %d in %.1fs", ran, line.substr(first).c_str(), code,
@@ -295,7 +296,7 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     line.clear();
   }
 
-  if(sawProbe && sawOther)
+  if(bSawProbe && sawOther)
   {
     Log("warning: this batch mixes `probe` with other commands; probe forces non-events, which "
         "leaves stale state behind, so run it on its own");
@@ -312,27 +313,27 @@ int main(int argc, char **argv)
   // losing the output that was already produced would hide exactly what happened.
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
-  g_start = Millis();    // progress timings are relative to this
+  g_Start = Millis();    // progress timings are relative to this
 
   std::vector<std::string> args;
-  bool wantDisasm = false;
+  bool bWantDisasm = false;
   const char *saveDir = NULL;
   std::string logPath = DefaultLogStem();
-  bool perRunLog = true;      // until `--log` names one exact file
+  bool bPerRunLog = true;     // until `--log` names one exact file
   std::string schemaOut;      // `--out <dir>`: where `schema` writes them
   std::string schemaCheck;    // `--check <dir>`: the copy to verify against
   for(int i = 1; i < argc; i++)
   {
     if(!strcmp(argv[i], kJsonFlag))
-      g_json = true;
+      g_bJson = true;
     else if(!strcmp(argv[i], kDisasmFlag))
-      wantDisasm = true;
+      bWantDisasm = true;
     else if(!strcmp(argv[i], kSaveFlag) && i + 1 < argc)
       saveDir = argv[++i];
     else if(!strcmp(argv[i], kLogFlag) && i + 1 < argc)
     {
       logPath = argv[++i];
-      perRunLog = false;
+      bPerRunLog = false;
     }
     else if(!strcmp(argv[i], "--out") && i + 1 < argc)
       schemaOut = argv[++i];
@@ -377,8 +378,8 @@ int main(int argc, char **argv)
   if(!logPath.empty())
   {
     std::string openedAs;
-    g_logFile = OpenLog(logPath, perRunLog, openedAs);
-    if(g_logFile == NULL)
+    g_LogFile = OpenLog(logPath, bPerRunLog, openedAs);
+    if(g_LogFile == NULL)
       fprintf(stderr, "warning: cannot write the log file %s\n", openedAs.c_str());
     else
       Log("log file: %s", openedAs.c_str());
@@ -452,7 +453,7 @@ int main(int argc, char **argv)
     std::vector<std::string> cmdArgs;
     cmdArgs.push_back(args[0]);
     cmdArgs.insert(cmdArgs.end(), args.begin() + 2, args.end());
-    ret = DispatchCommand(ctrl, file, path, cmdArgs, wantDisasm,
+    ret = DispatchCommand(ctrl, file, path, cmdArgs, bWantDisasm,
                           saveDirAbs.empty() ? NULL : saveDirAbs.c_str());
   }
   Log("done: exit %d after %.1fs", ret, (Millis() - started) / 1000.0);
@@ -462,7 +463,7 @@ int main(int argc, char **argv)
   //
   // The DLL is deliberately not freed: the objects are owned by it, and RenderDoc's own tools let
   // the process exit instead of unloading the engine underneath its own state.
-  if(g_logFile != NULL)
-    fclose(g_logFile);
+  if(g_LogFile != NULL)
+    fclose(g_LogFile);
   return ret;
 }

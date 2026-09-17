@@ -10,8 +10,9 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
-  // Where in the frame this event sits, in the engine's own marker names: the same path `draws` prints and a
-  // bundle stores, so a state document says which pass it belongs to without a second command.
+  // Where in the frame this event sits, in the engine's own marker names: the same path `draws`
+  // prints and a bundle stores, so a state document says which pass it belongs to without a second
+  // command.
   Field("marker", MarkerPathAt(ctrl, eid));
   Field("api", (long long)ctrl->GetAPIProperties().pipelineType);
 
@@ -87,7 +88,7 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
           const rdcarray<Descriptor> contents = ctrl->GetDescriptors(rp.heap, request);
           for(uint32_t k = 0; k < range.count; k++)
           {
-            const bool present = k < contents.size() && contents[k].resource != ResourceId::Null();
+            const bool bPresent = k < contents.size() && contents[k].resource != ResourceId::Null();
             // Two kinds per row, and they are different facts: `cat(N)` is the range's *category*
             // from the root signature (what the binding declares), `type(N)` is the heap slot's own
             // `DescriptorType` (what was actually written there). The engine has
@@ -97,7 +98,7 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
                 k < contents.size() ? contents[k].type : DescriptorType::Unknown;
             Row(Fmt("rp%-3d %c%-2u s%-3u cat(%u) type(%u) %s", i, RegisterLetter(range.category),
                     range.baseRegister + k, range.space, (unsigned)range.category, (unsigned)kind,
-                    present ? Fmt("res%s", IdText(contents[k].resource).c_str()).c_str() : "none"));
+                    bPresent ? Fmt("res%s", IdText(contents[k].resource).c_str()).c_str() : "none"));
           }
         }
       }
@@ -115,7 +116,7 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
     // (`LessEqual`, `Replace`, `InvSrcAlpha`), because a finding has to read like the state a
     // person set.
     ArrayOpen("viewports");
-    for(auto &vp : d3d12->rasterizer.viewports)
+    for(const Viewport &vp : d3d12->rasterizer.viewports)
       ObjectRow(Fmt(
           "{\"x\": %.2f, \"y\": %.2f, \"width\": %.2f, \"height\": %.2f, \"minDepth\": %.3f, "
           "\"maxDepth\": %.3f, \"enabled\": %s}",
@@ -123,7 +124,7 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
     ArrayClose(false);
 
     ArrayOpen("scissors");
-    for(auto &sc : d3d12->rasterizer.scissors)
+    for(const Scissor &sc : d3d12->rasterizer.scissors)
       ObjectRow(Fmt("{\"x\": %d, \"y\": %d, \"width\": %d, \"height\": %d, \"enabled\": %s}",
                     (int)sc.x, (int)sc.y, (int)sc.width, (int)sc.height,
                     sc.enabled ? "true" : "false"));
@@ -131,8 +132,8 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 
     ObjectOpenKey("outputMerger");
     {
-      const auto &ds = d3d12->outputMerger.depthStencilState;
-      const auto &bs = d3d12->outputMerger.blendState;
+      const D3D12Pipe::DepthStencilState &ds = d3d12->outputMerger.depthStencilState;
+      const D3D12Pipe::BlendState &bs = d3d12->outputMerger.blendState;
       Flag("depthEnable", ds.depthEnable);
       Flag("depthWrites", ds.depthWrites);
       Field("depthFunction", std::string(CompareFunctionText(ds.depthFunction)));
@@ -144,7 +145,7 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
       // A face's three operations plus its compare and write mask: `Keep` on all three is a face
       // that only *tests* stencil, which is exactly what "stencil test enabled where nothing wrote
       // stencil" turns on.
-      const auto face = [](const char *key, const StencilFace &f, bool lastInParent) {
+      const auto face = [](const char *key, const StencilFace &f, bool bLastInParent) {
         ObjectOpenKey(key);
         Field("fail", std::string(StencilOperationText(f.failOperation)));
         Field("depthFail", std::string(StencilOperationText(f.depthFailOperation)));
@@ -152,13 +153,13 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
         Field("function", std::string(CompareFunctionText(f.function)));
         Field("compareMask", (long long)f.compareMask);
         Field("writeMask", (long long)f.writeMask, true);
-        ObjectClose(lastInParent);
+        ObjectClose(bLastInParent);
       };
       face("frontFace", ds.frontFace, false);
       face("backFace", ds.backFace, false);
 
       ArrayOpen("blends");
-      for(auto &blend : bs.blends)
+      for(const ColorBlend &blend : bs.blends)
         ObjectRow(Fmt(
             "{\"enabled\": %s, \"writeMask\": %u, \"colorOperation\": \"%s\", \"alphaOperation\": "
             "\"%s\", \"srcColor\": \"%s\", \"dstColor\": \"%s\", \"srcAlpha\": \"%s\", "
@@ -175,8 +176,8 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
     }
   }
 
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -191,7 +192,8 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 //: that the semantic name alone does not show. The *type* is what a format rule needs: a `float4`
 //: written into an 8-bit UNORM target is a different thing from a `uint4` written into the same
 //: target, and the target's format is already in the bundle.
-int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, bool wantDisasm)
+int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+               bool bWantDisasm)
 {
   ctrl->SetFrameEvent(eid, true);
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
@@ -274,9 +276,9 @@ int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, in
     ArrayOpen("outputSignature");
     for(size_t s = 0; s < refl->outputSignature.size(); s++)
       Row(SignatureText(refl->outputSignature[s]));
-    ArrayClose(!wantDisasm);
+    ArrayClose(!bWantDisasm);
 
-    if(wantDisasm)
+    if(bWantDisasm)
     {
       // The disassembly is not part of the reflection: the controller generates it on request, per
       // target, and an empty target means "the native one".
@@ -300,8 +302,8 @@ int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, in
   }
   ArrayClose(true);    // `stages` is the object's last member
 
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -317,27 +319,31 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
   if(sh == NULL || sh->resourceId == ResourceId::Null())
     return Fail(1, "no %s shader is bound at eid %d", StageName(stage), eid);
 
-  // The bound shader's own reflection first: the pipe state hands it over (`D3D12Pipe::Shader::reflection`),
-  // so it is the reflection of the entry point that is *actually bound*. Asking `GetShader` with an empty
-  // entry-point name instead returns the shader's default entry, whose constant-block *layout* need not be
-  // the bound one's -- which lays a block's members out against the wrong offsets and prints the right bytes
-  // under the wrong names. `GetShader` stays as the fallback for a state the engine did not fill in.
+  // The bound shader's own reflection first: the pipe state hands it over
+  // (`D3D12Pipe::Shader::reflection`), so it is the reflection of the entry point that is *actually
+  // bound*. Asking `GetShader` with an empty entry-point name instead returns the shader's default
+  // entry, whose constant-block *layout* need not be the bound one's -- which lays a block's
+  // members out against the wrong offsets and prints the right bytes under the wrong names.
+  // `GetShader` stays as the fallback for a state the engine did not fill in.
   const ShaderReflection *refl = sh->reflection;
   if(refl == NULL)
-    refl = ctrl->GetShader(d3d12->pipelineResourceId, sh->resourceId, ShaderEntryPoint(rdcstr(), stage));
+    refl = ctrl->GetShader(d3d12->pipelineResourceId, sh->resourceId,
+                           ShaderEntryPoint(rdcstr(), stage));
   rdcstr entry = refl ? refl->entryPoint : rdcstr();
 
-  // Which buffer to read: the engine wants the resource explicitly, and a constant block is bound either
-  // as a root descriptor or as a slot of a descriptor table -- a bindless engine (UE) binds its cbuffers
-  // through tables, and asking only for the root descriptor reported "values will be zero" for *every*
-  // one of them (measured: all 312 cbuffer documents of the PC capture came back zeroed). The root
-  // signature cannot answer this: for a table it holds a heap and an offset, not a resource.
+  // Which buffer to read: the engine wants the resource explicitly, and a constant block is bound
+  // either as a root descriptor or as a slot of a descriptor table -- a bindless engine (UE) binds
+  // its cbuffers through tables, and asking only for the root descriptor reported "values will be
+  // zero" for *every* one of them (measured: all 312 cbuffer documents of the PC capture came back
+  // zeroed). The root signature cannot answer this: for a table it holds a heap and an offset, not
+  // a resource.
   //
-  // `GetDescriptorAccess` is the engine's own list of what this event's shaders read -- stage, binding
-  // *index* (the reflection's own constant-block index), array element, store and offset -- built for the
-  // event by the replay device. The RenderDoc GUI resolves its cbuffers through exactly this list
-  // (`PipeState::GetConstantBlock`), and `DescriptorRange(access)` is the matching way to ask for the
-  // descriptor itself, so this is the same resolution and not an imitation of it.
+  // `GetDescriptorAccess` is the engine's own list of what this event's shaders read -- stage,
+  // binding *index* (the reflection's own constant-block index), array element, store and offset --
+  // built for the event by the replay device. The RenderDoc GUI resolves its cbuffers through
+  // exactly this list
+  // (`PipeState::GetConstantBlock`), and `DescriptorRange(access)` is the matching way to ask for
+  // the descriptor itself, so this is the same resolution and not an imitation of it.
   ResourceId buffer = ResourceId::Null();
   uint64_t bufferOffset = 0;
   uint64_t bufferLength = 0;
@@ -363,32 +369,33 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
       bufferOffset = contents[0].byteOffset;
       bufferLength = contents[0].byteSize;
     }
-    // Whether or not the slot held anything, this is the row the reflection means: a second row for the
-    // same index would be a different array element, which is not what the slot asked for.
+    // Whether or not the slot held anything, this is the row the reflection means: a second row for
+    // the same index would be a different array element, which is not what the slot asked for.
     break;
   }
 
-  // A read that comes back zeroed has two very different meanings -- "the engine did not record a binding
-  // for this block here" and "the binding is real and the bytes are zero" -- and only the first is a fact
-  // about this tool. `$RDC_REPLAY_DEBUG=1` prints what the engine offered, so the two can be told apart
-  // without a rebuild.
+  // A read that comes back zeroed has two very different meanings -- "the engine did not record a
+  // binding for this block here" and "the binding is real and the bytes are zero" -- and only the
+  // first is a fact about this tool. `$RDC_REPLAY_DEBUG=1` prints what the engine offered, so the
+  // two can be told apart without a rebuild.
   if(getenv("RDC_REPLAY_DEBUG") != NULL)
   {
-    Log("cb: %d descriptor access row(s) at eid %d, %d root parameter(s), %d block(s) in the reflection",
+    Log("cb: %d descriptor access row(s) at eid %d, %d root parameter(s), %d block(s) in the "
+        "reflection",
         (int)access.size(), eid, (int)d3d12->rootSignature.parameters.size(),
         refl != NULL ? (int)refl->constantBlocks.size() : -1);
     for(size_t i = 0; i < access.size(); i++)
       Log("cb:   %s type=%u cat=%u index=%u elem=%u store=%s off=%llu size=%llu",
           StageName(access[i].stage), (unsigned)access[i].type,
-          (unsigned)CategoryForDescriptorType(access[i].type), access[i].index, access[i].arrayElement,
-          IdText(access[i].descriptorStore).c_str(), (unsigned long long)access[i].byteOffset,
-          (unsigned long long)access[i].byteSize);
+          (unsigned)CategoryForDescriptorType(access[i].type), access[i].index,
+          access[i].arrayElement, IdText(access[i].descriptorStore).c_str(),
+          (unsigned long long)access[i].byteOffset, (unsigned long long)access[i].byteSize);
   }
 
-  // The root-descriptor half, for the case the access list does not cover (an API or a driver that does
-  // not publish one): a CBV bound directly on a root parameter *is* in the pipe state as a resource. The
-  // lookup key is the block's own bind point -- the register and space the reflection declares -- not the
-  // block's index, which only happens to equal the register in the common case.
+  // The root-descriptor half, for the case the access list does not cover (an API or a driver that
+  // does not publish one): a CBV bound directly on a root parameter *is* in the pipe state as a
+  // resource. The lookup key is the block's own bind point -- the register and space the reflection
+  // declares -- not the block's index, which only happens to equal the register in the common case.
   if(buffer == ResourceId::Null() && refl != NULL && (size_t)slot < refl->constantBlocks.size())
   {
     const uint32_t reg = refl->constantBlocks[(size_t)slot].fixedBindNumber;
@@ -406,11 +413,12 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
     }
   }
 
-  // `length` is not optional: the engine fetches the bytes only when it is non-zero (`ReplayController::
-  // GetCBufferVariableContents` reads `if(length > 0) GetBufferData(...)`), and a zero length left every
-  // variable at its *default* of zero -- which is how every cbuffer document this tool ever wrote came out
-  // zeroed, for a block that was bound and full. A CBV's declared size is the right answer, and the
-  // reflection's block size is the fallback for a binding whose descriptor does not carry one.
+  // `length` is not optional: the engine fetches the bytes only when it is non-zero
+  // (`ReplayController:: GetCBufferVariableContents` reads `if(length > 0) GetBufferData(...)`),
+  // and a zero length left every variable at its *default* of zero -- which is how every cbuffer
+  // document this tool ever wrote came out zeroed, for a block that was bound and full. A CBV's
+  // declared size is the right answer, and the reflection's block size is the fallback for a
+  // binding whose descriptor does not carry one.
   if(bufferLength == 0 && refl != NULL && (size_t)slot < refl->constantBlocks.size())
     bufferLength = (uint64_t)refl->constantBlocks[(size_t)slot].byteSize;
 
@@ -424,16 +432,17 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
   Field("stage", std::string(StageName(stage)));
   Field("slot", (long long)slot);
   Field("shader", IdText(sh->resourceId));
-  Field("buffer",
-        buffer == ResourceId::Null()
-            ? std::string("(no root descriptor or table slot binds this block: values will be zero)")
-            : Fmt("res%s+0x%llx", IdText(buffer).c_str(), (unsigned long long)bufferOffset));
+  Field(
+      "buffer",
+      buffer == ResourceId::Null()
+          ? std::string("(no root descriptor or table slot binds this block: values will be zero)")
+          : Fmt("res%s+0x%llx", IdText(buffer).c_str(), (unsigned long long)bufferOffset));
 
   ArrayOpen("variables");
   PrintVariables(vars, 0);
   ArrayClose();
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }

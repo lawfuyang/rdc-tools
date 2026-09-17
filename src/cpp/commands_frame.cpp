@@ -22,8 +22,8 @@ int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path)
   Field("buffers", (long long)ctrl->GetBuffers().size());
   Field("debugMessages", (long long)ctrl->GetDebugMessages().size(), true);
 
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -33,53 +33,55 @@ int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 {
   PrintCaptureHeader(file, path);
   int calls = 0;
-  bool truncated = false;
-  const std::vector<ActionNode> rows = ActionTree(ctrl, calls, truncated);
+  bool bTruncated = false;
+  const std::vector<ActionNode> rows = ActionTree(ctrl, calls, bTruncated);
 
   int shown = 0;
   ArrayOpen("actions");
   for(size_t i = 0; i < rows.size(); i++)
   {
     const ActionNode &row = rows[i];
-    // The filter matches the call's own name *or* the marker path it sits inside, which is what makes a marker
-    // path a handle for a set of events (`--filter BasePass` finds the pass, not a call that spells it).
-    const bool filtered = filter != NULL && *filter != '\0';
-    const bool matches = !filtered || strstr(row.name.c_str(), filter) != NULL ||
-                         strstr(row.path.c_str(), filter) != NULL;
-    if(!matches)
+    // The filter matches the call's own name *or* the marker path it sits inside, which is what
+    // makes a marker path a handle for a set of events (`--filter BasePass` finds the pass, not a
+    // call that spells it).
+    const bool bFiltered = filter != NULL && *filter != '\0';
+    const bool bMatches = !bFiltered || strstr(row.m_Name.c_str(), filter) != NULL ||
+                          strstr(row.m_Path.c_str(), filter) != NULL;
+    if(!bMatches)
       continue;
-    if(!filtered && !row.call && !row.marker)
+    if(!bFiltered && !row.m_bCall && !row.m_bMarker)
       continue;    // without a filter: calls and markers only -- the state setters between them are not the tree
     if(maxRows > 0 && shown >= maxRows)
       continue;
 
-    if(g_json)
+    if(g_bJson)
     {
-      ObjectRow(Fmt("{\"eid\": %d, \"depth\": %d, \"call\": %s, \"marker\": %s, \"name\": \"%s\", "
-                    "\"path\": \"%s\"}",
-                    row.eid, row.depth, row.call ? "true" : "false", row.marker ? "true" : "false",
-                    JsonEscape(row.name).c_str(), JsonEscape(row.path).c_str()));
+      ObjectRow(Fmt(
+          "{\"eid\": %d, \"depth\": %d, \"call\": %s, \"marker\": %s, \"name\": \"%s\", "
+          "\"path\": \"%s\"}",
+          row.m_Eid, row.m_Depth, row.m_bCall ? "true" : "false", row.m_bMarker ? "true" : "false",
+          JsonEscape(row.m_Name).c_str(), JsonEscape(row.m_Path).c_str()));
     }
     else
     {
-      const std::string pad((size_t)row.depth * 2, ' ');
-      printf("%-7d %-5d %s%s\n", row.eid, row.depth, pad.c_str(), row.name.c_str());
+      const std::string pad((size_t)row.m_Depth * 2, ' ');
+      printf("%-7d %-5d %s%s\n", row.m_Eid, row.m_Depth, pad.c_str(), row.m_Name.c_str());
     }
     shown++;
   }
   ArrayClose(false);    // totalActions/totalCalls/shown follow
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("totalActions", (long long)rows.size());
   Field("totalCalls", (long long)calls);
-  Field("shown", shown, !truncated);
-  if(truncated)
+  Field("shown", shown, !bTruncated);
+  if(bTruncated)
   {
-    // Only reachable on a capture whose action tree is deeper than the recursion limit: say so rather than
-    // presenting a partial tree as the whole one.
+    // Only reachable on a capture whose action tree is deeper than the recursion limit: say so
+    // rather than presenting a partial tree as the whole one.
     Field("truncated", std::string("action tree deeper than the recursion limit"), true);
   }
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -257,11 +259,11 @@ int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, c
     }
   }
   ArrayClose(false);    // total/shown follow
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("total", (long long)texs.size());
   Field("shown", shown, true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -278,7 +280,7 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
   Field("instance", (long long)instance);
 
   const MeshFormat mesh = ctrl->GetPostVSData((uint32_t)instance, 0, MeshDataStage::VSOut);
-  const bool hasData = mesh.vertexResourceId != ResourceId::Null() && mesh.vertexByteStride != 0;
+  const bool bHasData = mesh.vertexResourceId != ResourceId::Null() && mesh.vertexByteStride != 0;
 
   Field("topology", (long long)mesh.topology);
   Field("vertexResource", IdText(mesh.vertexResourceId));
@@ -288,9 +290,9 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
   Field("indexBytes", (long long)mesh.indexByteSize);
   // Whether this is the last member of the object depends on whether the stream follows, and the
   // separator has to agree with that: `last` is the one thing the writer cannot work out alone.
-  Field("baseVertex", (long long)mesh.baseVertex, !hasData);
+  Field("baseVertex", (long long)mesh.baseVertex, !bHasData);
 
-  if(!hasData)
+  if(!bHasData)
   {
     if(IsJson())
       printf("}\n");
@@ -333,11 +335,11 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
     Row(line);
   }
   ArrayClose(false);    // vertexCount/componentsPerVertex follow
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("vertexCount", (long long)count);
   Field("componentsPerVertex", (long long)comps, true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -402,9 +404,9 @@ bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t heig
   if(f == NULL)
     return false;
 
-  bool ok = fwrite(header, 1, sizeof(header), f) == sizeof(header);
+  bool bOk = fwrite(header, 1, sizeof(header), f) == sizeof(header);
   std::vector<uint8_t> row(rowBytes + pad, 0);
-  for(size_t line = 0; line < h && ok; line++)
+  for(size_t line = 0; line < h && bOk; line++)
   {
     const size_t y = h - 1 - line;    // BMP rows are bottom-up
     const uint8_t *px = rgba.data() + y * w * 4;
@@ -414,9 +416,9 @@ bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t heig
       row[x * 3 + 1] = px[x * 4 + 1];
       row[x * 3 + 2] = px[x * 4 + 0];
     }
-    ok = fwrite(row.data(), 1, row.size(), f) == row.size();
+    bOk = fwrite(row.data(), 1, row.size(), f) == row.size();
   }
-  return (fclose(f) == 0) && ok;
+  return (fclose(f) == 0) && bOk;
 }
 
 //: Defined with the bundle (§2), used here too: `image` and the bundle's `rt/` images save a target
@@ -438,7 +440,7 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 
   int32_t width = 0, height = 0;
   std::string used;
-  const bool ok = SaveTargetImage(ctrl, rt, outPath, used, width, height);
+  const bool bOk = SaveTargetImage(ctrl, rt, outPath, used, width, height);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -446,11 +448,11 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   Field("width", (long long)width);
   Field("height", (long long)height);
   Field("file", used);
-  Field("written", ok ? 1 : 0, true);
-  g_indent = 0;
-  if(g_json)
+  Field("written", bOk ? 1 : 0, true);
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
-  return ok ? 0 : 1;
+  return bOk ? 0 : 1;
 }
 
 int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path)
@@ -465,10 +467,10 @@ int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path)
     Row(Fmt("eid %-7u %-18s = %f", (unsigned)results[i].eventId,
             CounterText(results[i].counter).c_str(), results[i].value.d));
   ArrayClose(false);    // total follows
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("total", (long long)results.size(), true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -483,10 +485,10 @@ int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path)
     Row(Fmt("eid %-6u %-8s %s", (unsigned)msgs[i].eventId, SeverityText(msgs[i].severity).c_str(),
             msgs[i].description.c_str()));
   ArrayClose(false);    // total follows
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("total", (long long)msgs.size(), true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -519,10 +521,10 @@ int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
   for(size_t i = 0; i < usage.size(); i++)
     Row(Fmt("eid %-7u %s", (unsigned)usage[i].eventId, UsageText(usage[i].usage).c_str()));
   ArrayClose(false);    // total follows
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("total", (long long)usage.size(), true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -566,11 +568,11 @@ int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
     found++;
   }
   ArrayClose(false);    // scanned/withState follow
-  g_indent = g_json ? 1 : 0;
+  g_Indent = g_bJson ? 1 : 0;
   Field("scanned", (long long)maxEid);
   Field("withState", found, true);
-  g_indent = 0;
-  if(g_json)
+  g_Indent = 0;
+  if(g_bJson)
     printf("}\n");
   return 0;
 }
@@ -608,11 +610,11 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
   const bytebuf pixels = out->ReadbackOutputTexture();
   width = dims.first;
   height = dims.second;
-  bool ok = WriteBMP(outBase, pixels, dims.first, dims.second);
+  bool bOk = WriteBMP(outBase, pixels, dims.first, dims.second);
   out->Shutdown();
   written = std::string(outBase);
 
-  if(!ok)
+  if(!bOk)
   {
     TextureSave save;
     save.resourceId = target;
@@ -622,10 +624,10 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
     if(res.OK())
     {
       written = png;
-      ok = true;
+      bOk = true;
     }
   }
-  return ok;
+  return bOk;
 }
 
 //: The per-event documents: the state, the reflection, and one file per constant block of every bound

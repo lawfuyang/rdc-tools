@@ -131,6 +131,7 @@ parts (`fourcc, offset, length`). Part meanings:
 | `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 | `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the numeric-id fallback. Needs no capture file |
+| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare** — no binary or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison itself and says so in its log (§9) |
 
 ### 4.2 Stream text mining
 
@@ -1177,6 +1178,18 @@ call it is -- and only then treat a `patch` render as evidence. Reporting this i
   left`), because the count-based version (`every 2000 ids`) stayed silent for the whole 164 s of a
   `--max-events 900` sweep: it stopped at id 1740, before the first line was ever due. A loop that
   finishes in under five seconds prints only its summary.
+* **The log says when the binary is older than the sources it was built from.** `WarnIfDriverIsStale`
+  compares the newest of `src/cpp/*.cpp|h` and `CMakeLists.txt` against the executable's own write time and
+  prints `warning: this replay_dump.exe is older than its sources: src\cpp\x.cpp was written N s later…`
+  with the build command under it. A replay host answers from the code it was compiled with, so a stale exe
+  is indistinguishable from a current one from the outside — the answer looks exactly like an answer — and
+  that is the one kind of wrong answer this tool exists not to produce: it was already used for a whole
+  verification pass in this repository's own history. Silent when there is nothing to compare (the exe was
+  copied out of the tree, or `src/cpp` is not there), never an error: running an old build on purpose is how
+  a bundle from the previous revision gets reproduced. The other half is
+  `python src\py\rdc_analysis.py build [--check]` (§4.1), because a running image cannot be overwritten on
+  Windows — the link that would replace `bin\replay_dump.exe` fails with `LNK1104` while that same exe is
+  what is running.
 * **`$RDC_PROFILE=1` prints where the time went**, one line per measured call site at the end of the run:
   `SetFrameEvent`, the state copy, the state/shaders/cbuffer documents, the event rows, the action tree,
   `resources.json`, the usage lists. It is compiled in and off by default (two clock reads per call site,

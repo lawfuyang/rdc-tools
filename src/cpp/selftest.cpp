@@ -591,6 +591,61 @@ int CmdSelftest()
     t.Equal(RejectionText(both), "scissor clipped, depth test failed", "pixelhistory-reason-order");
   }
 
+  // ------------------------------------------------ the file times behind the staleness warning
+  {
+    // `NewestSourceTime` is what the driver asks itself ("am I older than the sources I was built
+    // from?"), and like the rest of the file-time plumbing it needs no device -- so the comparison
+    // that decides whether a run's answers are the previous build's is checked here rather than
+    // found in the field. Two details the check has to get right: a suffix decides what counts as a
+    // source (`.txt` next to the sources is not one), and the *newest* wins rather than the first
+    // or the last one seen.
+    const std::string dir = DefaultLogStem() + ".srcdir";
+    CreateDirectoryA(dir.c_str(), NULL);
+    const std::string older = dir + "\\zz-old.cpp";
+    const std::string newer = dir + "\\aa-new.h";
+    const std::string notes = dir + "\\notes.txt";
+
+    const char *const kSuffixes[] = {".cpp", ".h"};
+    std::string name;
+    t.Check(NewestSourceTime(dir.c_str(), kSuffixes, 2, name) == 0,
+            "newest-source-of-an-empty-dir-is-zero", "an empty folder answered with a file");
+
+    for(const std::string *path : {&older, &newer, &notes})
+    {
+      FILE *f = fopen(path->c_str(), "wb");
+      if(f == NULL)
+        return Fail(1, "cannot write %s for the selftest", path->c_str());
+      fputs("x", f);
+      fclose(f);
+      // The clock interrupt this machine's file times are taken from ticks every ~15 ms, so two
+      // writes in a row can carry the *same* time and an ordering test would then pass or fail by
+      // chance. 50 ms is more than a tick, and it is the difference between the two files that the
+      // check below is about.
+      Sleep(50);
+    }
+
+    const long long when = NewestSourceTime(dir.c_str(), kSuffixes, 2, name);
+    t.Check(when > 0 && name == "aa-new.h", "newest-source-is-the-newest-source",
+            "the file that won is not the newest one the suffixes name");
+    // `notes.txt` was written last and is newer than every source: a checker that ignored the
+    // suffixes would have answered with it.
+    const long long notesWhen = FileWriteTime(notes);
+    t.Check(notesWhen > when, "newest-source-ignores-what-is-not-a-source",
+            "a file the suffixes do not name was counted as a source");
+    t.Equal(name, std::string("aa-new.h"), "newest-source-is-not-the-newest-file");
+    t.Check(FileWriteTime(older) > 0 && FileWriteTime(older) < when,
+            "file-write-time-orders-two-files", "two files written 50 ms apart do not compare");
+    t.Check(FileWriteTime(dir + "\\nope.cpp") == 0, "file-write-time-of-a-missing-file-is-zero",
+            "a file that is not there answered with a time");
+    t.Check(NewestSourceTime((dir + "\\nope").c_str(), kSuffixes, 2, name) == 0,
+            "newest-source-of-a-missing-dir-is-zero", "a missing folder answered with a file");
+
+    remove(older.c_str());
+    remove(newer.c_str());
+    remove(notes.c_str());
+    RemoveDirectoryA(dir.c_str());
+  }
+
   // ------------------------------------------------------------------ per-pass folding
   {
     // A pass is a maximal run of consecutive *calls* sharing a marker path. The marker's own row is

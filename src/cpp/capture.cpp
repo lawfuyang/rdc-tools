@@ -231,6 +231,55 @@ std::string WorkingDirectory()
   return (len == 0 || len >= sizeof(buf)) ? std::string("?") : std::string(buf);
 }
 
+//: When a file was last written, as the raw `FILETIME` (100 ns ticks since 1601) so two of them can
+//: be compared with `>`; 0 when it is not there, which is the answer a caller has to treat as "no
+//: opinion" rather than "very old".
+long long FileWriteTime(const std::string &path)
+{
+  WIN32_FILE_ATTRIBUTE_DATA info;
+  if(!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &info))
+    return 0;
+  return ((long long)info.ftLastWriteTime.dwHighDateTime << 32) | info.ftLastWriteTime.dwLowDateTime;
+}
+
+//: The file in `dir` whose name ends with one of the `count` suffixes and that was written last,
+//: with its time; 0 when the directory is not there or holds none of them, and then `name` is left
+//: alone. Suffixes rather than a wildcard because `FindFirstFile`'s `*.cpp` also matches `.cpp.swp`
+//: on some systems' rules and this answers "is a source newer than the exe".
+long long NewestSourceTime(const char *dir, const char *const *suffixes, int count, std::string &name)
+{
+  const std::string pattern = std::string(dir) + "\\*";
+  WIN32_FIND_DATAA found;
+  HANDLE search = FindFirstFileA(pattern.c_str(), &found);
+  if(search == INVALID_HANDLE_VALUE)
+    return 0;
+
+  long long newest = 0;
+  for(BOOL more = TRUE; more; more = FindNextFileA(search, &found))
+  {
+    if((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+      continue;
+    const std::string file(found.cFileName);
+    bool bMatch = false;
+    for(int i = 0; i < count && !bMatch; i++)
+    {
+      const size_t len = strlen(suffixes[i]);
+      bMatch = file.size() >= len && file.compare(file.size() - len, len, suffixes[i]) == 0;
+    }
+    if(!bMatch)
+      continue;
+    const long long when = ((long long)found.ftLastWriteTime.dwHighDateTime << 32) |
+                           found.ftLastWriteTime.dwLowDateTime;
+    if(when > newest)
+    {
+      newest = when;
+      name = file;
+    }
+  }
+  FindClose(search);
+  return newest;
+}
+
 //: This run's log base name, *without* the extension: `<exe stem>_<date>_<time>` beside the
 //: executable, always, with no environment variable to set. A tool that has to be *told* where to
 //: write its progress is a tool that produces none at the moment it matters -- and the log beside

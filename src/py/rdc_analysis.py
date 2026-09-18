@@ -36,6 +36,8 @@ Usage:
   python rdc_analysis.py validate <file|bundleDir> <schemaDir> [kind]  # documents vs the schemas
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
   python rdc_analysis.py bootstrap [tag]                   # fetch the RenderDoc source the chunk names come from
+  python rdc_analysis.py build    [--check]                # is bin/replay_dump.exe older than src/cpp,
+                                                          #   and build it (`--check` only reports)
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 
 Speed (REFERENCE 4.13): `$RDC_PROFILE=1` prints a per-phase table on stderr when the run ends, and
@@ -104,6 +106,7 @@ from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_profile import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_driver import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 
 def _filter_suite(suite: unittest.TestSuite, patterns: Sequence[str]) -> unittest.TestSuite:
     """Keep only the tests whose id contains one of `patterns` (like `unittest -k`)."""
@@ -203,6 +206,8 @@ def main() -> None:
         sys.exit(cmd_cache(argv[2:]))
     if len(argv) > 1 and argv[1] == 'bootstrap':
         sys.exit(cmd_bootstrap(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'build':
+        sys.exit(cmd_build(argv[2:]))
     if len(argv) < 3:
         print(__doc__)
         return

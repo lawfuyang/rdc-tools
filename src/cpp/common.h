@@ -277,6 +277,13 @@ private:
 int Fail(int code, _Printf_format_string_ const char *fmt, ...);
 std::string AbsolutePath(const char *path);
 std::string WorkingDirectory();
+//: When a file was last written (a raw `FILETIME`, comparable with `>`), or 0 when it is not there.
+long long FileWriteTime(const std::string &path);
+//: The newest file in `dir` whose name ends with one of the `count` suffixes, or 0 when there is
+//: none; `name` receives it. The primitive behind the driver's own staleness check, and
+//: device-free, so `selftest` pins it.
+long long NewestSourceTime(const char *dir, const char *const *suffixes, int count,
+                           std::string &name);
 std::string DefaultLogStem();
 FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs);
 HMODULE LoadReplayDLL();

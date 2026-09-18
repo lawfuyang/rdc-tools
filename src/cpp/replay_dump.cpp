@@ -291,6 +291,73 @@ void WarnIfRenderdocSrcMissing()
       root.c_str());
 }
 
+//: Says so, in the log, when this executable is older than the sources it was built from.
+//:
+//: Because a replay host answers from the code it was compiled with and cannot see that it has been
+//: superseded: after an edit and before a build, every command runs the *previous* revision and
+//: says nothing about it -- which is the one kind of wrong answer this tool exists to not produce,
+//: and it is invisible from the outside (the data looks exactly like data from a fixed build).
+//: Measured in this repository's own history: a stale `bin\replay_dump.exe` was used for a whole
+//: verification pass and only the elapsed time of a command gave it away.
+//:
+//: Quiet when the answer would be a guess: nothing when the exe's own path or the `src\cpp` folder
+//: cannot be read (it was copied out of the tree, or run from a CI checkout) and nothing when the
+//: newest source is older, which is every normal run. A build that changes nothing about the binary
+//: -- a comment, a whitespace edit -- still warns, deliberately: the warning is about being able to
+//: trust the answers, and "the source is newer than the code that ran" is exactly that question. It
+//: is not an error, because running an old build on purpose is legitimate (that is how a bundle
+//: from the previous revision gets reproduced).
+void WarnIfDriverIsStale()
+{
+  char exe[4096];
+  const DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
+  if(len == 0 || len >= sizeof(exe))
+    return;
+  const std::string exePath(exe, len);
+  const long long exeTime = FileWriteTime(exePath);
+  if(exeTime == 0)
+    return;
+
+  const size_t slash = exePath.find_last_of("\\/");
+  if(slash == std::string::npos)
+    return;
+  const std::string binDir = exePath.substr(0, slash);    // <root>\bin
+  const size_t parent = binDir.find_last_of("\\/");
+  if(parent == std::string::npos)
+    return;
+  const std::string root = binDir.substr(0, parent);
+
+  // The driver's own translation units and headers, and the build file that can change the binary
+  // without touching either (`/WX` off, a new source glob, a different renderdoc.dll path).
+  const char kSrcDir[] = "src\\cpp";
+  const char *const kSuffixes[] = {".cpp", ".h"};
+  std::string newest;
+  long long newestTime = NewestSourceTime((root + "\\" + kSrcDir).c_str(), kSuffixes, 2, newest);
+  // What to print: the *name* is what the comparison needed, but a warning that says `common.h` is
+  // one path-guess away from being useless, so the folder goes in front of it here.
+  std::string where = newest.empty() ? std::string() : (std::string(kSrcDir) + "\\" + newest);
+  const char *const kBuildFile[] = {"CMakeLists.txt"};
+  std::string buildFile;
+  const long long buildTime = NewestSourceTime(root.c_str(), kBuildFile, 1, buildFile);
+  if(buildTime > newestTime)
+  {
+    newestTime = buildTime;
+    where = buildFile;
+  }
+
+  if(newestTime <= exeTime)
+    return;
+
+  // Seconds, because the difference is what a reader wants to judge it by, and whole seconds
+  // because a raw FILETIME count is unreadable. The remainder is dropped rather than rounded: "0 s
+  // newer" next to a warning would read as a false alarm.
+  const long long newer = (newestTime - exeTime) / 10000000LL;
+  Log("warning: this replay_dump.exe is older than its sources: %s was written %lld s later, so "
+      "every answer from this run is the previous build's",
+      where.c_str(), newer);
+  Log("         build it with: cmake --build build --config Release");
+}
+
 //: The event id an argument names: a number, a marker path (`BasePass`, `Scene > BasePass`), which
 //: `ResolveMarkerPath` turns into the first call inside it, or `last`. `how` receives what the
 //: argument resolved to, so the caller can log the path that won rather than what was typed.
@@ -916,6 +983,11 @@ int main(int argc, char **argv)
     else
       Log("log file: %s", openedAs.c_str());
   }
+
+  // Into the log rather than only to stderr: a stale run has to say so in the file it leaves
+  // behind, which is the one place a reader compares two runs by. It sits after the log opens and
+  // before the working directory, so it is the first thing the log says about the run itself.
+  WarnIfDriverIsStale();
 
   // Every path is made absolute here, and the working directory is logged: a path that only works
   // from one directory is otherwise indistinguishable from a missing file.

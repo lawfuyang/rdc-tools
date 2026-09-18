@@ -76,7 +76,8 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   module (`from rdc_commands import *`), so `R.<anything>` keeps working for the tests and for scripts. Do not
   turn it back into one file, and do not add an `__init__.py`.
 - **A module may only import modules beneath it**, and the layering is: `rdc_renderdoc_src` (the tree, and
-  fetching it) → `rdc_types` → `rdc_chunkmap` → `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` →
+  fetching it) and `rdc_driver` (the driver's binary against the sources it is built from, and the build that
+  catches it up) → `rdc_types` → `rdc_chunkmap` → `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` →
   `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
   and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors →
   `rdc_notable`/`rdc_recommend` → `rdc_report_render` → `rdc_report` → `rdc_analysis`. A cycle breaks
@@ -118,6 +119,16 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   scope, `RENDERDOC_InitialiseReplay()` before opening, `RENDERDOC_ShutdownReplay()` on the way out — or it
   dies inside `OpenCapture` with no diagnostic at all. Its output is unbuffered on purpose, so a crash still
   leaves the output that was already produced, and `$RDC_REPLAY_DEBUG=1` traces each step on stderr.
+- **The driver says so in its log when it is older than the sources it was built from**
+  (`WarnIfDriverIsStale` in `src/cpp/replay_dump.cpp`, over `FileWriteTime`/`NewestSourceTime` in
+  `capture.cpp`): a replay host answers from the code it was compiled with, so a stale exe is
+  indistinguishable from a current one from the outside — its answer looks exactly like an answer — and that
+  has already cost this repository a whole verification pass. The other half is
+  `python src\py\rdc_analysis.py build [--check]` (`rdc_driver.py`), because a running image cannot be
+  overwritten on Windows: the link that would replace `bin\replay_dump.exe` fails with `LNK1104` while that
+  same exe is what is running. Do not turn the warning into an error — running an old build on purpose is how
+  a bundle from the previous revision gets reproduced — and do not make the check a *test*: whether a binary
+  has been built is the state of a working tree, not a property of the tool.
 - The state document's `rootParameters` array is rows, and the binding rules read them by shape: `rpN reg=R
   space=S vis=<stages> <target>` (the parameter as set; `vis=` is absent in older bundles and then means every
   stage), and, for a *set* table, `rpN <letter><reg> s<space> cat(N) type(N) <res…|none>` per resolved slot.

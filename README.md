@@ -133,6 +133,18 @@ no-op. The extracted tree is RenderDoc's own checkout, so the version it reports
 the enums; if that differs from the RenderDoc that recorded the capture, the tool says so when it names a
 chunk.
 
+**The driver's own build.** `bin\replay_dump.exe` is written by `cmake --build build` from `src/cpp`, and a
+binary older than its sources answers with the *previous* revision's behaviour while looking exactly like a
+current one. Both halves of that are covered: the driver compares its own write time against `src/cpp/*.cpp|h`
+and `CMakeLists.txt` at startup and says so in its log when it is behind (never an error — running an old
+build on purpose is how a bundle from the previous revision gets reproduced), and the tool reports and
+rebuilds it, which is the only place that can: a running image cannot be overwritten on Windows.
+
+```powershell
+& $py src\py\rdc_analysis.py build --check       # is bin\replay_dump.exe older than src\cpp? (exit 1 = yes)
+& $py src\py\rdc_analysis.py build               # build it, if so
+```
+
 **Where the tree is looked for** (`_find_renderdoc_src()` in `src/py/rdc_chunkmap.py`), in order:
 
 1. the `RENDERDOC_SRC` environment variable, if set;

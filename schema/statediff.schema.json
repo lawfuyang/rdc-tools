@@ -1,0 +1,33 @@
+{
+  "title": "statediff",
+  "description": "One changed field per line between two events' pipeline states. Both sides are read by stepping onto the id from past it, so a difference is about the two events rather than about how far the replay had got (REFERENCE 9). Field names are the ones `state` uses.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eidA",
+               "markerA", "eidB", "markerB", "fieldsA", "fieldsB", "changed", "fields"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eidA": {"type": "integer"},
+    "markerA": {"type": "string", "description": "the marker path event A sits inside"},
+    "eidB": {"type": "integer"},
+    "markerB": {"type": "string"},
+    "fieldsA": {"type": "integer", "description": "how many fields event A's state carries"},
+    "fieldsB": {"type": "integer"},
+    "changed": {"type": "integer"},
+    "fields": {"type": "array", "items": {
+      "type": "object",
+      "required": ["field", "a", "b"],
+      "properties": {
+        "field": {"type": "string", "description": "the same key `state` writes, e.g. rootParameters.3"},
+        "a": {"type": "string", "description": "event A's value, or `(absent)` when only B has the field"},
+        "b": {"type": "string"}
+      },
+      "additionalProperties": false
+    }}
+  },
+  "additionalProperties": false
+}

@@ -225,11 +225,12 @@ not exist yet, everything else runs today.
 * **Offline today** — `sections`, `blocks`, `resources`, `descriptors`, `verify`, `summary`, `markers`,
   `chunks`, `chunk`, `draws`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`, `dxbc`,
   `dump-chunk`, `dump-shaders`, `cache`, `selftest` (REFERENCE §4).
-* **Driver today** — `info`, `draws`, `state`, `shaders`, `cb`, `textures`, `mesh`, `image`, `counters`,
-  `debug`, `usage`, `probe`, `batch`, the bundle pair `dump` + `bundle-verify`, and the contract pair `schema` +
-`selftest` (REFERENCE §9).
-* **Roadmap** — `--repl`, `find`/`--at-marker`,
-  `statediff`, `buffer`, `watch`, `debug --group`, `schema`, `sweep` (ROADMAP §1), pixel history, shader patching,
+* **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `shaders`, `cb`, `textures`,
+  `mesh`, `image`, `counters`,
+  `debug`, `usage`, `probe`, `batch`, `--repl`/`--stdin`, the bundle pair `dump` + `bundle-verify`, and the
+  contract pair `schema` + `selftest` (REFERENCE §9). `find` and an event id argument both take a **marker
+  path** as well as a number, so a command can be pointed at a pass rather than an id.
+* **Roadmap** — `watch`, `debug --group`, `schema`, `sweep` (ROADMAP §1), pixel history, shader patching,
   shader debugging, overlays (ROADMAP §2), contact sheets, per-pass counters, `mesh --stage/--obj`, texture
   subresources (ROADMAP §3), `deps`, memory/aliasing report, `--format`, structural `diff` (ROADMAP §4),
   `replaydiff` (ROADMAP §5), the capture corpus and the golden/fixture tests (ROADMAP §6).
@@ -260,7 +261,7 @@ offline tool, and it survives the process that produced it; stdout does not, and
 | per-event state | `state <eid>`, or `states/<eid>.json` in the bundle (REFERENCE §9) | render targets, depth, shaders, root parameters — the "what was bound" half of every claim |
 | shader reflection | `shaders <eid>` (add `--disasm` when the shader itself is the question) | the **names** (`MobileBasePass`, `IndirectLightingCache`) and the bind points that turn a root parameter into a meaning |
 | named constant values | `cb <eid> <stage> <slot>`, or the bundle's `cbuffers/` (REFERENCE §9) | what the shader actually read: the numbers behind "the light is too bright" |
-| buffer contents | `buffer <resId> [offset] [len]` *(ROADMAP §1)* | what is really in a buffer that reflection cannot describe (index data, structured buffers) |
+| buffer contents | `buffer <resId> [offset] [len] [--as u32\|f32\|hex\|ascii]` (REFERENCE §9) | what is really in a buffer that reflection cannot describe (index data, structured buffers) |
 | textures | `textures --save <dir>` today; subresources and raw/HDR options *(ROADMAP §3)* | decoded pixels to look at, plus the format/dimension facts for the audit |
 | render targets | `image <eid> <out.bmp>` today; bundle `rt/` (REFERENCE §9) and contact sheets *(ROADMAP §3)* | what the pass produced — the fastest way to see "this pass drew nothing" |
 | geometry | `mesh <eid>` today; other stages and `--obj` *(ROADMAP §3)* | what the VS/GS emitted, which is where vertex bugs show themselves |

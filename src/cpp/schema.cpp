@@ -478,6 +478,105 @@ const SchemaDoc kSchemas[] = {
   },
   "additionalProperties": false
 })sc"},
+
+    {"find", "find", R"sc({
+  "title": "find",
+  "description": "What the action list and the resource table hold that matches a substring: events whose call name or marker path matches, and resources whose name matches. Case-insensitive, and `where` says which field matched -- `View` hitting a marker and `View` hitting a resource are different answers.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "needle",
+               "calls", "events", "resources", "matched"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "needle": {"type": "string", "description": "the substring as given"},
+    "calls": {"type": "integer", "description": "how many calls the action list has, matching or not"},
+    "events": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "kind", "name", "where", "marker"],
+      "properties": {
+        "eid": {"type": "integer", "description": "ActionDescription::eventId"},
+        "kind": {"type": "string", "enum": ["call", "marker", "event"]},
+        "name": {"type": "string"},
+        "where": {"type": "string", "enum": ["name", "marker"]},
+        "marker": {"type": "string", "description": "the markers the event sits inside, empty at the root"}
+      },
+      "additionalProperties": false
+    }},
+    "resources": {"type": "array", "items": {
+      "type": "object",
+      "required": ["resource", "name"],
+      "properties": {
+        "resource": {"type": "string", "description": "e.g. res1234"},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": false
+    }},
+    "matched": {"type": "integer", "description": "how many events and resources were printed"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"statediff", "statediff", R"sc({
+  "title": "statediff",
+  "description": "One changed field per line between two events' pipeline states. Both sides are read by stepping onto the id from past it, so a difference is about the two events rather than about how far the replay had got (REFERENCE 9). Field names are the ones `state` uses.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eidA",
+               "markerA", "eidB", "markerB", "fieldsA", "fieldsB", "changed", "fields"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eidA": {"type": "integer"},
+    "markerA": {"type": "string", "description": "the marker path event A sits inside"},
+    "eidB": {"type": "integer"},
+    "markerB": {"type": "string"},
+    "fieldsA": {"type": "integer", "description": "how many fields event A's state carries"},
+    "fieldsB": {"type": "integer"},
+    "changed": {"type": "integer"},
+    "fields": {"type": "array", "items": {
+      "type": "object",
+      "required": ["field", "a", "b"],
+      "properties": {
+        "field": {"type": "string", "description": "the same key `state` writes, e.g. rootParameters.3"},
+        "a": {"type": "string", "description": "event A's value, or `(absent)` when only B has the field"},
+        "b": {"type": "string"}
+      },
+      "additionalProperties": false
+    }}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"buffer", "buffer", R"sc({
+  "title": "buffer",
+  "description": "A buffer's contents, read through the engine at the current event. `values` holds the rows the terminal prints: one hex string for `hex` and `ascii`, one number per element for `u32` and `f32`.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "resource",
+               "name", "length", "offset", "read", "as", "values"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "resource": {"type": "string", "description": "e.g. res1234"},
+    "name": {"type": "string", "description": "the capture's own name for it, or the id"},
+    "length": {"type": "integer", "description": "the buffer's size in bytes"},
+    "offset": {"type": "integer", "description": "where the read started"},
+    "read": {"type": "integer", "description": "how many bytes the engine returned"},
+    "as": {"type": "string", "enum": ["hex", "u32", "f32", "ascii"]},
+    "values": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+})sc"},
 };
 
 const int kSchemaCount = (int)(sizeof(kSchemas) / sizeof(kSchemas[0]));

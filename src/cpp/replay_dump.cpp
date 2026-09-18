@@ -57,7 +57,13 @@ void Usage()
       "\n"
       "  info    <rdc>                     renderdoc version, driver, API properties, counts\n"
       "  draws   <rdc> [max=80] [filter]   the action tree with event ids (markers and calls)\n"
+      "  find    <rdc> <substring> [max=40]   events whose call name or marker path matches, and\n"
+      "                                        resources whose name matches (case-insensitive)\n"
       "  state   <rdc> <eid>               bound shaders, outputs and D3D12 root parameters\n"
+      "  statediff <rdc> <eidA> <eidB>     one changed field per line between two events' states\n"
+      "  buffer  <rdc> <resId|name> [offset] [len] [--as u32|f32|hex|ascii]   a buffer's "
+      "contents,\n"
+      "                                    read through the engine at the current event\n"
       "  shaders <rdc> <eid> [--disasm]    reflection: cbuffers, bindings, signatures, "
       "disassembly\n"
       "  cb      <rdc> <eid> <stage> <slot> named values of one constant buffer\n"
@@ -77,8 +83,27 @@ void Usage()
       "  selftest                          this program checking itself: writer, schemas, help, "
       "DLL\n"
       "\n"
-      "Options (any position): --json, --log <file>, --disasm, --save <dir>, --out <dir>, --check "
-      "<dir>.\n"
+      "Options (any position): --json, --log <file>, --disasm, --save <dir>, --out <dir>, --check\n"
+      "<dir>, --at-marker <path>.\n"
+      "\n"
+      "An event id argument may be a *marker path* instead of a number: `state BasePass` and\n"
+      "`state \"Scene > BasePass\"` both work, matching the name inside the path first, then a\n"
+      "component of it, then a substring -- the same rule `--at-marker <path>` uses, which "
+      "supplies\n"
+      "the event id for a command that takes one (and sets the current event for a command that\n"
+      "reads at it, like `buffer`). A marker path survives a re-capture where an id does not.\n"
+      "Where the path resolved to is written to the log, so an answer taken from a path can be\n"
+      "checked: `find <substring>` lists the paths and their ids.\n"
+      "\n"
+      "`--repl` and `--stdin` keep the capture open and read commands from the terminal (or a "
+      "pipe),\n"
+      "one per line, exactly as a batch file spells them: `replay_dump <capture> --repl`. "
+      "`--repl`\n"
+      "prints a prompt, `--stdin` does not; `help` prints this text, `quit` leaves. A line that "
+      "fails\n"
+      "is logged and the session continues, which is the whole point -- a session costs ~4-11 s "
+      "to\n"
+      "stand up and each command in it costs only itself.\n"
       "\n"
       "A batch file holds one command per line, in the same syntax minus the executable and the\n"
       "capture (`state 270 --json`), with `#` for comments. Each line's output is preceded by a\n"
@@ -191,22 +216,138 @@ void WarnIfRenderdocSrcMissing()
       root.c_str());
 }
 
-//: Runs one command against an already-open capture. Shared by `main` and `batch`, so a command
-//: name and its arguments mean the same thing however they were spelled.
-int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
-                    const std::vector<std::string> &args, bool bWantDisasm, const char *saveDir)
+//: The event id an argument names: a number, or a marker path (`BasePass`, `Scene > BasePass`),
+//: which `ResolveMarkerPath` turns into the first call inside it. `how` receives the path that won,
+//: so the caller can log what the argument resolved to rather than what was typed.
+bool ParseEidArg(IReplayController *ctrl, const std::string &text, int &eid, std::string &how)
 {
+  int parsed = 0;
+  if(ParseInt(text.c_str(), parsed))
+  {
+    eid = parsed;
+    return true;
+  }
+  const int resolved = ResolveMarkerPath(ctrl, text.c_str(), how);
+  if(resolved < 0)
+    return false;
+  eid = resolved;
+  return true;
+}
+
+//: Takes the options the dispatcher owns out of an argument list: `--as <mode>` and
+//: `--at-marker <path>`. Per *line* rather than per process, which is what lets one batch file or
+//: REPL session point different commands at different markers.
+void TakeDispatchOptions(std::vector<std::string> &args, std::string &asMode, std::string &atMarker)
+{
+  std::vector<std::string> kept;
+  for(size_t i = 0; i < args.size(); i++)
+  {
+    if(args[i] == "--as" && i + 1 < args.size())
+    {
+      asMode = args[++i];
+      continue;
+    }
+    if(args[i] == "--at-marker" && i + 1 < args.size())
+    {
+      atMarker = args[++i];
+      continue;
+    }
+    kept.push_back(args[i]);
+  }
+  args.swap(kept);
+}
+
+//: A byte offset or length: decimal, or `0x` hex. `ToInt` is int-sized and a buffer can be larger.
+unsigned long long ParseSize(const std::string &text)
+{
+  return strtoull(text.c_str(), NULL, 0);
+}
+
+//: Runs one command against an already-open capture. Shared by `main`, `batch` and `--repl`, so a
+//: command name, its arguments and its options mean the same thing however they were spelled.
+int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
+                    const std::vector<std::string> &given, bool bWantDisasm, const char *saveDir)
+{
+  if(given.empty())
+    return 2;
+
+  std::vector<std::string> args = given;
+  std::string asMode, atMarkerText;
+  TakeDispatchOptions(args, asMode, atMarkerText);
   if(args.empty())
     return 2;
 
   const char *cmd = args[0].c_str();
+
+  // A marker path stands in for an event id wherever one is expected, and `--at-marker` is the same
+  // resolution with the path in an option instead of in the argument. Resolving here -- once, before
+  // dispatch -- is what keeps every command below unaware of both: `state BasePass` reads args[1] and
+  // finds a number in it. A path that matches nothing is an error rather than a silent event 0.
+  const bool bTakesEid = !strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "cb") ||
+                         !strcmp(cmd, "mesh") || !strcmp(cmd, "image") || !strcmp(cmd, "statediff");
+  if(!atMarkerText.empty())
+  {
+    std::string matched;
+    const int eid = ResolveMarkerPath(ctrl, atMarkerText.c_str(), matched);
+    if(eid < 0)
+      return Fail(2, "--at-marker '%s' matches no marker path in this capture (try `find`)",
+                  atMarkerText.c_str());
+    Log("--at-marker %s -> eid %d [%s]", atMarkerText.c_str(), eid, matched.c_str());
+    if(bTakesEid)
+    {
+      if(args.size() > 1)
+        args.erase(args.begin() + 1);
+      args.insert(args.begin() + 1, Fmt("%d", eid));
+    }
+    else
+    {
+      // A command with no id argument (`buffer`) reads at the current event: this chooses it.
+      ctrl->SetFrameEvent((uint32_t)eid, true);
+    }
+  }
+  // `args` may have been rewritten just above -- a positional erased, an id inserted -- and that
+  // can move the vector's storage, so the pointer taken before it is re-taken rather than left
+  // dangling (which read as `unknown command ''`: the comparison ran on freed bytes).
+  cmd = args[0].c_str();
+  if(bTakesEid)
+  {
+    const size_t slots = !strcmp(cmd, "statediff") ? 2 : 1;
+    for(size_t slot = 1; slot <= slots; slot++)
+    {
+      if(args.size() <= slot)
+        break;
+      int eid = 0;
+      std::string resolved;
+      if(ParseEidArg(ctrl, args[slot], eid, resolved))
+      {
+        if(!resolved.empty())
+          Log("%s %s -> eid %d [%s]", cmd, args[slot].c_str(), eid, resolved.c_str());
+        args[slot] = Fmt("%d", eid);
+      }
+      else
+      {
+        return Fail(2, "'%s' is neither an event id nor a marker path in this capture (try `find`)",
+                    args[slot].c_str());
+      }
+    }
+  }
+
   if(!strcmp(cmd, "info"))
     return CmdInfo(ctrl, file, path);
   if(!strcmp(cmd, "draws"))
     return CmdDraws(ctrl, file, path, args.size() > 1 ? ToInt(args[1], 80) : 80,
                     args.size() > 2 ? args[2].c_str() : NULL);
+  if(!strcmp(cmd, "find"))
+    return CmdFind(ctrl, file, path, args.size() > 1 ? args[1].c_str() : NULL,
+                   args.size() > 2 ? ToInt(args[2], 40) : 40);
   if(!strcmp(cmd, "state") && args.size() > 1)
     return CmdState(ctrl, file, path, ToInt(args[1], 0));
+  if(!strcmp(cmd, "statediff") && args.size() > 2)
+    return CmdStateDiff(ctrl, file, path, ToInt(args[1], 0), ToInt(args[2], 0));
+  if(!strcmp(cmd, "buffer") && args.size() > 1)
+    return CmdBuffer(ctrl, file, path, args[1].c_str(), args.size() > 2 ? ParseSize(args[2]) : 0,
+                     args.size() > 3 ? ParseSize(args[3]) : 0,
+                     asMode.empty() ? NULL : asMode.c_str());
   if(!strcmp(cmd, "shaders") && args.size() > 1)
     return CmdShaders(ctrl, file, path, ToInt(args[1], 0), bWantDisasm);
   if(!strcmp(cmd, "cb") && args.size() > 3)
@@ -281,6 +422,17 @@ void SplitLine(const std::string &line, std::vector<std::string> &args, bool &bJ
   }
 }
 
+//: `text` without a leading UTF-8 BOM. An editor's "UTF-8 with BOM" save, or a PowerShell pipe,
+//: puts one there -- and it is invisible in every editor that matters, so the first token becomes
+//: `\xEF\xBB\xBFstate` and the only symptom is "unknown command". Stripped rather than diagnosed.
+std::string WithoutBom(const std::string &text)
+{
+  if(text.size() >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB &&
+     (unsigned char)text[2] == 0xBF)
+    return text.substr(3);
+  return text;
+}
+
 //: Runs a file of command lines against one open capture. The point is the cost of a replay
 //: session, not the cost of the commands: standing the engine up and opening the capture is ~4 s on
 //: a small capture and ~11 s on a 1.4 GB one, and this pays it once for the whole file.
@@ -307,10 +459,11 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     const size_t first = line.find_first_not_of(" \t");
     if(first != std::string::npos && line[first] != '#')
     {
+      const std::string text = WithoutBom(line.substr(first));
       std::vector<std::string> args;
       bool bJson = false, bDisasm = false;
       std::string saveDir;
-      SplitLine(line.substr(first), args, bJson, bDisasm, saveDir);
+      SplitLine(text, args, bJson, bDisasm, saveDir);
 
       // `probe` forces non-events, and a forced non-event leaves the last real event's state in
       // place; whichever ran second, one of the two answers would be wrong. It belongs in its own
@@ -322,7 +475,7 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
       // The marker is what lets a caller split the stream back into one output per command. It is
       // printed in both formats: JSON has no comment syntax, and guessing where one object ends and
       // the next begins is not something a consumer should have to do.
-      printf("#=== %s\n", line.substr(first).c_str());
+      printf("#=== %s\n", text.c_str());
       fflush(stdout);
 
       g_bJson = bJson;
@@ -331,8 +484,7 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
           DispatchCommand(ctrl, file, path, args, bDisasm, saveDir.empty() ? NULL : saveDir.c_str());
       ran++;
       ret = (code != 0) ? code : ret;
-      Log("batch %d: %s -> exit %d in %.1fs", ran, line.substr(first).c_str(), code,
-          (Millis() - started) / 1000.0);
+      Log("batch %d: %s -> exit %d in %.1fs", ran, text.c_str(), code, (Millis() - started) / 1000.0);
     }
 
     if(ch == EOF)
@@ -351,6 +503,94 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
   return ret;
 }
 
+//: `--repl` / `--stdin`: commands from the terminal (or a pipe) against one open capture.
+//:
+//: `batch` already pays the device setup once for a file of commands, and this is the same loop with
+//: stdin as the file -- because what is being avoided is the ~4-11 s of standing a session up per
+//: question, not the file. `--repl` prints a prompt; `--stdin` is the same without one, for a pipe.
+//: `help` prints the usage, `quit`/`exit` (or end of input) leaves.
+//:
+//: A failing line does not end the session: every command returns a code and `Fail` logs and returns
+//: rather than exiting, which is also why `batch` can run a failing line and carry on to the next. The
+//: loop keeps the worst code it saw, so a scripted pipe still gets a useful exit status.
+int CmdRepl(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPrompt)
+{
+  int ret = 0, ran = 0;
+  bool bSawProbe = false, sawOther = false;
+  std::string line;
+  if(bPrompt)
+    printf("%s is open: one command per line, `help` for the list, `quit` to leave.\n", path);
+
+  for(;;)
+  {
+    if(bPrompt)
+    {
+      printf("rdc> ");
+      fflush(stdout);
+    }
+    line.clear();
+    int ch = 0;
+    while((ch = fgetc(stdin)) != EOF && ch != '\n')
+    {
+      if(ch != '\r')
+        line += (char)ch;
+    }
+    const size_t first = line.find_first_not_of(" \t");
+    const bool bAtEnd = (ch == EOF);
+    if(first == std::string::npos || line[first] == '#')
+    {
+      if(bAtEnd)
+        break;
+      continue;
+    }
+
+    const std::string text = WithoutBom(line.substr(first));
+    if(text == "quit" || text == "exit")
+      break;
+    if(text == "help" || text == "--help")
+    {
+      Usage();
+      if(bAtEnd)
+        break;
+      continue;
+    }
+
+    std::vector<std::string> args;
+    bool bJson = false, bDisasm = false;
+    std::string saveDir;
+    SplitLine(text, args, bJson, bDisasm, saveDir);
+    if(args.empty())
+    {
+      if(bAtEnd)
+        break;
+      continue;
+    }
+
+    // The same warning `batch` prints, for the same reason: probe's answer depends on being first.
+    const bool bIsProbe = args[0] == "probe";
+    bSawProbe = bSawProbe || bIsProbe;
+    sawOther = sawOther || !bIsProbe;
+
+    g_bJson = bJson;
+    const ULONGLONG started = Millis();
+    const int code =
+        DispatchCommand(ctrl, file, path, args, bDisasm, saveDir.empty() ? NULL : saveDir.c_str());
+    ran++;
+    ret = (code != 0) ? code : ret;
+    Log("repl %d: %s -> exit %d in %.1fs", ran, text.c_str(), code, (Millis() - started) / 1000.0);
+    if(bAtEnd)
+      break;
+  }
+
+  if(bSawProbe && sawOther)
+  {
+    Log("warning: this session mixes `probe` with other commands; probe forces non-events, which "
+        "leaves stale state behind, so run it on its own");
+  }
+  Log("repl finished: %d command(s)", ran);
+  return ret;
+}
+
 int main(int argc, char **argv)
 {
   // Unbuffered: the replay engine is third-party code that can take the process down with it, and
@@ -363,9 +603,10 @@ int main(int argc, char **argv)
   bool bWantDisasm = false;
   const char *saveDir = NULL;
   std::string logPath = DefaultLogStem();
-  bool bPerRunLog = true;     // until `--log` names one exact file
-  std::string schemaOut;      // `--out <dir>`: where `schema` writes them
-  std::string schemaCheck;    // `--check <dir>`: the copy to verify against
+  bool bPerRunLog = true;                    // until `--log` names one exact file
+  std::string schemaOut;                     // `--out <dir>`: where `schema` writes them
+  std::string schemaCheck;                   // `--check <dir>`: the copy to verify against
+  bool bRepl = false, bReplQuiet = false;    // `--repl` / `--stdin`: commands from stdin
   for(int i = 1; i < argc; i++)
   {
     if(!strcmp(argv[i], kJsonFlag))
@@ -379,6 +620,10 @@ int main(int argc, char **argv)
       logPath = argv[++i];
       bPerRunLog = false;
     }
+    else if(!strcmp(argv[i], "--repl"))
+      bRepl = true;
+    else if(!strcmp(argv[i], "--stdin"))
+      bReplQuiet = true;
     else if(!strcmp(argv[i], "--out") && i + 1 < argc)
       schemaOut = argv[++i];
     else if(!strcmp(argv[i], "--check") && i + 1 < argc)
@@ -392,6 +637,12 @@ int main(int argc, char **argv)
     Usage();
     return args.empty() ? 2 : 0;
   }
+
+  // `--repl`/`--stdin` name no command: the capture is the only argument, and the commands come from
+  // stdin. Spelling it as a command (`repl <capture>`) inside the program is what lets the rest of
+  // this function -- the log, the warning, the session setup, the dispatch below -- stay one path.
+  if(bRepl || bReplQuiet)
+    args.insert(args.begin(), std::string(bRepl ? "repl" : "stdin"));
 
   // `schema` and `selftest` are about this program rather than about a frame: no capture path, no
   // device, and no log file -- they answer before anything is loaded, so a machine with no
@@ -491,7 +742,11 @@ int main(int argc, char **argv)
 
   int ret;
   const ULONGLONG started = Millis();
-  if(!strcmp(cmd, "batch") && args.size() > 2)
+  if(!strcmp(cmd, "repl") || !strcmp(cmd, "stdin"))
+  {
+    ret = CmdRepl(ctrl, file, path, !strcmp(cmd, "repl"));
+  }
+  else if(!strcmp(cmd, "batch") && args.size() > 2)
   {
     ret = CmdBatch(ctrl, file, path, batchPathAbs.c_str());
   }

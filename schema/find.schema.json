@@ -1,0 +1,40 @@
+{
+  "title": "find",
+  "description": "What the action list and the resource table hold that matches a substring: events whose call name or marker path matches, and resources whose name matches. Case-insensitive, and `where` says which field matched -- `View` hitting a marker and `View` hitting a resource are different answers.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "needle",
+               "calls", "events", "resources", "matched"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "needle": {"type": "string", "description": "the substring as given"},
+    "calls": {"type": "integer", "description": "how many calls the action list has, matching or not"},
+    "events": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "kind", "name", "where", "marker"],
+      "properties": {
+        "eid": {"type": "integer", "description": "ActionDescription::eventId"},
+        "kind": {"type": "string", "enum": ["call", "marker", "event"]},
+        "name": {"type": "string"},
+        "where": {"type": "string", "enum": ["name", "marker"]},
+        "marker": {"type": "string", "description": "the markers the event sits inside, empty at the root"}
+      },
+      "additionalProperties": false
+    }},
+    "resources": {"type": "array", "items": {
+      "type": "object",
+      "required": ["resource", "name"],
+      "properties": {
+        "resource": {"type": "string", "description": "e.g. res1234"},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": false
+    }},
+    "matched": {"type": "integer", "description": "how many events and resources were printed"}
+  },
+  "additionalProperties": false
+}

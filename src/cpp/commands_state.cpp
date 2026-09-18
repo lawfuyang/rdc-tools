@@ -182,6 +182,349 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   return 0;
 }
 
+//: Every field `statediff` compares, keyed the way `state` names them: `shaders.vs`,
+//: `renderTargets.0`, `rootParameters.3`, `viewports.0`, `outputMerger.depthFunction`. Same
+//: vocabulary as the state document on purpose -- a row in a diff can be found in the state it came
+//: from without a second table to keep in sync.
+static void StateDiffRows(const D3D12Pipe::State *st, std::map<std::string, std::string> &rows)
+{
+  rows.clear();
+  if(st == NULL)
+    return;
+
+  for(const ShaderStage stage : ReportedStages())
+  {
+    const D3D12Pipe::Shader *sh = StageShader(st, stage);
+    if(sh == NULL || sh->resourceId == ResourceId::Null())
+      continue;
+    rows[Fmt("shaders.%s", StageName(stage))] = IdText(sh->resourceId);
+  }
+  for(int i = 0; i < (int)st->outputMerger.renderTargets.size(); i++)
+  {
+    const ResourceId rt = st->outputMerger.renderTargets[i].resource;
+    if(rt == ResourceId::Null())
+      continue;
+    rows[Fmt("renderTargets.%d", i)] = IdText(rt);
+  }
+  rows["depthTarget"] = IdText(st->outputMerger.depthTarget.resource);
+  rows["rootSignature"] = IdText(st->rootSignature.resourceId);
+  rows["rootSignature.parameters"] = Fmt("%d", (int)st->rootSignature.parameters.size());
+  for(int i = 0; i < (int)st->rootSignature.parameters.size(); i++)
+  {
+    const D3D12Pipe::RootParam &rp = st->rootSignature.parameters[i];
+    std::string detail = "none";
+    if(rp.descriptor.resource != ResourceId::Null())
+      detail = Fmt("res%s", IdText(rp.descriptor.resource).c_str());
+    else if(rp.heap != ResourceId::Null())
+      detail = Fmt("heap%s+0x%x", IdText(rp.heap).c_str(), rp.heapByteOffset);
+    else if(!rp.constants.empty())
+      detail = Fmt("%d words", (int)rp.constants.size() / 4);
+    rows[Fmt("rootParameters.%d", i)] = Fmt("reg=%u space=%u vis=%s %s", rp.reg, rp.space,
+                                            VisibilityText(rp.visibility).c_str(), detail.c_str());
+  }
+  for(size_t i = 0; i < st->rasterizer.viewports.size(); i++)
+  {
+    const Viewport &vp = st->rasterizer.viewports[i];
+    rows[Fmt("viewports.%d", (int)i)] =
+        Fmt("%.2fx%.2f at %.2f,%.2f z %.3f..%.3f %s", vp.width, vp.height, vp.x, vp.y, vp.minDepth,
+            vp.maxDepth, vp.enabled ? "enabled" : "disabled");
+  }
+  for(size_t i = 0; i < st->rasterizer.scissors.size(); i++)
+  {
+    const Scissor &sc = st->rasterizer.scissors[i];
+    rows[Fmt("scissors.%d", (int)i)] = Fmt("%dx%d at %d,%d %s", (int)sc.width, (int)sc.height,
+                                           (int)sc.x, (int)sc.y, sc.enabled ? "enabled" : "disabled");
+  }
+  const D3D12Pipe::DepthStencilState &ds = st->outputMerger.depthStencilState;
+  const D3D12Pipe::BlendState &bs = st->outputMerger.blendState;
+  rows["outputMerger.depthEnable"] = ds.depthEnable ? "true" : "false";
+  rows["outputMerger.depthWrites"] = ds.depthWrites ? "true" : "false";
+  rows["outputMerger.depthFunction"] = CompareFunctionText(ds.depthFunction);
+  rows["outputMerger.stencilEnable"] = ds.stencilEnable ? "true" : "false";
+  rows["outputMerger.stencilReadOnly"] = st->outputMerger.stencilReadOnly ? "true" : "false";
+  rows["outputMerger.frontFace"] = Fmt(
+      "%s/%s/%s %s", StencilOperationText(ds.frontFace.failOperation),
+      StencilOperationText(ds.frontFace.depthFailOperation),
+      StencilOperationText(ds.frontFace.passOperation), CompareFunctionText(ds.frontFace.function));
+  rows["outputMerger.backFace"] = Fmt("%s/%s/%s %s", StencilOperationText(ds.backFace.failOperation),
+                                      StencilOperationText(ds.backFace.depthFailOperation),
+                                      StencilOperationText(ds.backFace.passOperation),
+                                      CompareFunctionText(ds.backFace.function));
+  rows["outputMerger.alphaToCoverage"] = bs.alphaToCoverage ? "true" : "false";
+  rows["outputMerger.independentBlend"] = bs.independentBlend ? "true" : "false";
+  for(size_t i = 0; i < bs.blends.size(); i++)
+  {
+    const ColorBlend &blend = bs.blends[i];
+    rows[Fmt("outputMerger.blends.%d", (int)i)] = Fmt(
+        "%s mask=%u %s(%s+%s) alpha %s(%s+%s)", blend.enabled ? "enabled" : "disabled",
+        (unsigned)blend.writeMask, BlendOperationText(blend.colorBlend.operation),
+        BlendMultiplierText(blend.colorBlend.source),
+        BlendMultiplierText(blend.colorBlend.destination),
+        BlendOperationText(blend.alphaBlend.operation), BlendMultiplierText(blend.alphaBlend.source),
+        BlendMultiplierText(blend.alphaBlend.destination));
+  }
+}
+
+//: The state of `eid`, read so that it is the *complete* one.
+//:
+//: A forward `SetFrameEvent` hands back what the engine has accumulated so far; a backward one
+//: makes it replay the frame from its start (REFERENCE 9). Two events read forward would therefore
+//: differ in ways that are only about how far the replay had got -- `shaders: "cs=11388 "` against
+//: the complete
+//: `"ps=11402 cs=11388 ms=11368 "` -- so both sides are read the same way: step onto the id from
+//: *past* it. That is one extra refresh (~50 ms), and an id past the last event clamps to it, so
+//: the last event is read the same way as any other.
+static const D3D12Pipe::State *StateAtComplete(IReplayController *ctrl, int eid)
+{
+  ctrl->SetFrameEvent((uint32_t)(eid + 1), true);
+  ctrl->SetFrameEvent((uint32_t)eid, true);
+  return ctrl->GetD3D12PipelineState();
+}
+
+int CmdStateDiff(IReplayController *ctrl, ICaptureFile *file, const char *path, int eidA, int eidB)
+{
+  // The marker paths come from the action list, which is cached and needs no engine call.
+  const std::string markerA = MarkerPathAt(ctrl, eidA);
+  const std::string markerB = MarkerPathAt(ctrl, eidB);
+
+  std::map<std::string, std::string> a, b;
+  StateDiffRows(StateAtComplete(ctrl, eidA), a);
+  StateDiffRows(StateAtComplete(ctrl, eidB), b);
+
+  // A field only one side has counts as changed, and says which side it came from: a render target
+  // that stopped being bound is not "the same field, empty".
+  struct Change
+  {
+    std::string m_Field, m_A, m_B;
+  };
+  std::vector<Change> changed;
+  std::map<std::string, std::string>::const_iterator ia = a.begin(), ib = b.begin();
+  while(ia != a.end() || ib != b.end())
+  {
+    const bool bAFirst = ib == b.end() || (ia != a.end() && ia->first < ib->first);
+    const std::string key = bAFirst ? ia->first : ib->first;
+    const std::map<std::string, std::string>::const_iterator fa = a.find(key), fb = b.find(key);
+    const std::string va = fa == a.end() ? std::string("(absent)") : fa->second;
+    const std::string vb = fb == b.end() ? std::string("(absent)") : fb->second;
+    if(va != vb)
+      changed.push_back(Change{key, va, vb});
+    if(fa != a.end())
+      ++ia;
+    if(fb != b.end())
+      ++ib;
+  }
+
+  PrintCaptureHeader(file, path);
+  Field("eidA", (long long)eidA);
+  Field("markerA", markerA);
+  Field("eidB", (long long)eidB);
+  Field("markerB", markerB);
+  Field("fieldsA", (long long)a.size());
+  Field("fieldsB", (long long)b.size());
+  Field("changed", (long long)changed.size());
+  if(g_bJson)
+  {
+    ArrayOpen("fields");
+    for(size_t i = 0; i < changed.size(); i++)
+      ObjectRow(Fmt("{\"field\": \"%s\", \"a\": \"%s\", \"b\": \"%s\"}",
+                    JsonEscape(changed[i].m_Field).c_str(), JsonEscape(changed[i].m_A).c_str(),
+                    JsonEscape(changed[i].m_B).c_str()));
+    ArrayClose(true);
+    printf("}\n");
+    return 0;
+  }
+  printf("--- changed ---\n");
+  if(changed.empty())
+    printf("(no field differs)\n");
+  for(size_t i = 0; i < changed.size(); i++)
+    printf("%-28s %-26s -> %s\n", changed[i].m_Field.c_str(), changed[i].m_A.c_str(),
+           changed[i].m_B.c_str());
+  return 0;
+}
+
+//: The resource an argument names: `res123`, a bare `123`, or a name -- exact, then a case-insensitive
+//: substring, the same way `usage` matches. `why` receives what went wrong when nothing matched.
+static ResourceId ResolveResourceArg(IReplayController *ctrl, const char *what, std::string &name,
+                                     std::string &why)
+{
+  std::string want(what == NULL ? "" : what);
+  // The tool writes ids as `res1234` and `IdText` returns the bare number, so both spellings are
+  // accepted here rather than making the caller remember which command wants which.
+  if(want.size() > 3 && want.compare(0, 3, "res") == 0)
+    want = want.substr(3);
+  const rdcarray<ResourceDescription> &res = ctrl->GetResources();
+  for(size_t i = 0; i < res.size(); i++)
+  {
+    if(IdText(res[i].resourceId) == want ||
+       (!res[i].name.empty() && std::string(res[i].name.c_str()) == want))
+    {
+      name = res[i].name.empty() ? want : std::string(res[i].name.c_str());
+      return res[i].resourceId;
+    }
+  }
+  for(size_t i = 0; i < res.size(); i++)
+  {
+    if(!res[i].name.empty() && std::string(res[i].name.c_str()).find(want) != std::string::npos)
+    {
+      name = std::string(res[i].name.c_str());
+      return res[i].resourceId;
+    }
+  }
+  why = Fmt("no resource with id or name '%s'", want.c_str());
+  return ResourceId::Null();
+}
+
+//: `buffer <resId|name> [offset] [len] [--as u32|f32|hex|ascii]`: what is actually in a buffer,
+//: read through the engine. The offline tool prints a buffer's size and name from the file; only
+//: replay can show its contents, and this is the command that does -- a float row for a uniform
+//: block, a hexdump for a structure, an ASCII row for a string table.
+//:
+//: `offset` and `len` accept decimal or `0x` hex, and `len` defaults to 256 bytes (a screenful)
+//: rather than the whole buffer: reads go through the engine, and a 64 MB buffer is not a hexdump
+//: anyone reads. `--as` defaults to `hex`.
+int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
+              unsigned long long offset, unsigned long long length, const char *asMode)
+{
+  const std::string mode(asMode == NULL ? "hex" : asMode);
+  if(mode != "hex" && mode != "u32" && mode != "f32" && mode != "ascii")
+    return Fail(2, "--as '%s' is not one of u32, f32, hex, ascii", mode.c_str());
+
+  std::string name, why;
+  const ResourceId id = ResolveResourceArg(ctrl, what, name, why);
+  if(id == ResourceId::Null())
+    return Fail(1, "%s", why.c_str());
+
+  const rdcarray<BufferDescription> &buffers = ctrl->GetBuffers();
+  const BufferDescription *desc = NULL;
+  for(size_t i = 0; i < buffers.size(); i++)
+  {
+    if(buffers[i].resourceId == id)
+    {
+      desc = &buffers[i];
+      break;
+    }
+  }
+  if(desc == NULL)
+    return Fail(1, "%s is not a buffer (a texture, a heap or an acceleration structure)",
+                name.c_str());
+
+  const unsigned long long total = (unsigned long long)desc->length;
+  if(offset > total)
+    return Fail(1, "offset 0x%llx is past the end of %s (0x%llx bytes)", offset, name.c_str(), total);
+  unsigned long long want = length == 0 ? 256 : length;
+  if(offset + want > total)
+    want = total - offset;
+
+  const bytebuf data = ctrl->GetBufferData(id, offset, want);
+
+  PrintCaptureHeader(file, path);
+  Field("resource", Fmt("res%s", IdText(id).c_str()));
+  Field("name", name);
+  Field("length", (long long)total);
+  Field("offset", (long long)offset);
+  Field("read", (long long)data.size());
+  Field("as", mode);
+
+  if(g_bJson)
+  {
+    ArrayOpen("values");
+    if(mode == "hex" || mode == "ascii")
+    {
+      std::string hex;
+      for(size_t i = 0; i < data.size(); i++)
+        hex += Fmt("%02x", (unsigned)data[i]);
+      Row(hex);
+    }
+    else if(mode == "u32")
+    {
+      for(size_t i = 0; i + 4 <= data.size(); i += 4)
+      {
+        uint32_t value = 0;
+        memcpy(&value, &data[i], 4);
+        Row(Fmt("%u", (unsigned)value));
+      }
+    }
+    else
+    {
+      for(size_t i = 0; i + 4 <= data.size(); i += 4)
+      {
+        float value = 0.0f;
+        memcpy(&value, &data[i], 4);
+        Row(Fmt("%.6g", (double)value));
+      }
+    }
+    ArrayClose(true);
+    printf("}\n");
+    return 0;
+  }
+
+  // Text: rows addressed by their offset in the buffer, so a value can be read back as a byte range.
+  if(mode == "hex")
+  {
+    for(size_t i = 0; i < data.size(); i += 16)
+    {
+      std::string hex, ascii;
+      for(size_t k = 0; k < 16; k++)
+      {
+        if(i + k < data.size())
+        {
+          const unsigned char c = (unsigned char)data[i + k];
+          hex += Fmt("%02x ", (unsigned)c);
+          ascii += (c >= 32 && c < 127) ? (char)c : '.';
+        }
+        else
+        {
+          hex += "   ";
+        }
+      }
+      printf("  %08llx  %s |%s|\n", offset + (unsigned long long)i, hex.c_str(), ascii.c_str());
+    }
+  }
+  else if(mode == "ascii")
+  {
+    for(size_t i = 0; i < data.size(); i += 32)
+    {
+      std::string text;
+      for(size_t k = 0; k < 32 && i + k < data.size(); k++)
+      {
+        const unsigned char c = (unsigned char)data[i + k];
+        text += (c >= 32 && c < 127) ? (char)c : '.';
+      }
+      printf("  %08llx  %s\n", offset + (unsigned long long)i, text.c_str());
+    }
+  }
+  else
+  {
+    const int perRow = 4;
+    for(size_t i = 0; i + 4 <= data.size(); i += 4 * perRow)
+    {
+      std::string line;
+      for(int k = 0; k < perRow && i + 4 * (size_t)k + 4 <= data.size(); k++)
+      {
+        if(mode == "u32")
+        {
+          uint32_t value = 0;
+          memcpy(&value, &data[i + 4 * (size_t)k], 4);
+          line += Fmt("%-12u", (unsigned)value);
+        }
+        else
+        {
+          float value = 0.0f;
+          memcpy(&value, &data[i + 4 * (size_t)k], 4);
+          line += Fmt("%-12.6g", (double)value);
+        }
+      }
+      printf("  %08llx  %s\n", offset + (unsigned long long)i, line.c_str());
+    }
+  }
+  if(data.size() < want)
+    printf(
+        "  (the engine returned %d of the %llu byte(s) asked for: the buffer's contents are not "
+        "fully initialised)\n",
+        (int)data.size(), want);
+  return 0;
+}
+
 //: One signature element as a row: the semantic with its index, the register it starts at, `c<N>`
 //: -- the component count the engine reports for it (`SigParameter::compCount`) -- and the
 //: component type

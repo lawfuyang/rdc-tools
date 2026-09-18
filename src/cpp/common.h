@@ -323,6 +323,15 @@ bool IsCallFlags(ActionFlags flags);
 std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &bTruncated);
 std::map<int, std::string> MarkerPaths(IReplayController *ctrl);
 std::string MarkerPathAt(IReplayController *ctrl, int eid);
+
+//: `text` lowercased, for the case-insensitive halves of a search (`find`, a marker path given
+//: where an event id is expected). The names being matched are the engine's, which are ASCII.
+std::string LowerAscii(std::string_view text);
+
+//: The first call whose marker path answers for `text`, or -1 when nothing does; `matched` receives the
+//: path that won, so a caller can print what it resolved to rather than what was typed. Full path
+//: first, then a component of one (`BasePass` answers for `Scene > BasePass`), then a substring.
+int ResolveMarkerPath(IReplayController *ctrl, const char *text, std::string &matched);
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
 std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 
@@ -331,7 +340,12 @@ std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path);
 int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxRows,
              const char *filter);
+int CmdFind(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *needle,
+            int maxRows);
 int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid);
+int CmdStateDiff(IReplayController *ctrl, ICaptureFile *file, const char *path, int eidA, int eidB);
+int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
+              unsigned long long offset, unsigned long long length, const char *asMode);
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                bool bWantDisasm);
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,

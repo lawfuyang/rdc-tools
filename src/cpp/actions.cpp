@@ -156,6 +156,87 @@ std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls)
   return kinds;
 }
 
+//: `text` with its ASCII letters lowercased, for the case-insensitive halves of a search. A local
+//: helper rather than a locale call: what is being matched is the engine's names, which are ASCII.
+std::string LowerAscii(std::string_view text)
+{
+  std::string out(text);
+  for(size_t i = 0; i < out.size(); i++)
+  {
+    const char c = out[i];
+    if(c >= 'A' && c <= 'Z')
+      out[i] = (char)(c - 'A' + 'a');
+  }
+  return out;
+}
+
+namespace
+{
+//: True when `want` is one component of the path, case-insensitively: paths are `A > B > C`.
+bool ComponentEquals(const std::string &pathLower, const std::string &wantLower)
+{
+  size_t start = 0;
+  for(;;)
+  {
+    const size_t end = pathLower.find(" > ", start);
+    const std::string component =
+        pathLower.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if(component == wantLower)
+      return true;
+    if(end == std::string::npos)
+      return false;
+    start = end + 3;
+  }
+}
+}    // namespace
+
+int ResolveMarkerPath(IReplayController *ctrl, const char *text, std::string &matched)
+{
+  matched.clear();
+  const std::string want(text == NULL ? "" : text);
+  if(want.empty())
+    return -1;
+  const std::string wantLower = LowerAscii(want);
+
+  std::map<int, std::string> paths = MarkerPaths(ctrl);
+
+  // Three passes over the same table, strongest match first, so a full path can never be beaten by
+  // a component that happens to say the same thing, and a component never by a substring.
+  for(std::map<int, std::string>::const_iterator it = paths.begin(); it != paths.end(); ++it)
+  {
+    if(it->second == want)
+    {
+      matched = it->second;
+      return it->first;
+    }
+  }
+  for(std::map<int, std::string>::const_iterator it = paths.begin(); it != paths.end(); ++it)
+  {
+    if(LowerAscii(it->second) == wantLower)
+    {
+      matched = it->second;
+      return it->first;
+    }
+  }
+  for(std::map<int, std::string>::const_iterator it = paths.begin(); it != paths.end(); ++it)
+  {
+    if(ComponentEquals(LowerAscii(it->second), wantLower))
+    {
+      matched = it->second;
+      return it->first;
+    }
+  }
+  for(std::map<int, std::string>::const_iterator it = paths.begin(); it != paths.end(); ++it)
+  {
+    if(LowerAscii(it->second).find(wantLower) != std::string::npos)
+    {
+      matched = it->second;
+      return it->first;
+    }
+  }
+  return -1;
+}
+
 // --------------------------------------------------------------------------- value formatting
 
 //: How deep a struct-of-structs is expanded before the rest is elided. The tree comes from the

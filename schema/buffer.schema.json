@@ -1,0 +1,23 @@
+{
+  "title": "buffer",
+  "description": "A buffer's contents, read through the engine at the current event. `values` holds the rows the terminal prints: one hex string for `hex` and `ascii`, one number per element for `u32` and `f32`.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "resource",
+               "name", "length", "offset", "read", "as", "values"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "resource": {"type": "string", "description": "e.g. res1234"},
+    "name": {"type": "string", "description": "the capture's own name for it, or the id"},
+    "length": {"type": "integer", "description": "the buffer's size in bytes"},
+    "offset": {"type": "integer", "description": "where the read started"},
+    "read": {"type": "integer", "description": "how many bytes the engine returned"},
+    "as": {"type": "string", "enum": ["hex", "u32", "f32", "ascii"]},
+    "values": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

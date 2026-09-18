@@ -98,23 +98,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 1. P1 — Replay driver: finding your way around a frame
 
-* **`--repl` (and `--stdin`)** — keep the capture open and take commands from the terminal or a pipe, so the
-  3–10 s device setup is paid once and exploration becomes interactive instead of a sequence of processes. The
-  building blocks exist (`batch` already runs a command list against one open capture); the work is prompt/loop
-  plumbing, per-command error recovery, and not leaking the controller between commands. (~2–4 h)
-* **`find <substring>` and `--at-marker <path>`** — find the events whose call name, marker path or resource
-  name matches, and let every command take a marker path instead of an eid. The names are there to search:
-  `draws` prints the engine's ids and marker paths, and `events.json` carries a `marker` member per event, so
-  this is one pass over the action list plus the argument plumbing (`--at-marker` resolves a path to an id the
-  same way `probe` resolves an id to state). Marker paths survive re-captures where eids do not, so this is also
-  what the summary's appendix and any stored expectations should use. (~3 h)
-* **`statediff <eidA> <eidB>`** — field-by-field diff of two events' state (RT set, depth, blend, raster, root
-  parameters, shaders, viewport), printed as one changed-field-per-line list. "What changed between draw 40 and
-  draw 41" is otherwise a manual read of two `state` dumps. (~4 h)
-* **`buffer <resId> [offset] [len] [--as u32|f32|hex|ascii]`** — read a buffer's contents at the current event
-  (`GetBufferData`), hexdump or typed rows, `--json` for scripts. The offline tool can print a buffer's *size*
-  and *name*; only replay can show what is in it. Pairs with the resource table to answer "what is actually in
-  that 4 MB uniform buffer". (~3 h)
 * **`watch <name>`** — given a reflection member name (`Light.intensity`, `Material.Opacity`), print its value at
   every event of the frame as a small table, so a uniform that is right at one draw and wrong at the next is one
   command instead of forty `cb` calls. Slow by nature (a cbuffer read per event), so it takes a range. (~4–6 h)
@@ -353,14 +336,11 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — exploration and experiments**
-1. **`--repl`, `find`/`--at-marker`, `statediff`, `buffer` (§1)** — the cheap commands that make a frame
-   navigable; ~2 days for all four, and `--at-marker` in particular is now one walk of `GetRootActions()`
-   rather than something to derive (§1's first item).
-2. **Shader patching + differential replay, and RT contact sheets (§2, §3)** — the "what if" pair, and the
+1. **Shader patching + differential replay, and RT contact sheets (§2, §3)** — the "what if" pair, and the
    honest way to answer "what does this branch contribute".
-3. **Pixel history (§2)** — "why is this pixel this colour", gated on the capture supporting it.
-4. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
-5. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
+2. **Pixel history (§2)** — "why is this pixel this colour", gated on the capture supporting it.
+3. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
+4. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
    detector could use from it has landed as the usage-chain rules).
 
 **Phase 2 — comparisons and the long tail**

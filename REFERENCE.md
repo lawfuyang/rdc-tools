@@ -1049,6 +1049,28 @@ Three things to know about running it:
   says why, `done: exit N` means it finished, and neither means it died or was killed mid-run.
   (`replay_dump` writes that last line itself precisely because a log that just stopped used to be
   unreadable — a run that failed to open a missing capture looks exactly like one that hung there.)
+**Finding your way around a frame (the four navigation commands).** `find <substring> [max]` searches what the
+engine already publishes -- every call's name and marker path from the action list, every resource's name from
+the resource table -- and says which field matched, because `View` hitting a marker and `View` hitting a
+resource are different answers. An **event id argument may be a marker path** in every command that takes one
+(`state "Base Pass Render (Phase 1) - Opaque"`), and `--at-marker <path>` supplies it as an option instead; both
+resolve through the same rule (full path, then a component of it, then a substring) and both write the
+resolution to the log, so an answer taken from a path can be checked. `statediff <eidA> <eidB>` prints one
+changed field per line, with `state`'s own field names, and reads *both* sides by stepping onto the id from past
+it -- a forward read hands back only what the replay has accumulated, so two events read forward would appear to
+differ in ways that are about the replay's travel rather than about the events (the trap the bundle's second
+state read exists for, §9 above). `buffer <resId|name> [offset] [len] [--as u32|f32|hex|ascii]` reads a buffer
+through `GetBufferData` at the current event (use `--at-marker` to choose it) -- the one thing the offline tool
+cannot show, because a buffer's *size* and *name* are in the file and its *contents* are not.
+
+`--repl` and `--stdin` keep the capture open and read commands from the terminal (or a pipe) one per line, which
+is what makes a session cheap: standing the engine up costs 4-11 s and each command in it costs only itself
+(measured: three commands in one 14 s session at 1.6 s, 0.2 s and 0.0 s). A failing line is logged and the
+session continues -- `Fail` returns a code rather than exiting, which is also why `batch` can run a failing line
+and carry on. One thing to know when driving it: a script piped in by PowerShell arrives with a UTF-8 BOM, and
+the first token is then `\xEF\xBB\xBFstate`; the driver strips it (and `--stdin < script.txt` avoids the
+question entirely, which is the tested path).
+
 * **`probe` runs alone.** It forces non-events on purpose, and a forced non-event keeps the last real
   event's state, so mixing it with other commands makes *one* of the two answers wrong whichever order
   they run in. The driver warns when a batch does it.

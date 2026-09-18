@@ -493,9 +493,95 @@ int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path)
   return 0;
 }
 
-//: Which events touch a resource: the way to answer "where does this buffer come from". The argument
-//: is an id (as `textures` prints it) or a resource name -- `ResourceId` cannot be constructed from a
-//: number outside the DLL, so the match is made against what the engine itself reports.
+//: `find <substring> [max]`: which events' calls or markers, and which resources, mention something.
+//:
+//: Everything here is something the engine already publishes -- the action list gives every call its
+//: name and the marker path it sits inside, the resource table gives every resource its name -- so
+//: nothing is inferred from a state or a binding. It is the cheap half of the marker plumbing:
+//: `--at-marker` and a path written where an event id is expected both resolve through
+//: `ResolveMarkerPath`, and this is how a reader finds out which paths there are to resolve.
+//:
+//: Matching is case-insensitive, and each row says *where* it matched, because `View` hitting a marker
+//: and `View` hitting a resource are different answers. Resources are listed rather than chased: which
+//: events touch one is `usage <resId>`'s answer, from the engine's own usage chain, and deriving it
+//: here would be a second implementation of the same thing.
+int CmdFind(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *needle,
+            int maxRows)
+{
+  const std::string want(needle == NULL ? "" : needle);
+  if(want.empty())
+    return Fail(2, "find needs a substring to look for");
+  const std::string wantLower = LowerAscii(want);
+
+  int calls = 0;
+  bool bTruncated = false;
+  const std::vector<ActionNode> rows = ActionTree(ctrl, calls, bTruncated);
+  const std::map<int, std::string> paths = MarkerPaths(ctrl);
+
+  PrintCaptureHeader(file, path);
+  Field("needle", want);
+  Field("calls", (long long)calls);
+
+  int found = 0;
+  ArrayOpen("events");
+  for(size_t i = 0; i < rows.size() && found < maxRows; i++)
+  {
+    const std::string name = std::string(rows[i].m_Name.c_str());
+    const std::map<int, std::string>::const_iterator pathIt = paths.find(rows[i].m_Eid);
+    const std::string markerPath = pathIt == paths.end() ? std::string() : pathIt->second;
+
+    const bool bNameHit = LowerAscii(name).find(wantLower) != std::string::npos;
+    const bool bPathHit =
+        !markerPath.empty() && LowerAscii(markerPath).find(wantLower) != std::string::npos;
+    if(!bNameHit && !bPathHit)
+      continue;
+
+    found++;
+    const char *kind = rows[i].m_bMarker ? "marker" : (rows[i].m_bCall ? "call" : "event");
+    if(g_bJson)
+      ObjectRow(
+          Fmt("{\"eid\": %d, \"kind\": \"%s\", \"name\": \"%s\", \"where\": \"%s\", "
+              "\"marker\": \"%s\"}",
+              rows[i].m_Eid, kind, JsonEscape(name).c_str(), bNameHit ? "name" : "marker",
+              JsonEscape(markerPath).c_str()));
+    else
+      printf("#%-6d %-7s %-34s %s%s\n", rows[i].m_Eid, kind, name.c_str(),
+             bPathHit && !bNameHit ? "in " : "", bPathHit && !bNameHit ? markerPath.c_str() : "");
+  }
+  ArrayClose(false);
+
+  int resFound = 0;
+  const rdcarray<ResourceDescription> &res = ctrl->GetResources();
+  ArrayOpen("resources");
+  for(size_t i = 0; i < res.size() && resFound < maxRows; i++)
+  {
+    const std::string name = res[i].name.empty() ? std::string() : std::string(res[i].name.c_str());
+    if(name.empty() || LowerAscii(name).find(wantLower) == std::string::npos)
+      continue;
+    resFound++;
+    const std::string idText = Fmt("res%s", IdText(res[i].resourceId).c_str());
+    if(g_bJson)
+      ObjectRow(Fmt("{\"resource\": \"%s\", \"name\": \"%s\"}", idText.c_str(),
+                    JsonEscape(name).c_str()));
+    else
+      printf("%-9s %s\n", idText.c_str(), name.c_str());
+  }
+  ArrayClose(false);
+
+  Field("matched", (long long)(found + resFound), true);
+  if(g_bJson)
+    printf("}\n");
+  if(found == 0 && resFound == 0)
+    Log("find: nothing in this capture's action list or resource table contains '%s'", want.c_str());
+  if(found >= maxRows || resFound >= maxRows)
+    Log("find: %d row(s) printed per list -- narrow the substring, or pass a larger max", maxRows);
+  return 0;
+}
+
+//: Which events touch a resource: the way to answer "where does this buffer come from". The
+//: argument is an id (as `textures` prints it) or a resource name -- `ResourceId` cannot be
+//: constructed from a number outside the DLL, so the match is made against what the engine itself
+//: reports.
 int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what)
 {
   PrintCaptureHeader(file, path);

@@ -610,6 +610,23 @@ UTF-16 pass entirely when the ASCII half already filled the cap -- the answer th
 first, then wide, then the cap), so `chunks <rdc> 0` went from over five minutes to under twenty seconds with
 identical output, and none of the saving was in the decode.
 
+**A second look** (2026-09-18) took the same profile apart again and found four things, all measured:
+
+| what | before | after |
+|---|---|---|
+| `cmd_draws` slicing every payload up front | 1.082 s (copying 1.47 GB it never reads) | 0.004 s -- the slice is gated on `DRAW_CHUNKS`/`STATE_CHUNKS` |
+| ranking 1.16 M strings with a `(-count, offset)` tuple key | 1.574 s | 0.716 s -- `key=counts.__getitem__`; ties keep dict insertion order, which *is* first-offset order |
+| `unittest` (+ `http.client`) imported by every command | ~120 ms + ~90 ms | 0 -- both are imported where they are used (`selftest`, an actual download) |
+| `sections`, `summary`, `markers`, `resources`, `descriptors`, `verify` | 1.1-1.8 s | 0.55-0.68 s |
+
+`shader_bind_names` is deliberately **not** optimised, and is at least visible now: it scans the stream for
+`DXBC` containers so a root parameter can be given the name its reflection offers, which costs 1.2-1.7 s on the
+hobby capture and returns **no names at all** (that capture's DXIL has reflection stripped). The scan is one
+`find` pass at the primitive's own rate -- 1.2 GB/s over the map, which is *not* slower than over `bytes` -- the
+containers are really there (85 of them), and a shader can sit inside any payload, so gating the scan on a chunk
+name would be a guess rather than a check. It has a `$RDC_PROFILE` slot now; the reason `draws` looked
+mysterious for an hour is that its largest cost had no name in the table.
+
 ### 4.14 Reading the file: mapped, not copied
 
 Every command used to pay two full reads before doing anything: the container (601 MB for the hobby capture,
@@ -1088,10 +1105,16 @@ thread* faster between engine calls also changes what the engine answers: buffer
 writes -- `setvbuf(stdout, NULL, _IOFBF, 1 << 20)` inside `CaptureStdout` -- took a 300-event dump from 36.5 s
 to 30.1 s and moved `states/841.state.json` (3148 bytes against 2717) and `events.json`. It reproduced both
 ways: five buffered dumps agreed with each other, two unbuffered ones agreed with the pre-change bundle byte
-for byte. So the writer stays unbuffered, with a comment at `CaptureStdout` saying why, and the rule for a
-future driver change is stronger than "hash the bundle against a fresh run": **hash it against a bundle from
-the *previous* build**. What the host does between engine calls is not free time, it is part of the input; the
-same is true of the offline side, which is why `$RDC_PROFILE` measures rather than assumes (4.13).
+for byte. The rule for a future driver change is stronger than "hash the bundle against a fresh run": **hash it
+against a bundle from the *previous* build**. What the host does between engine calls is not free time, it is
+part of the input; the same is true of the offline side, which is why `$RDC_PROFILE` measures rather than
+assumes (4.13).
+
+What *is* allowed, and now taken: a document written **after the last engine call** may be buffered, because
+nothing downstream of it can be answered differently. `SetDocumentBuffering(true)` is called once, after the
+events loop, and `resources.json`'s 3.8 s of write syscalls becomes 0.1 s; the manifest of a 300-event dump
+stays byte-identical to the unbuffered reference. Everything before that point -- the per-event state, shader
+and cbuffer documents -- stays unbuffered exactly as before.
 
 **The sweep is cached** (`$RDC_CACHE_DIR` moves the cache, `$RDC_NO_CACHE` disables it,
 `%LOCALAPPDATA%\rdc-tools\cache` by default — the offline tool's own directory, so both halves have one cache

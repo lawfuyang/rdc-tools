@@ -29,9 +29,10 @@ import os
 import shutil
 import sys
 import tarfile
-import urllib.error
-import urllib.request
 from typing import Callable, Dict, List, Optional, Tuple
+
+# `urllib.request` is imported inside `_fetch`: it costs ~90 ms (with `http.client` behind it) and the
+# tree is usually already there, so every command would pay for a download it never makes.
 
 #: The files the tool cannot work without, relative to the tree's root: the `SystemChunk` enum and the D3D12
 #: chunk enum. A tree that has these two is "populated" for this tool's purposes -- deliberately a *content*
@@ -86,6 +87,7 @@ def is_populated(root: str) -> bool:
 
 
 def _fetch(url: str, timeout: float = TIMEOUT) -> bytes:
+    import urllib.request      # ~90 ms with `http.client` behind it; only a download needs it
     """One HTTP GET. The only place this module touches the network, which is what the tests replace."""
     request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -248,7 +250,9 @@ def ensure(root: Optional[str] = None, tag: Optional[str] = None,
             % (', '.join(missing_parts(target)), wanted))
         download(wanted, target, log=log)
         log('  %s is populated from %s' % (target, wanted))
-    except (BootstrapError, urllib.error.URLError, OSError, ValueError, EOFError, tarfile.TarError) as exc:
+    # `urllib.error.URLError` is an `OSError`, so it is covered here without importing urllib at module
+    # scope (see the note in the imports).
+    except (BootstrapError, OSError, ValueError, EOFError, tarfile.TarError) as exc:
         note = ('could not fetch the RenderDoc source (%s); chunk names will fall back to numeric ids '
                 '(see README section 1.1)' % exc)
         log('warning: %s' % note)

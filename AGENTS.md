@@ -240,9 +240,16 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   it only with a byte-identical-bundle check against a cold run.
 - **A change that alters the host's timing is not content-neutral** (measured 2026-09-18). Buffering the
   bundle's document writes took a 300-event dump from 36.5 s to 30.1 s and moved two files of the bundle:
-  the engine's answer depends on how fast the host gets back to it. The writer therefore stays unbuffered,
-  and a driver change is checked against a bundle from the *previous* build, not against a fresh run of
-  itself. `CaptureStdout` carries the numbers.
+  the engine's answer depends on how fast the host gets back to it. A document written *between* engine calls
+  stays unbuffered; one written after the last `SetFrameEvent` may be buffered (`SetDocumentBuffering`, which
+  the bundle writer turns on after the events loop — `resources.json`'s 3.8 s of syscalls becomes 0.1 s with
+  the manifest still byte-identical). A driver change is checked against a bundle from the *previous* build,
+  not against a fresh run of itself, and `CaptureStdout` carries the numbers.
+- **Every call that costs real time has a `$RDC_PROFILE` slot, or it will hide.** `shader_bind_names` was
+  1.2-1.7 s of a 2.6 s `draws` and invisible in the table for an hour; the scan itself is at the primitive's
+  own rate (one `find` pass over the stream at 1.2 GB/s, and a map is not slower than `bytes` for it), so what
+  the slot buys is not an optimisation but the ability to see that the cost is real and where it sits. A long
+  call with no slot is a measurement that cannot be taken.
 - **The offline tool maps rather than reads** (REFERENCE 4.14): the container and the cached stream are
   `mmap`s, which is 0.5-1.1 s and ~2 GB of allocation per command. A stream is an `rdc_types.Buffer` (bytes,
   bytearray or map -- never a view, so `chunk_strings` can still call `.decode`); a *slice* of any of them is

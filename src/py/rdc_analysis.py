@@ -48,8 +48,10 @@ from __future__ import annotations
 
 import os
 import sys
-import unittest
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
+
+if TYPE_CHECKING:       # `unittest` is only needed by `selftest`, and importing it costs ~120 ms
+    import unittest
 
 # The two offline layers that grew out of this file. Imported rather than moved silently, so the CLI, the
 # tests and anything else that already says `rdc_analysis.cmd_report` keep working; the heavy lifting is in
@@ -105,6 +107,7 @@ from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 
 def _filter_suite(suite: unittest.TestSuite, patterns: Sequence[str]) -> unittest.TestSuite:
     """Keep only the tests whose id contains one of `patterns` (like `unittest -k`)."""
+    import unittest
     out = unittest.TestSuite()
     for test in suite:
         if isinstance(test, unittest.TestSuite):
@@ -119,6 +122,7 @@ def cmd_selftest(args: Optional[Sequence[str]] = None) -> int:
     Extra arguments: `-v` for verbose, `-k <substring>` to run matching tests only.
     Returns a process exit code (0 = all passed).
     """
+    import unittest
     argv = list(args or [])
     verbosity, patterns, unknown = 1, [], []
     i = 0

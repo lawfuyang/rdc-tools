@@ -117,6 +117,18 @@ void ObjectClose(bool bLast = true);
 std::string FmtV(_Printf_format_string_ const char *fmt, va_list args);
 std::string Fmt(_Printf_format_string_ const char *fmt, ...);
 
+//: Whether the next document's writes go through a buffered stdout, and whether that is allowed yet.
+//:
+//: A document is a great many small `printf`s -- 11,082 rows in `resources.json` -- and while stdout is
+//: unbuffered (so a crash still leaves what a command printed) each one is a write syscall, measured at
+//: 3.8 s of a 36.5 s bundle dump. Buffering is only legal once the caller says **no engine call
+//: follows**: `setvbuf(stdout, NULL, _IOFBF, ...)` before the events loop was measured to move
+//: `states/841.state.json` and `events.json`, because the engine's answer depends on how fast the host
+//: returns to it. The bundle writer turns it on after its last `SetFrameEvent` (REFERENCE 9).
+void SetDocumentBuffering(bool bOn);
+bool DocumentBuffering();
+const size_t kDocBuffer = 1 << 20;
+
 //: Runs a block with stdout pointing at a file, so a command written to print to the terminal
 //: writes a file instead. A file-descriptor swap rather than a `FILE *` threaded through the
 //: writers, because the helpers (`Field`, `Row`, `ArrayOpen`, ...) and the commands that use them
@@ -134,18 +146,25 @@ public:
     m_Saved = _dup(fd);
     m_File = fopen(path, "wb");
     if(m_File != NULL && m_Saved >= 0)
+    {
       _dup2(_fileno(m_File), fd);
-    // Do NOT buffer this. A document is written between engine calls, so making the host thread faster
-    // there changes what the engine answers: `setvbuf(stdout, NULL, _IOFBF, 1 << 20)` here took a
-    // 300-event dump from 36.5 s to 30.1 s and moved `states/841.state.json` and `events.json` --
-    // reproduced both ways, and the unbuffered build matched the pre-change bundles exactly. The
-    // syscalls are the cost of every engine call seeing the same host timing as before (REFERENCE 9).
+      // Buffered only when the caller has said that every engine call is behind it. Buffering a
+      // document written *between* engine calls makes the host faster and changes the bundle --
+      // measured both ways, see REFERENCE 9.
+      if(DocumentBuffering())
+      {
+        setvbuf(stdout, NULL, _IOFBF, kDocBuffer);
+        m_bBuffered = true;
+      }
+    }
   }
   ~CaptureStdout()
   {
     fflush(stdout);
     if(m_Saved >= 0)
       _dup2(m_Saved, _fileno(stdout));
+    if(m_bBuffered)
+      setvbuf(stdout, NULL, _IONBF, 0);    // the console, and the next command, go back to unbuffered
     if(m_File != NULL)
       fclose(m_File);
     if(m_Saved >= 0)
@@ -158,6 +177,7 @@ public:
 private:
   FILE *m_File = NULL;
   int m_Saved = -1;
+  bool m_bBuffered = false;
 };
 
 //: The bundle's documents are JSON whatever the terminal was asked for: they are read by the offline

@@ -149,7 +149,11 @@ def cmd_strings(path: str, minlen: int = 6, maxlines: int = 200) -> None:
     print('stream %d bytes [%s]' % (len(stream), how))
     counts, order = rdc_scan.scan_runs(stream, minlen, rdc_cache.stream_source(path, info))
     print('unique ascii strings >= %d: %d' % (minlen, len(counts)))
-    ranked = sorted(counts, key=lambda s: (-counts[s], order[s]))
+    # Ranked by count, ties by first offset -- and the tie-break needs no key of its own: a dict keeps
+    # its insertion order, `counts` is filled in ascending first-offset order (the scan walks the stream
+    # forward, and the parallel merge concatenates slices in offset order), and a stable sort keeps it.
+    # Measured: the tuple key was 1.46 s of this command's 6.2 s over 1.16 M strings.
+    ranked = sorted(counts, key=counts.__getitem__, reverse=True)
     for s in ranked[:maxlines]:
         print('%6d  @0x%-9x %s' % (counts[s], order[s], s[:150]))
 
@@ -318,7 +322,11 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
     print('%-7s %-24s %-8s %-9s %s' % ('chunk', 'pass / primitive', 'pso', 'args', 'state'))
     for idx, ch in enumerate(iter_chunks(stream), 1):
         nm = names.get(ch['id'], '')
-        blob = chunk_payload(stream, ch)
+        # The payload is sliced only for the chunks this loop reads (`STATE_CHUNKS` is the setters plus
+        # `List_Reset`). Slicing every one of the hobby capture's 29,212 payloads copies 1.47 GB to throw
+        # it away and measured 1.08 s of this command's 2.8 s; `summary` and `markers` never paid it
+        # because they hand `chunk_strings` the chunk and it slices for itself.
+        blob = chunk_payload(stream, ch) if (nm in DRAW_CHUNKS or nm in STATE_CHUNKS) else b''
         if nm == 'PushMarker':
             s = chunk_strings(stream, ch, 3, 1)
             stack.append(s[0] if s else '?')

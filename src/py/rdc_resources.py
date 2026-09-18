@@ -338,6 +338,7 @@ def parse_rdef(data: Buffer) -> List[ShaderBind]:
                                 count=u32(data, e + 24)))
     return binds
 
+@rdc_profile.timed('shader bind names')
 def shader_bind_names(stream: Buffer) -> Dict[str, Dict[Tuple[str, int, int], str]]:
     """`stage -> (kind, register, space) -> name` for every `RDEF` the capture still has.
 

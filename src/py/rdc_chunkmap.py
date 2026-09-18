@@ -66,6 +66,12 @@ STATE_SETTERS = ('List_SetPipelineState', 'List_SetGraphicsRootSignature',
                  'List_SetComputeRootDescriptorTable', 'List_IASetVertexBuffers',
                  'List_IASetIndexBuffer')
 
+#: Every `List_*` chunk whose payload a state tracker reads: the setters above plus `List_Reset`, which is
+#: handled before the setter check because its payload carries the command list id at +40 rather than +0.
+#: A reader that skips the payload for anything outside this set is right; gating on `STATE_SETTERS` alone
+#: cleared the state on every `List_Reset` (caught by the tests).
+STATE_CHUNKS = STATE_SETTERS + ('List_Reset',)
+
 #: Payload lengths the decoders expect for the chunks with a fixed layout, used as a checksum by
 #: `verify` (REFERENCE 3.4: "chunk length is a checksum for your decoder"). Chunks carrying arrays or
 #: variable-length data are deliberately absent.
@@ -240,6 +246,7 @@ __all__ = [
     'RENDERDOC_SRC',
     'RESOURCE_CHUNKS',
     'RESOURCE_KINDS',
+    'STATE_CHUNKS',
     'STATE_SETTERS',
     '_DESCRIPTOR_COPY_SIZE',
     '_DESCRIPTOR_WRITE_MIN',

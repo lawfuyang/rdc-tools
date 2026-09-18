@@ -8,6 +8,23 @@
 ULONGLONG g_Start = 0;
 FILE *g_LogFile = NULL;
 
+namespace
+{
+//: Off until a command says every engine call is behind it (`SetDocumentBuffering`); `common.h` and
+//: REFERENCE 9 have what turning it on too early costs.
+bool g_bBufferDocuments = false;
+}    // namespace
+
+void SetDocumentBuffering(bool bOn)
+{
+  g_bBufferDocuments = bOn;
+}
+
+bool DocumentBuffering()
+{
+  return g_bBufferDocuments;
+}
+
 ULONGLONG Millis()
 {
   return GetTickCount64();

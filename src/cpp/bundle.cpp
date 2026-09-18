@@ -846,6 +846,13 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   Log("bundle: events.json written (%d id(s) with bound state, %d state file group(s))",
       eventsWritten, (int)stateFiles);
 
+  // Everything that could be answered differently because the host was faster is behind us: no
+  // `SetFrameEvent` follows this point, so from here the documents are written through a buffered
+  // stdout. Their syscalls were 3.8 s of a 36.5 s dump (`resources.json` alone), and buffering a
+  // document written *between* engine calls is the change that was measured and reverted -- the engine
+  // hands back a different `states/841.state.json` when the host returns to it sooner (REFERENCE 9).
+  SetDocumentBuffering(true);
+
   // ------------------------------------------------------------------ resources.json
   {
     const JsonDocument bJson;

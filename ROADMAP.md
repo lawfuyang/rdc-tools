@@ -53,7 +53,9 @@ Current state for reference: the offline tool parses the `.rdc` container, decom
 (LZ4 through the built `bin/rdc_lz4.dll`, and Zstd optional) and caches it on disk so
 repeat
 commands are instant (REFERENCE §4.8), walks the
-SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the resource table
+SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the barriers, the render-target
+bindings, the clears, the discards and the copies (the use ledger behind `deps` and `memory`, REFERENCE §4.15),
+the resource table
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (REFERENCE §4.10) and the root signatures (REFERENCE §3.4), inventories the
 DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
@@ -150,14 +152,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 4. P1/P2 — Offline analysis: what the file knows that the frame does not
 
-* **Dependency graph from the chunk stream** — who wrote what and who read it, from the descriptor writes and
-  draw state the offline parser already decodes: a `deps` command emitting DOT/Mermaid plus a table, with
-  read-before-write and write-never-read flagged. This is the evidence behind half of the report's detectors, and it is
-  offline work because it is a fold over the stream — no device needed. (~1–2 d)
-* **Memory and aliasing report** — resource lifetimes (creation, first/last use, destruction, `AliasingBarrier`
-  pairs) and the placement/committed type from the creation payloads, then "these two could share memory, saving
-  N MB" and "these N MB are never read". Sub-allocated UE page buffers complicate this (a CBV into a page is
-  named after the page — REFERENCE §4.9), so it reports what it can prove and says what it cannot. (~1 d)
 * **CSV and Markdown tables** — `--format table|csv|markdown` on `draws`, `resources`, `descriptors`, `rootsig`,
   `summary`, so results can be pasted into an issue or opened in a spreadsheet. (The replay driver has `--json`;
   the offline tool is the cheap, device-free half.) (~2 h)
@@ -314,15 +308,11 @@ never silent ones).
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
-**Phase 1 — exploration and experiments**
-1. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
-   detector could use from it has landed as the usage-chain rules).
-
-**Phase 2 — comparisons and the long tail**
-2. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
-3. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
+**Phase 1 — comparisons and the long tail**
+1. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
+2. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-4. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+3. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
    REFERENCE §8 bullet that is not replay's job.
-5. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
-6. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.
+4. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
+5. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.

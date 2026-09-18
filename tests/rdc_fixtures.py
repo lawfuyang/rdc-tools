@@ -372,6 +372,130 @@ def pl_create_pso(pso_id: int, tail: bytes = b'\xAB\xCD' * 16) -> bytes:
     return u64b(pso_id) + tail
 
 
+def pl_create_heap(heap_id: int, size: int, heap_type: int = 1, flags: int = 0x1000) -> bytes:
+    """`Device_CreateHeap`: the `D3D12_HEAP_DESC` (40 B) | IID | heap id -- 72 bytes in all.
+
+    The IID is `Data1(4) | Data2(2) | Data3(2) | Data4[8]`, and the array serialises with its own
+    `u64` count in front of it, which is why the payload is 72 bytes rather than the 64 the struct
+    sizes suggest. Measured on all 31 `Device_CreateHeap` payloads of the two captures: every one is
+    72 bytes with the size at +0 and the heap id at `length - 8`.
+    """
+    desc = (u64b(size) + u32b(heap_type) + u32b(0) + u32b(0) + u32b(1) + u32b(1) + u64b(0)
+            + u32b(flags))
+    return (desc + u32b(0x6b3b2502) + u16b(0x6e51) + u16b(0x45b3) + u64b(8) + u64b(0x90EE9884265E8DF3)
+            + u64b(heap_id))
+
+
+def pl_resources_barrier(cmdlist: int, entries: Sequence[Tuple[Any, ...]]) -> bytes:
+    """`List_ResourceBarrier`: cmdList | count | arrayCount | entries.
+
+    An entry is `('transition', resource, subresource, before, after)`, `('aliasing', from, to)` or
+    `('uav', resource)` -- the three arms of `D3D12_RESOURCE_BARRIER`, 28/24/16 bytes each.
+    """
+    out = u64b(cmdlist) + u32b(len(entries)) + u64b(len(entries))
+    for entry in entries:
+        if entry[0] == 'transition':
+            out += (u32b(0) + u32b(0) + u64b(entry[1]) + u32b(entry[2]) + u32b(entry[3])
+                    + u32b(entry[4]))
+        elif entry[0] == 'aliasing':
+            out += u32b(1) + u32b(0) + u64b(entry[1]) + u64b(entry[2])
+        else:
+            out += u32b(2) + u32b(0) + u64b(entry[1])
+    return out
+
+
+def pl_barrier_groups(cmdlist: int, groups: Sequence[Tuple[str, Sequence[Tuple[Any, ...]]]]) -> bytes:
+    """`List_Barrier`: cmdList | groupCount | arrayCount | groups.
+
+    A group is `('texture', [(resource, access, layout, flags), ...])`,
+    `('buffer', [(resource, access), ...])` or `('global', [(access,), ...])`; the elements are
+    60/40/16 bytes, and the group header carries the count twice (u32, then u64).
+    """
+    out = u64b(cmdlist) + u32b(len(groups)) + u64b(len(groups))
+    for kind, elements in groups:
+        out += (u32b({'global': 0, 'texture': 1, 'buffer': 2}[kind]) + u32b(len(elements))
+                + u64b(len(elements)))
+        for entry in elements:
+            if kind == 'texture':
+                resource, access, layout, flags = entry
+                out += (u32b(0) + u32b(0) + u32b(0) + u32b(access) + u32b(0) + u32b(layout)
+                        + u64b(resource) + b'\x00' * 24 + u32b(flags))
+            elif kind == 'buffer':
+                resource, access = entry
+                out += (u32b(0) + u32b(0) + u32b(0) + u32b(access) + u64b(resource) + u64b(0)
+                        + u64b(0))
+            else:
+                out += u32b(0) + u32b(0) + u32b(0) + u32b(entry[0])
+    return out
+
+
+def pl_rtv_descriptor(resource: int, heap: int = 1, index: int = 0, dimension: int = 4,
+                      fmt: int = 28) -> bytes:
+    """One serialised RTV `D3D12Descriptor`, as `List_OMSetRenderTargets` writes them.
+
+    `u32 type (0x1003) | u64 heap | u32 index | u64 resource | u32 format | u32 dimension | the arm
+    the dimension selects`: TEXTURE2D (4) is an 8-byte arm (a mip slice and a plane slice), BUFFER
+    (1) is 12, TEXTURE2DMS (6) is empty.
+    """
+    arm = {0: 0, 1: 12, 2: 4, 3: 12, 4: 8, 5: 16, 6: 0, 7: 8, 8: 12}[dimension]
+    return (u32b(0x1003) + u64b(heap) + u32b(index) + u64b(resource) + u32b(fmt) + u32b(dimension)
+            + b'\x00' * arm)
+
+
+def pl_dsv_descriptor(resource: int, heap: int = 1, index: int = 0, dimension: int = 3,
+                      fmt: int = 20) -> bytes:
+    """One serialised DSV `D3D12Descriptor`: a DSV description carries flags as well as the format."""
+    arm = {0: 0, 1: 4, 2: 12, 3: 4, 4: 12, 5: 0, 6: 8}[dimension]
+    return (u32b(0x1004) + u64b(heap) + u32b(index) + u64b(resource) + u32b(fmt) + u32b(0)
+            + u32b(dimension) + b'\x00' * arm)
+
+
+def pl_omset(cmdlist: int, rtvs: Sequence[int], dsv: int = 0) -> bytes:
+    """`List_OMSetRenderTargets`: cmdList | count(u32) | arrayCount(u64) | RTVs | present | [DSV]."""
+    out = u64b(cmdlist) + u32b(len(rtvs)) + u64b(len(rtvs))
+    for resource in rtvs:
+        out += pl_rtv_descriptor(resource)
+    return out + (bytes([1]) + pl_dsv_descriptor(dsv) if dsv else bytes([0]))
+
+
+def pl_clear(cmdlist: int, resource: int, kind: str = 'rtv') -> bytes:
+    """A `List_Clear*View` payload with the part the tool reads: the descriptor and its resource.
+
+    An RTV/DSV clear serialises its descriptor first (id at +24); a UAV clear puts a `PortableHandle`
+    in front of it (id at +36). What follows the descriptor -- the clear value, the rect count, the
+    rect array -- is not decoded, so the fixture carries a short tail of zeroes.
+    """
+    if kind == 'uav':
+        return (u64b(cmdlist) + u64b(1) + u32b(0) + u32b(0x1002) + u64b(2) + u32b(0)
+                + u64b(resource) + u32b(0) + u32b(0) + b'\x00' * 64)
+    desc = pl_dsv_descriptor(resource) if kind == 'dsv' else pl_rtv_descriptor(resource)
+    return u64b(cmdlist) + desc + b'\x00' * 40
+
+
+def pl_discard(cmdlist: int, resource: int) -> bytes:
+    """`List_DiscardResource`: cmdList | resource | OPT(region) -- the region's shape is not read."""
+    return u64b(cmdlist) + u64b(resource) + b'\x00' * 13
+
+
+def pl_copy_buffer(cmdlist: int, dst: int, dst_offset: int, src: int, src_offset: int,
+                   num_bytes: int) -> bytes:
+    """`List_CopyBufferRegion` -- 48 bytes, which is what `EXPECTED_LENGTHS` checks it against."""
+    return (u64b(cmdlist) + u64b(dst) + u64b(dst_offset) + u64b(src) + u64b(src_offset)
+            + u64b(num_bytes))
+
+
+def pl_copy_texture(cmdlist: int, dst: int, src: int, dst_sub: int = 0, src_sub: int = 0) -> bytes:
+    """`List_CopyTextureRegion`: cmdList | dst location | X, Y, Z | src location | box.
+
+    Both locations take the SUBRESOURCE_INDEX arm (type **0**, one `UINT`, so 16 bytes) and the box
+    is present (a 1-byte flag then 24 bytes of coordinates). All five payloads in the captures here
+    are 77 bytes with this shape.
+    """
+    loc = lambda res, sub: u64b(res) + u32b(0) + u32b(sub)
+    return (u64b(cmdlist) + loc(dst, dst_sub) + u32b(0) * 3 + loc(src, src_sub) + bytes([1])
+            + u32b(0) * 3 + u32b(1) * 3)
+
+
 # --------------------------------------------------------------------------- root signatures
 #: `D3D12_ROOT_PARAMETER_TYPE` / `D3D12_DESCRIPTOR_RANGE_TYPE` by the words the tool uses.
 PARAM_KIND_CODES = {'table': 0, '32bit': 1, 'cbv': 2, 'srv': 3, 'uav': 4}
@@ -557,6 +681,21 @@ enum class D3D12Chunk : uint32_t
   List_SetComputeRootSignature,
   List_SetComputeRootDescriptorTable,
   List_SetComputeRootConstantBufferView,
+  List_SetComputeRootShaderResourceView,
+  List_SetComputeRootUnorderedAccessView,
+  List_OMSetRenderTargets,
+  List_ResourceBarrier,
+  List_Barrier,
+  List_ClearRenderTargetView,
+  List_ClearDepthStencilView,
+  List_ClearUnorderedAccessViewUint,
+  List_ClearUnorderedAccessViewFloat,
+  List_DiscardResource,
+  List_CopyBufferRegion,
+  List_CopyTextureRegion,
+  List_ResolveQueryData,
+  List_BuildRaytracingAccelerationStructure,
+  Device_CreateHeap,
   Device_CreateCommittedResource,
   Device_CreatePlacedResource,
   Device_CreateReservedResource,

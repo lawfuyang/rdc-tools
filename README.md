@@ -203,6 +203,8 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | Show me the pass/primitive tree | `markers` |
 | Which draw is the one I care about? | `markers`, then `chunks <limit> List_Draw` |
 | What pipeline state, constant buffers and vertex streams does draw N use? | `draws` |
+| Who writes this resource, and who reads it? | `deps` (offline, with `read-before-write` / `write-never-read` flagged — REFERENCE §4.15) |
+| What does the frame's memory add up to, and what could share it? | `memory` (placement, capture-relative lifetimes, aliasing barriers — REFERENCE §4.15) |
 | What is `res342`, and which buffers/textures exist at all? | `resources`, `resources <limit> <nameFilter>` |
 | What does the descriptor heap hold that this table binding points into? | `descriptors`, `descriptors <rdc> <heapId>` |
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>` |
@@ -242,8 +244,8 @@ It is written against the roadmap as implemented: anything marked *(roadmap §N)
 not exist yet, everything else runs today.
 
 * **Offline today** — `sections`, `blocks`, `resources`, `descriptors`, `verify`, `summary`, `markers`,
-  `chunks`, `chunk`, `draws`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`, `dxbc`,
-  `dump-chunk`, `dump-shaders`, `cache`, `selftest` (REFERENCE §4).
+  `chunks`, `chunk`, `draws`, `deps`, `memory`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`,
+  `dxbc`, `dump-chunk`, `dump-shaders`, `cache`, `selftest` (REFERENCE §4).
 * **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `pixelhistory`, `shaders`, `cb`,
   `textures`,
   `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters` (`--per-pass`), `crosscheck`,
@@ -252,8 +254,8 @@ not exist yet, everything else runs today.
   path** as well as a number (and `last` for the frame's own last event), so a command can be pointed at a
   pass rather than at an id.
 * **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), shader debugging, overlays
-  (ROADMAP §2), `mesh --stage/--obj`, texture subresources (ROADMAP §3), `deps`,
-  memory/aliasing report, `--format`, structural `diff` (ROADMAP §4), `replaydiff` (ROADMAP §5), the capture
+  (ROADMAP §2), `mesh --stage/--obj`, texture subresources (ROADMAP §3), `--format`, structural `diff`,
+  the root-signature/chunk cross-check, the VRAM budget (ROADMAP §4), `replaydiff` (ROADMAP §5), the capture
   corpus and the golden/fixture tests (ROADMAP §6).
 
 ### The rule, and why it is the rule
@@ -292,7 +294,7 @@ offline tool, and it survives the process that produced it; stdout does not, and
 | debug messages | `debug` | the API's own complaints — the highest-value red flags there are |
 | usage chains | `usage <resId>`, or `resources.json` (REFERENCE §9) | who writes and who reads a resource: the evidence for "dead" and "uninitialised" |
 | resource identity | `resources <rdc>` (offline) | names and sizes for every id, so output speaks in names instead of `res342` |
-| the file's own view | `sections`, `verify`, `markers`, `draws`, `rootsig`, `descriptors` (offline) | structure, integrity, and the descriptor writes the engine does not report |
+| the file's own view | `sections`, `verify`, `markers`, `draws`, `rootsig`, `descriptors`, `deps`, `memory` (offline) | structure, integrity, the descriptor writes the engine does not report, and who touched what |
 | the `.rdc` itself | keep it next to the bundle | the offline commands read it directly; the engine's output is a *cache* of what it said, never the only copy |
 
 ### The order of operations
@@ -304,7 +306,8 @@ offline tool, and it survives the process that produced it; stdout does not, and
    `batch` file holding the specific questions (REFERENCE §9). Never open the capture twice for the same
    question, and call `probe` first if the eids are not certain.
 3. **Analyse offline over the bundle *and* the `.rdc`**: the report generator *(REFERENCE §4.11)* for the map, then targeted
-   offline commands (`resources`, `deps` *(ROADMAP §4)*, `diff` *(ROADMAP §4)*, `rootsig`) for the specific thing.
+   offline commands (`resources`, `deps` and `memory` *(REFERENCE §4.15)*, `diff` *(ROADMAP §4)*, `rootsig`) for the
+   specific thing.
 4. **Targeted engine follow-ups only** for what is still open, using the eids the offline step produced — not a
    second fishing expedition. Files narrow the question, the engine answers it, files again.
 5. **Assemble the answer with evidence**, and state plainly what could not be determined (the bar for an answer, below).
@@ -377,8 +380,8 @@ python src\py\rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name 
 ```
 
 Three things to check, in this order: is the *content* right (the decoded PNG), is the *format* right for how
-it is sampled (the RT-format audit, *ROADMAP §3*), and was it *written* before it was read (`deps` *(ROADMAP §4)*: the
-write→read chain). To prove its contribution rather than argue about it, substitute a flat texture for it and
+it is sampled (the RT-format audit, *ROADMAP §3*), and was it *written* before it was read (`deps` *(REFERENCE §4.15)*:
+the write→read chain). To prove its contribution rather than argue about it, substitute a flat texture for it and
 diff the renders *(ROADMAP §2, §5)* — if the picture does not change, the texture is not the problem.
 
 **E. "What is in this uniform — and is it ever what we expect?"**
@@ -416,9 +419,9 @@ a puzzle to keep grinding at.
 .\bin\replay_dump.exe image 'capture.rdc' <eid> out.bmp      # what each pass produced (contact sheet, ROADMAP §3)
 ```
 
-The offline half supplies the parts the GPU cannot: `deps` *(ROADMAP §4)* for writes nobody reads and reads nobody
-wrote, the memory/aliasing report *(ROADMAP §4)* for "these N MB could be shared", and the VRAM budget for "what if
-this were half resolution". Counters are hardware and driver dependent — if they are unavailable, the honest
+The offline half supplies the parts the GPU cannot: `deps` *(REFERENCE §4.15)* for writes nobody reads and reads nobody
+wrote, `memory` *(REFERENCE §4.15)* for "these N MB could be shared" and for which resources nothing reads, and the
+VRAM budget *(ROADMAP §4)* for "what if this were half resolution". Counters are hardware and driver dependent — if they are unavailable, the honest
 answer is "not measurable here", not zero.
 
 **H. "This looks uninitialised, or garbage."**
@@ -543,9 +546,10 @@ built on.
 * **`REFERENCE.md`** — the detail behind this file: §3 how the capture is decoded, §4 the full command
   reference, §5 worked examples, §6 verified payload facts, §7 how to add a command, §8 pitfalls and known
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
-* **`ROADMAP.md`** — what is not implemented yet, in priority order: the report's detectors and rankings
-  (§1), the driver's navigation and experiment commands (§2–§4), the dependency graph and memory report
-  (§5), two-capture A/B (§6), the verification corpus (§7), the D3D12 harness (§8.5).
+* **`ROADMAP.md`** — what is not implemented yet, in priority order: the driver's navigation and experiment
+  commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4),
+  two-capture A/B (§5), the verification corpus and CI (§6), the work beyond the local desktop (§7),
+  robustness and scope (§8), the REFERENCE §8 items being closed (§9), and the suggested order (§10).
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.
 * **`renderdoc-src/`** — fetched into the root folder on first use (§1.1), and also where this project keeps

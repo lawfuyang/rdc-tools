@@ -61,16 +61,54 @@ COMPUTE_CHUNKS = ('List_Dispatch',)
 
 #: Command-list chunks that change the state `cmd_draws` reports (see `_apply_state_chunk`).
 STATE_SETTERS = ('List_SetPipelineState', 'List_SetGraphicsRootSignature',
-                 'List_SetGraphicsRootConstantBufferView', 'List_SetGraphicsRootDescriptorTable',
+                 'List_SetGraphicsRootConstantBufferView', 'List_SetGraphicsRootShaderResourceView',
+                 'List_SetGraphicsRootUnorderedAccessView', 'List_SetGraphicsRootDescriptorTable',
                  'List_SetComputeRootSignature', 'List_SetComputeRootConstantBufferView',
+                 'List_SetComputeRootShaderResourceView', 'List_SetComputeRootUnorderedAccessView',
                  'List_SetComputeRootDescriptorTable', 'List_IASetVertexBuffers',
-                 'List_IASetIndexBuffer')
+                 'List_IASetIndexBuffer', 'List_OMSetRenderTargets')
 
 #: Every `List_*` chunk whose payload a state tracker reads: the setters above plus `List_Reset`, which is
 #: handled before the setter check because its payload carries the command list id at +40 rather than +0.
 #: A reader that skips the payload for anything outside this set is right; gating on `STATE_SETTERS` alone
 #: cleared the state on every `List_Reset` (caught by the tests).
 STATE_CHUNKS = STATE_SETTERS + ('List_Reset',)
+
+#: The two barrier chunks: `List_ResourceBarrier` (the D3D12.0 `D3D12_RESOURCE_BARRIER`, whose union has
+#: three arms) and `List_Barrier` (the ID3D12GraphicsCommandList7 form, which names an *access* instead
+#: of a state and adds a discard flag). Both payloads are arrays and neither is in `EXPECTED_LENGTHS`;
+#: the decoders walk them by type and refuse an entry that does not land exactly at the end.
+BARRIER_CHUNKS = ('List_ResourceBarrier', 'List_Barrier')
+
+#: Payloads that name a render target in their own bytes rather than through a descriptor heap:
+#: `List_OMSetRenderTargets` binds them, a clear writes one, a discard drops one.
+TARGET_CHUNKS = ('List_OMSetRenderTargets',)
+CLEAR_CHUNKS = ('List_ClearRenderTargetView', 'List_ClearDepthStencilView',
+                'List_ClearUnorderedAccessViewUint', 'List_ClearUnorderedAccessViewFloat')
+DISCARD_CHUNKS = ('List_DiscardResource',)
+
+#: Copies: the destination is written and the source read, which is the one place the offline stream
+#: shows a buffer being produced without being bound to a pipeline.
+COPY_CHUNKS = ('List_CopyBufferRegion', 'List_CopyTextureRegion')
+
+#: The resource heaps the capture creates. `Device_CreateHeap1` is the same payload shape (the
+#: descriptor first, the heap id last), so one parse covers both; only the base form has been measured
+#: against real payloads, which is why only it is in `EXPECTED_LENGTHS`.
+HEAP_CHUNKS = ('Device_CreateHeap', 'Device_CreateHeap1')
+
+#: `List_*` chunks that reference resources which the offline decoders do **not** attribute as uses.
+#: They are not decoded because what they touch is a sub-range, an argument buffer or an
+#: acceleration-structure build, and a use that is only half-decoded would be read as a fact -- so the
+#: ledger counts them instead and `deps`/`memory` print the ones their capture actually contains. This
+#: is what keeps a `write-never-read` finding an observation about the *decoded* stream rather than a
+#: claim about the frame.
+UNATTRIBUTED_CHUNKS = ('List_ResolveQueryData', 'List_BuildRaytracingAccelerationStructure',
+                       'List_CopyRaytracingAccelerationStructure', 'List_ExecuteIndirect',
+                       'List_SetDescriptorHeaps', 'List_ResolveSubresource',
+                       'List_ResolveSubresourceRegion', 'List_CopyResource', 'List_CopyTiles',
+                       'List_WriteBufferImmediate', 'List_EmitRaytracingAccelerationStructurePostbuildInfo',
+                       'List_CopyRaytracingAccelerationStructureRegion', 'List_SetPredication',
+                       'List_ClearStateObject', 'List_BeginRenderPass')
 
 #: Payload lengths the decoders expect for the chunks with a fixed layout, used as a checksum by
 #: `verify` (REFERENCE 3.4: "chunk length is a checksum for your decoder"). Chunks carrying arrays or
@@ -89,7 +127,11 @@ EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
     'List_SetComputeRootSignature': (16,),
     'List_SetComputeRootDescriptorTable': (24,),
     'List_SetComputeRootConstantBufferView': (28,),
+    'List_SetComputeRootShaderResourceView': (28,),
+    'List_SetComputeRootUnorderedAccessView': (28,),
     'List_IASetIndexBuffer': (9, 33),      # 9 = null view, 33 = present flag + view
+    'List_CopyBufferRegion': (48,),        # cmdList, dst, dstOffset, src, srcOffset, numBytes
+    'Device_CreateHeap': (72,),            # desc(40) | IID(24, its 8-byte array count included) | id
 }
 
 #: `align_up`'s default (kept as a module constant so callers can name it).
@@ -231,23 +273,30 @@ def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: str = 'D3D12') -> Di
 __all__ = [
     'ALIGN_UP_DEFAULT',
     'AS_KINDS',
+    'BARRIER_CHUNKS',
     'CHUNK_64BITSIZE',
     'CHUNK_ALIGN',
     'CHUNK_CALLSTACK',
     'CHUNK_DURATION',
     'CHUNK_THREADID',
     'CHUNK_TIMESTAMP',
+    'CLEAR_CHUNKS',
     'COMPUTE_CHUNKS',
+    'COPY_CHUNKS',
     'DESCRIPTOR_COPY_CHUNKS',
     'DESCRIPTOR_KINDS',
+    'DISCARD_CHUNKS',
     'DRAW_CHUNKS',
     'EXPECTED_LENGTHS',
+    'HEAP_CHUNKS',
     'MARKER_CHUNKS',
     'RENDERDOC_SRC',
     'RESOURCE_CHUNKS',
     'RESOURCE_KINDS',
     'STATE_CHUNKS',
     'STATE_SETTERS',
+    'TARGET_CHUNKS',
+    'UNATTRIBUTED_CHUNKS',
     '_DESCRIPTOR_COPY_SIZE',
     '_DESCRIPTOR_WRITE_MIN',
     '_RESOURCE_DESC_SIZE',

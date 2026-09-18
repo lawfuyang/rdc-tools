@@ -114,6 +114,14 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `Device_CreateDescriptorHeap` | `D3D12_DESCRIPTOR_HEAP_DESC` (type, count) + IID + the heap id at `length - 16` + the original GPU base — 56 bytes |
 | `Device_Create{ConstantBuffer,ShaderResource,UnorderedAccess,RenderTarget,DepthStencil}View` | the descriptor first — the **resource id is at +16** — and the destination `PortableHandle` last (`u64 heapId` at `length - 12`, `u32 index` at `length - 4`). 68 bytes for an SRV, 80 for a UAV in the captures |
 | `Device_CopyDescriptors` / `…Simple` | `u64 count`, then `count x (u32 heapType, dst PortableHandle, src PortableHandle)` — 28 bytes per entry (36 bytes for a single copy) |
+| `List_ResourceBarrier` | `u64 cmdList, u32 NumBarriers, u64 arrayCount`, then one entry per barrier — `u32 Type, u32 Flags` and the arm the type selects: a transition is 28 B (`u64 resId, u32 Subresource, u32 StateBefore, u32 StateAfter`), an aliasing barrier 24 (`u64 before, u64 after`) and a UAV barrier 16 (`u64 resId`). The serialiser writes the *active arm member by member*, so the entries are not one length and a decoder has to walk them by type |
+| `List_Barrier` | `u64 cmdList, u32 NumBarrierGroups, u64 arrayCount`, then per group `u32 Type (0/1/2 = global/texture/buffer), u32 NumBarriers, u64 count` and its elements: global 16 B (`SyncBefore, SyncAfter, AccessBefore, AccessAfter`), texture 60 B (the same six access words, `u64 resId`, a 24-byte subresource range, flags) and buffer 40 B (the access words, `u64 resId`, offset, size) |
+| `List_OMSetRenderTargets` | `u64 cmdList, u32 NumRenderTargetDescriptors, u64 arrayCount`, the RTV `D3D12Descriptor`s, a `u8` "DSV present" flag and the DSV descriptor. A descriptor is `u32 type, u64 heap, u32 index, u64 resId, u32 format, u32 dimension` and then the arm the dimension selects (up to 16 B for an RTV, 12 for a DSV) — the call serialises the descriptors, not handles, so this is a walk |
+| `List_Clear*View` | the target's descriptor (an RTV/DSV clear) or a 12-byte `PortableHandle` and then the descriptor (a UAV clear), then the clear value, `NumRects` and the rects. The **resource is at +24** (RTV/DSV) or **+36** (UAV) — a descriptor's own resource field, verified against the resource table on all 100 clears and discards of the two captures |
+| `List_DiscardResource` | `u64 cmdList, u64 resId, OPT(D3D12_DISCARD_REGION)` — 17 bytes with no region, 37 with one |
+| `List_CopyBufferRegion` | `u64 cmdList, u64 dst, u64 dstOffset, u64 src, u64 srcOffset, u64 numBytes` (48 B, in `EXPECTED_LENGTHS`) |
+| `List_CopyTextureRegion` | `u64 cmdList`, a `D3D12_TEXTURE_COPY_LOCATION` on each side with `DstX/Y/Z` between them, then `OPT(D3D12_BOX)`. A location is `u64 resId, u32 Type, the arm the type selects` — and the types are the other way round from the obvious guess: **0 = a subresource index** (4 B, so the location is 16) and **1 = a placed footprint** (28 B, so 40). All five payloads in the captures here are 77 bytes and take the type-0 arm |
+| `Device_CreateHeap` | the `D3D12_HEAP_DESC` (40 B: size, 20 B of properties, alignment, flags), the IID (24 B — its `Data4[8]` array carries its own `u64` count, which is why the payload is 72 and not 64) and the heap id at `length - 8` |
 | `InitialContents` | `u64 resourceId` + resource description, then the data — only the id and the first header bytes are decoded (`chunk <N>`); reading the contents is the replay driver's job |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
 
@@ -193,14 +201,17 @@ which replay does not expose.
 | `chunks` | `<rdc> [limit=200] [nameFilter]` | chunk index, offset, **name**, payload length, and a preview of the strings inside — the way to find a chunk by name |
 | `chunk` | `<rdc> <index>` | full inspector: id/name/flags/length, payload offset **and header size**, decoded fields via `decode_chunk`, 160-byte hex dump, and the payload's strings |
 | `draws` | `<rdc> [maxDraws=80]` | per-draw table (see below) |
+| `deps` | `<rdc> [maxResources=40] [table\|dot\|mermaid]` | who writes what and who reads it, from the capture's own stream: writes/reads per resource with the first and last event, `read-before-write` and `write-never-read` flagged and their evidence printed, and the same graph in DOT or Mermaid (§4.15) |
+| `memory` | `<rdc> [maxRows=20]` | what the frame's memory adds up to: placement and kind with byte totals, capture-relative lifetimes, the aliasing barriers it hands memory over with, heaps ranked by what sharing could save, and every figure's caveat (§4.15) |
 | `rootsig` | `<rdc> [maxSigs=40]` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter with its type, register, space and descriptor ranges |
 | `dump-chunk` | `<rdc> <index> <outfile>` | writes the chunk payload to a file |
 
 #### `draws` — the per-draw table
 
 Maintains the state of each **command list** while walking the stream: marker stack (`PushMarker`/`PopMarker`),
-pipeline state (`List_SetPipelineState`), root signature and root bindings (graphics and compute, CBVs and
-descriptor tables), vertex streams (`List_IASetVertexBuffers`) and the index buffer. On every draw/dispatch it
+pipeline state (`List_SetPipelineState`), root signature and root bindings (graphics and compute: CBVs, root
+SRV/UAV descriptors and descriptor tables), vertex streams (`List_IASetVertexBuffers`), the index buffer and the
+render targets `List_OMSetRenderTargets` binds. On every draw/dispatch it
 prints the state that is *in effect* — everything still bound, not only what changed since the previous draw:
 
 ```
@@ -225,6 +236,19 @@ descriptor table — the heap and the slot it points at, plus what the capture w
 (`-> srv res2233[SkyViewLut]`, §4.10) or the heap's name when the slot was never written in this frame (§8);
 `res<id>+0x<off>(sz,st)` is a vertex stream (resource, byte offset, size, stride). A `res0+0x0(sz0,st0)` entry
 is a **NULL vertex buffer** — a useful signature in itself.
+
+The *write* side of the state is printed the same way: `RTV:`/`DSV:` are the targets the list last bound
+(`List_OMSetRenderTargets`, whose payload carries the descriptors themselves — §3.4), and `SRV:`/`UAV:` are root
+descriptors of those kinds, which the stream carries in the same `(resource, byteOffset)` shape a root CBV uses.
+Two draws of the PC capture's deferred base pass:
+
+```
+        RTV: res60857[SceneColor]  res60858[GBufferA]  res60859[GBufferB]  res60860[GBufferC]  res60861[GBufferD]  res60862[GBufferE]
+        DSV: res60843[SceneDepthZ]
+```
+
+Those lines are bindings, not uses — a draw that binds a UAV and writes nothing still says so there. `deps`
+(§4.15) is what turns them into writes and reads, and says what it cannot see.
 
 Every resource the capture named carries that name in `[...]`, truncated to 24 characters, and descriptor
 tables carry their heap's name — `GlobalSamplerHeap` says the table holds samplers, which is the difference
@@ -720,6 +744,61 @@ across processes would mean handing each worker the chunk index for its slice --
 second. Nothing derived is cached for the same reason §4.13 gives: a table or index cache is a new class of
 artefact on disk to avoid work that is already sub-second.
 
+### 4.15 The frame's uses and its memory: `deps` and `memory`
+
+`rdc_detect_usage` (§4.11) asks the same two questions of a replay driver's **bundle** — the engine's own
+per-resource history — and these two commands are the file-side twin: one walk of the chunk stream, no device, no
+GPU, and the same two names for the same two findings, so a result from either side can be read beside the other.
+`tests/test_rdc_uses.py` tests both from fixtures (§4.6); the walk itself lives in `rdc_uses.py`.
+
+**What counts as a use** (`rdc_uses.walk_uses`) is a stated list, not a guess:
+
+| the use | how it is classified |
+|---|---|
+| a draw's or dispatch's bindings | a root or table CBV/SRV is a read, a UAV — root or through a table — is a read *and* a write, a vertex/index buffer is a read, a bound target (`RTV`/`DSV`) a write. A table slot resolves through the heap the frame wrote (§4.10); a slot it never wrote resolves to nothing and is *counted* |
+| a clear, a discard | `List_Clear*View` writes; `List_DiscardResource` is its own kind of use (`discard`) |
+| a copy | `List_CopyBufferRegion`/`List_CopyTextureRegion`: destination a write, source a read — the one place the stream shows a buffer produced without being bound to a pipeline |
+| a barrier | classified by the state (or 1.7-era access word) the resource *enters*: `RenderTarget`, `UnorderedAccess`, `DepthWrite`, `CopyDest`, `ResolveDest` write, the shader-resource and copy-source states read, `UnorderedAccess` does both, `Common` neither. A `List_Barrier` texture barrier with the discard flag is additionally a discard |
+
+Creating a resource, naming one, or writing a descriptor into a heap (`Device_Create*View`) is **not** a use.
+Binding is not using either: a draw that binds a UAV and writes nothing reads as a write here, which is what the
+words around every finding say.
+
+**Measured** on the two captures (the stream is cached for every run after the first, §4.8; the ledger phase is
+0.08 s of `deps`' 0.27 s / 0.45 s):
+
+| | `PC Renderer.rdc` (631 MB stream, 52 draws) | `HobbyRenderer FlyingWorld.rdc` (1.47 GB, 50 draws) |
+|---|---|---|
+| resources with a use the stream shows | 88 | 117 |
+| `read-before-write` | 27 | 26 |
+| `write-never-read` | 52 | 62 |
+| table bindings that resolve to nothing | 118 | 9 |
+
+Those counts are large for a reason worth stating plainly: **most of UE's descriptor tables are filled at
+startup**, so a read through an unwritten slot is invisible — the PC capture resolves 9 slots of its 118 table
+bindings (§8). The commands print that count *with* the finding, and the hobby capture's nine is why its
+`write-never-read` list is the more meaningful of the two. `deps` also prints which resource-referencing chunks
+it does **not** attribute (`rdc_chunkmap.UNATTRIBUTED_CHUNKS`: `List_ResolveQueryData`, `List_ExecuteIndirect`,
+`List_BuildRaytracingAccelerationStructure`, `List_SetDescriptorHeaps`, …), because "nothing read it" and
+"nothing this can see read it" are different sentences — and a payload that does not parse cleanly (a barrier
+whose walk does not land at its end) is refused and counted rather than half-read.
+
+`deps <rdc> [maxResources] [table|dot|mermaid]` — `maxResources` caps the table rows and the graph's resources
+(0 = all). The graph is bipartite and literal: an event that wrote is a `w<eid>` node, one that read is `r<eid>`,
+a resource is a box, and each edge is labelled with the binding kind. A resource nothing wrote has no producer to
+connect from and is left out (the table still counts it); a UAV is drawn as both because it is both. Event ids
+are **chunk indices** — the numbering `draws` prints, not the engine's (§8).
+
+`memory <rdc> [maxRows]` — placement, size and lifetime from the same walk: `Device_CreateHeap` gives a heap its
+size, a placed resource its heap and offset, and every figure containing a texture is marked `~` (pixels × 4: a
+capture records no texture byte count). Its aliasing section reads the frame's own **aliasing barriers** first —
+two resources handed the same memory, in order — and then ranks heaps by `total − peak`, what perfect packing
+could save *if* every pair were legal (D3D12's aliasing requirements are not in the file, so it is an upper
+bound). Two things it prints rather than hides: a lifetime here is **capture-relative** — D3D12 writes no release
+to the stream, so it ends at the frame's last use, and a resource older than the capture has no creation event at
+all — and a heap's recorded size need not agree with the totals beside it, because a texture's real size is not
+in the file.
+
 ---
 
 ## 5. Worked examples
@@ -874,6 +953,11 @@ Then: `python src\py\rdc_analysis.py psos capture.rdc`.
 | `chunk_payload(stream, ch)` | the payload bytes (correct offset, always) |
 | `chunk_strings(stream, ch, minlen, limit)` | strings inside a payload (ASCII **and** UTF-16LE) |
 | `decode_chunk(name, blob)` | decoded fields for the known chunk types |
+| `walk_uses(stream, names, resources, heaps)` | the whole use ledger: `{resources, aliases, heaps, seen, events, failed, unresolved}` (§4.15) |
+| `parse_barriers(blob)` / `parse_barrier_groups(blob)` | the two barrier payloads: every entry, or None when the walk does not land exactly at the end (§3.4) |
+| `parse_targets(blob)` | `(render targets, depth target)` of `List_OMSetRenderTargets` |
+| `clear_target(blob)` / `discard_target(blob)` | the resource a clear or a discard names, 0 when the payload is not shaped as one |
+| `copy_pair(name, blob)` | a copy's `(destination, source)` |
 | `parse_dxil_containers(stream)` | `(offset, size, hash, parts)` for every DXBC container |
 | `parse_signature(blob)` | decoded `ISG1`/`OSG1` `(name, semanticIndex, register)` list |
 | `part_strings(blob, off, ln)` | strings inside one container part |
@@ -930,6 +1014,12 @@ not on this list"). The ones that stay offline work items are tracked with an ac
 * **Chunk indices are not event ids.** `summary`/`markers`/`draws` number chunks the way the file stores them,
   which matched the engine's event ids on the two Unreal captures and does not on the hobby-renderer one
   (`replay_dump probe`, §9). Use the driver's ids when talking to the driver.
+* **A lifetime read out of the file is capture-relative.** D3D12 writes no release to the stream — no chunk
+  records a resource being destroyed — so the frame's *last use* is where a lifetime ends, and a resource created
+  before the capture (UE allocates its heaps and static textures at startup) has no creation event at all.
+  `memory` (§4.15) reports both rather than inventing an end, and counts a resource the frame never touches as
+  live for the whole frame. The same file gives a texture no byte count: every figure containing one is an
+  estimate at 4 bytes a pixel, marked `~`.
 
 ## 9. The replay driver (`replay_dump`)
 

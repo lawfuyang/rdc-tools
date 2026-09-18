@@ -119,16 +119,111 @@ class DrawState(TypedDict):
     differs from the current one -- "if a root signature is changed on a command list, all previous
     root arguments become stale", which is what RenderDoc's own replay implements
     (`d3d12_command_list_wrap.cpp`). Graphics and compute root parameters are separate namespaces.
+
+    `rtv`/`dsv` are the render targets `OMSetRenderTargets` bound -- the write side of the state, and
+    the only place a target binding is recorded in the stream (`List_OMSetRenderTargets` carries the
+    RTV and DSV *descriptors*, not handles). `gfxSrv`/`gfxUav`/`compSrv`/`compUav` are the root
+    descriptors of those kinds, which `List_Set{Graphics,Compute}Root{ShaderResource,UnorderedAccess}View`
+    binds and which the stream carries in the same (resource, byteOffset) shape a root CBV uses.
     """
     pso: Optional[int]
     gfxSig: Optional[int]
     compSig: Optional[int]
     gfxCbv: Dict[int, Tuple[int, int]]
     compCbv: Dict[int, Tuple[int, int]]
+    gfxSrv: Dict[int, Tuple[int, int]]
+    compSrv: Dict[int, Tuple[int, int]]
+    gfxUav: Dict[int, Tuple[int, int]]
+    compUav: Dict[int, Tuple[int, int]]
     gfxTable: Dict[int, Tuple[int, int]]
     compTable: Dict[int, Tuple[int, int]]
     vbs: Dict[int, Tuple[int, int, int, int]]
     ib: Optional[Tuple[int, int]]
+    rtv: List[int]
+    dsv: int
+
+class BarrierInfo(TypedDict):
+    """One entry of a `List_ResourceBarrier` payload (`D3D12_RESOURCE_BARRIER`).
+
+    `kind` is `transition` / `aliasing` / `uav`, and the union is walked arm by arm because the
+    entries are not the same length: a transition serialises as 28 bytes (resource, subresource,
+    state before, state after), an aliasing barrier as 24 (the two resources) and a UAV barrier as
+    16. `resource2` is the second resource of an aliasing barrier -- the one the memory is handed
+    *to* -- and is 0 for the other kinds. `before`/`after` are `D3D12_RESOURCE_STATES` words, and
+    `subresource` is 0xffffffff for "all of them".
+    """
+    kind: str
+    resource: int
+    resource2: int
+    before: int
+    after: int
+    subresource: int
+
+class GroupBarrier(TypedDict):
+    """One entry of a `List_Barrier` payload (`D3D12_TEXTURE_BARRIER` / `_BUFFER_BARRIER` / `_GLOBAL_BARRIER`).
+
+    The 1.7-era barrier names an access rather than a state, which is why `access` is a
+    `D3D12_BARRIER_ACCESS` bitmask (the thing the ledger classifies) and `layout` is only meaningful
+    for a texture barrier. `sync` is the `D3D12_BARRIER_SYNC` after the barrier and `flags` the
+    texture barrier flags (`DISCARD` says the previous contents are dropped). A global barrier has
+    no resource at all, so its `resource` is 0.
+    """
+    kind: str
+    resource: int
+    sync: int
+    access: int
+    layout: int
+    flags: int
+
+class UseInfo(TypedDict):
+    """One event's use of one resource, as an offline walk of the stream sees it.
+
+    `access` is `read` / `write` / `read+write` / `discard` -- a UAV binding and a transition to
+    `UNORDERED_ACCESS` are both read *and* write, which is the same reading the report gives a
+    bundle's `CS_RWResource` row. `how` is what made the use (`cbv`, `srv`, `uav`, `rtv`, `dsv`,
+    `vb`, `ib`, `clear`, `copy-dst`, `copy-src`, `discard`, `barrier`), `call` the chunk it happened
+    in (the label a graph node prints) and `detail` the payload's own words for it (`rp3`,
+    `copy 144 B`, `RenderTarget -> PixelShaderResource`).
+    """
+    eid: int
+    access: str
+    how: str
+    call: str
+    detail: str
+
+class ResourceUse(TypedDict):
+    """One resource's capture-relative life: where it came from, and every use the stream shows.
+
+    `created` is the chunk index of the creation payload and 0 when the capture does not create the
+    resource at all -- a frame capture records what happened *during* the frame, and UE allocates
+    its heaps and static textures at startup, so most referenced resources are older than the file.
+    `placement` is `committed` / `placed` / `reserved` for one the capture does create and `external`
+    for one it does not; `heap`/`offset` are the heap a placed resource lives in (`Device_CreateHeap`
+    is where a heap's *size* comes from). `uses` is in stream order.
+    """
+    created: int
+    placement: str
+    heap: int
+    offset: int
+    uses: List[UseInfo]
+
+class UseLedger(TypedDict):
+    """Everything one walk of the stream says about who touches what (see `rdc_uses.walk_uses`).
+
+    `aliases` is every aliasing barrier as `(eid, from, to)`, `heaps` the resource heaps the capture
+    creates by size, `seen` the chunk-name histogram of the whole walk (the commands use it to say
+    which resource-referencing chunks are *not* decoded as uses), and `failed` counts the payloads
+    that did not parse cleanly -- a barrier whose walk does not land exactly at the end of its
+    payload is never guessed at. `unresolved` counts the descriptor-table bindings whose heap slot
+    the capture never wrote, which resolve to nothing rather than to a guess.
+    """
+    resources: Dict[int, ResourceUse]
+    aliases: List[Tuple[int, int, int]]
+    heaps: Dict[int, int]
+    seen: Dict[str, int]
+    events: int
+    failed: Dict[str, int]
+    unresolved: int
 
 class RootRange(TypedDict):
     """One descriptor range of a root signature table.
@@ -211,6 +306,7 @@ _RUN_PATTERNS: Dict[int, re.Pattern[bytes]] = {6: STR_RE}
 _WIDE_PATTERNS: Dict[int, re.Pattern[str]] = {}
 
 __all__ = [
+    'BarrierInfo',
     'Buffer',
     'BufferLike',
     'CacheEntry',
@@ -221,13 +317,17 @@ __all__ = [
     'DrawState',
     'DxbcContainer',
     'DxbcPart',
+    'GroupBarrier',
     'ResourceInfo',
+    'ResourceUse',
     'RootParam',
     'RootRange',
     'RootSignature',
     'STR_RE',
     'SectionInfo',
     'ShaderBind',
+    'UseInfo',
+    'UseLedger',
     'ZSTD_MAGIC',
     '_RUN_PATTERNS',
     '_WIDE_PATTERNS',

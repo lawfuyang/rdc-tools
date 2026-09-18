@@ -21,6 +21,10 @@ Usage:
   python rdc_analysis.py chunks   <rdc> [limit] [nameFilter]
   python rdc_analysis.py chunk    <rdc> <chunkIndex>
   python rdc_analysis.py draws    <rdc> [maxDraws]
+  python rdc_analysis.py deps     <rdc> [maxResources] [table|dot|mermaid]
+                                                         # who writes what, who reads it (offline)
+  python rdc_analysis.py memory   <rdc> [maxRows]        # placement, capture-relative lifetimes,
+                                                         #   aliasing pairs and never-read bytes
   python rdc_analysis.py rootsig  <rdc> [maxSigs]        # decoded root signatures: parameter types,
                                                          #   registers, spaces, descriptor ranges
   python rdc_analysis.py strings  <rdc> [minlen] [maxlines]
@@ -108,6 +112,7 @@ from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and test
 from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_uses import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_profile import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_driver import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -233,6 +238,14 @@ def _dispatch() -> None:
         cmd_chunk_detail(path, int(argv[3]))
     elif cmd == 'draws':
         cmd_draws(path, _arg(argv, 3, 80))
+    elif cmd == 'deps':
+        deps_fmt = argv[4] if len(argv) > 4 else 'table'
+        if deps_fmt not in ('table', 'dot', 'mermaid'):
+            print('usage: rdc_analysis.py deps <rdc> [maxResources] [table|dot|mermaid]')
+            sys.exit(2)
+        cmd_deps(path, _arg(argv, 3, 40), deps_fmt)
+    elif cmd == 'memory':
+        cmd_memory(path, _arg(argv, 3, 20))
     elif cmd == 'chunks':
         cmd_chunks(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
     elif cmd == 'verify':

@@ -24,6 +24,7 @@
 #include <io.h>        // _dup/_dup2: the bundle writes files, not stdout
 #pragma comment(lib, "bcrypt.lib")
 
+#include <algorithm>    // std::min/std::max, for the image scaling (image.cpp)
 #include <cerrno>
 #include <charconv>
 #include <cstdarg>
@@ -105,6 +106,10 @@ std::string JsonEscape(const rdcstr &s);
 void Indent();
 void Field(const char *key, std::string_view value, bool bLast = false);
 void Field(const char *key, const rdcstr &value, bool bLast = false);
+//: Integers only, and deliberately so: a `double` overload was tried here and made every existing
+//: `Field(key, 0)` ambiguous (int converts to both), which is a compile error in twenty call sites
+//: rather than a wrong number in one. A fractional value is written as text with `Fmt("%.3f", ...)`
+//: and typed as a string in its schema -- see `percentDiffering` in commands_image.cpp.
 void Field(const char *key, long long value, bool bLast = false);
 void Flag(const char *key, bool bValue, bool bLast = false);
 void ArrayOpen(const char *key);
@@ -346,6 +351,14 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 int CmdStateDiff(IReplayController *ctrl, ICaptureFile *file, const char *path, int eidA, int eidB);
 int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
               unsigned long long offset, unsigned long long length, const char *asMode);
+int CmdSheet(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *outDir,
+             int every, int maxPasses, int tileWidth, bool bList);
+//: Two files and a heat map: this one needs no engine, like `bundle-verify`. It still runs inside a
+//: session (the command line opens the capture), but nothing about the answer depends on the device.
+int CmdImgDiff(ICaptureFile *file, const char *path, const char *aPath, const char *bPath,
+               const char *outPath);
+int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::vector<std::string> &args);
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                bool bWantDisasm);
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
@@ -377,6 +390,45 @@ bool FileBytes(const char *path, unsigned long long &bytes);
 bool MakeDir(const std::string &path);
 bool DirIsEmpty(const std::string &path, bool &bEmpty);
 std::string BundleRelative(const std::string &root, const std::string &full);
+
+// --------------------------------------------------------------------------- images (image.cpp)
+
+//: A decoded image: 8-bit RGBA, top-down (the order the engine's readback and the BMP writer use).
+struct ImageData
+{
+  int m_Width = 0;
+  int m_Height = 0;
+  bytebuf m_Rgba;
+
+  bool Valid() const
+  {
+    return m_Width > 0 && m_Height > 0 && m_Rgba.size() == (size_t)m_Width * (size_t)m_Height * 4u;
+  }
+
+  //: Exactly `count` pixels, every byte `value`. `rdcarray` (which `bytebuf` is) has neither
+  //: `assign` nor a two-argument `resize`: clear, size, then fill.
+  void Reset(size_t count, uint8_t value = 255)
+  {
+    m_Rgba.clear();
+    m_Rgba.resize(count);
+    for(size_t i = 0; i < m_Rgba.size(); i++)
+      m_Rgba[i] = (byte)value;
+  }
+};
+
+//: A 24-bit BMP: the writer behind `image`, the bundle's `rt/` images, the contact sheet and the
+//: difference map. `ReadBMPImage` takes the uncompressed 24/32-bit files back in, ours and a viewer's.
+bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t height);
+bool WriteBMPImage(const char *path, const ImageData &img);
+bool ReadBMPImage(const char *path, ImageData &img, std::string &why);
+ImageData DownscaleImage(const ImageData &src, int maxWidth, int maxHeight);
+ImageData MakeMontage(const std::vector<ImageData> &tiles, int columns, int tileWidth,
+                      int tileHeight, int gutter);
+uint64_t DifferenceHash(const ImageData &img);
+long long ImagePixelDelta(const ImageData &a, const ImageData &b, int &maxDelta,
+                          long long &sumDelta, ImageData *heat);
+bool ReadTargetImage(IReplayController *ctrl, ResourceId target, ImageData &img, std::string &why);
+ResourceId FirstRenderTarget(const D3D12Pipe::State *st);
 
 // --------------------------------------------------------------------------- self-check (selftest.cpp)
 

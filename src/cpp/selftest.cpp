@@ -383,6 +383,106 @@ int CmdSelftest()
             "the selftest left its scratch folder behind");
   }
 
+  // ------------------------------------------------------------------ the image helpers
+  //
+  // A contact sheet and a difference map are pictures nobody can check by reading the code, so the
+  // maths behind them is checked where it can be: no device, no capture, no DLL. `WriteBMP` is the
+  // writer the bundle's `rt/` images go through -- the manifest hashes those files -- so the round
+  // trip below also says that a reader has not drifted from that writer.
+  {
+    ImageData img;
+    img.m_Width = 4;
+    img.m_Height = 4;
+    img.Reset(4u * 4u * 4u, 0);
+    for(int y = 0; y < 4; y++)
+    {
+      for(int x = 0; x < 4; x++)
+      {
+        uint8_t *px = img.m_Rgba.data() + ((size_t)y * 4u + (size_t)x) * 4u;
+        px[0] = (uint8_t)(x * 60);
+        px[1] = (uint8_t)(y * 60);
+        px[2] = 128;
+        px[3] = 255;
+      }
+    }
+
+    const std::string bmp = DefaultLogStem() + ".selftest.bmp";
+    t.Check(WriteBMPImage(bmp.c_str(), img), "image-bmp-written", "the BMP could not be written");
+
+    ImageData back;
+    std::string why;
+    t.Check(ReadBMPImage(bmp.c_str(), back, why), "image-bmp-read", why.c_str());
+    t.Check(back.Valid() && back.m_Width == img.m_Width && back.m_Height == img.m_Height &&
+                back.m_Rgba == img.m_Rgba,
+            "image-bmp-round-trip", "what the reader got back is not what the writer wrote");
+
+    // BMP rounds every row up to four bytes, so a 3-wide image is where a reader that ignores the
+    // padding reads the next row one byte early -- wrong pixels, no error.
+    ImageData odd;
+    odd.m_Width = 3;
+    odd.m_Height = 2;
+    // Alpha 255 and one distinct red per pixel: the writer is 24-bit (the reader fills alpha in),
+    // and a uniform image would hide exactly the misalignment this checks for.
+    odd.Reset(3u * 2u * 4u, 255);
+    for(int i = 0; i < 6; i++)
+      odd.m_Rgba[(size_t)i * 4u] = (uint8_t)(10 + i * 10);
+    const std::string oddBmp = DefaultLogStem() + ".selftest-pad.bmp";
+    ImageData oddBack;
+    t.Check(WriteBMPImage(oddBmp.c_str(), odd) && ReadBMPImage(oddBmp.c_str(), oddBack, why) &&
+                oddBack.m_Rgba == odd.m_Rgba,
+            "image-bmp-row-padding", "a row that is not a multiple of four bytes did not survive");
+
+    const ImageData small = DownscaleImage(img, 2, 2);
+    t.Check(small.m_Width == 2 && small.m_Height == 2, "image-downscale-size",
+            "a 4x4 image asked to fit 2x2 did not come back 2x2");
+    // Each destination pixel is the average of the 2x2 block it covers: red runs 0,60,120,180 across
+    // the source, so the two reds are (0+60)/2 = 30 and (120+180)/2 = 150, and green (0+60)/2 = 30.
+    t.Check(small.Valid() && small.m_Rgba[0] == 30 && small.m_Rgba[4] == 150 && small.m_Rgba[5] == 30,
+            "image-downscale-average", "the thumbnail is not the average of the pixels it covers");
+
+    std::vector<ImageData> tiles(3, small);
+    const ImageData montage = MakeMontage(tiles, 2, 2, 2, 1);
+    t.Check(montage.m_Width == 7 && montage.m_Height == 7, "image-montage-size",
+            "a 3-tile montage in 2 columns with a 1px gutter is not 7x7");
+
+    t.Check(DifferenceHash(img) == DifferenceHash(img), "image-hash-stable",
+            "the same image hashed twice gave two answers");
+    ImageData inverted = img;
+    for(size_t i = 0; i + 4 <= inverted.m_Rgba.size(); i += 4)
+    {
+      for(int k = 0; k < 3; k++)
+        inverted.m_Rgba[i + k] = (uint8_t)(255 - inverted.m_Rgba[i + k]);
+    }
+    t.Check(DifferenceHash(inverted) != DifferenceHash(img), "image-hash-inverted",
+            "inverting an image did not change its hash");
+
+    int maxDelta = 0;
+    long long sumDelta = 0;
+    t.Check(ImagePixelDelta(img, img, maxDelta, sumDelta, NULL) == 0 && maxDelta == 0,
+            "image-diff-same", "an image differs from itself");
+    ImageData one = img;
+    one.m_Rgba[7] = (uint8_t)(one.m_Rgba[7] ^ 0xff);
+    t.Check(ImagePixelDelta(img, one, maxDelta, sumDelta, NULL) == 1, "image-diff-one-pixel",
+            "one changed pixel was not reported as one");
+    t.Check(ImagePixelDelta(img, small, maxDelta, sumDelta, NULL) == -1, "image-diff-size-mismatch",
+            "two images of different sizes were compared anyway");
+
+    const std::string notBmp = DefaultLogStem() + ".selftest.txt";
+    FILE *f = fopen(notBmp.c_str(), "wb");
+    if(f != NULL)
+    {
+      fputs("this is not a bitmap", f);
+      fclose(f);
+    }
+    ImageData rejected;
+    t.Check(!ReadBMPImage(notBmp.c_str(), rejected, why), "image-rejects-non-bmp",
+            "a text file was read as an image");
+
+    remove(bmp.c_str());
+    remove(oddBmp.c_str());
+    remove(notBmp.c_str());
+  }
+
   // ------------------------------------------------------------------ the help text and the DLL
   {
     std::string usage;

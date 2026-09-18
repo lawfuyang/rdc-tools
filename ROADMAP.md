@@ -115,13 +115,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 2. P1 — Replay driver: experiments on the frame (the "what if" tools)
 
-* **Shader patching and differential replay** — `BuildTargetShader` compiles an edited shader (HLSL or the
-  capture's own assembly), `ReplaceResource` substitutes it for the original, `Replay()` re-runs the draw, and
-  `CreateOutput` gives the image. That turns "is this branch the problem" into an experiment: force the return
-  value, disable a feature, substitute a flat texture — and diff the two renders (§3, render-target contact
-  sheets, is where the comparison lives). This is the
-  single highest-value item in this section: it answers questions about *that draw* without re-capturing the
-  application. (~2–3 d)
 * **Pixel history** — `PixelHistory(texture, x, y, subresource, typeCast)` returns one `PixelModification` per
   event that touched that pixel, with the reasons it was rejected (`depthTestFailed`, `stencilTestFailed`,
   `scissorClipped`, `viewClipped`, `shaderDiscarded`, `backfaceCulled`, `depthBoundsFailed`, `sampleMasked`) and
@@ -146,10 +139,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 3. P1/P2 — Replay driver: the frame's pictures, counters and geometry
 
-* **Render-target contact sheets** — `image --every-pass <outdir>` (and `--every N`) writes one PNG per pass
-  boundary plus a montage and an index Markdown; `image --diff <a.bmp> <b.bmp> --out <heat.png>` compares two
-  renders (absolute difference plus a perceptual hash, so "did this actually change the picture" is one number).
-  This is the visual half of the summary and the payoff for §2's experiments. (~1 d)
 * **Per-pass counters** — `FetchCounters(counters)` returns results per event (`CounterResult.eventId`); there is
   no event-range parameter, so per-pass means folding the per-event list client-side between a pass's first and
   last eid. New command `counters --per-pass [--passes <path>]`, printing a table and the top-N cost passes, for
@@ -284,10 +273,11 @@ iterate with than re-capturing a frame.
 | Fast iteration without a capture round-trip | ✖ | ✔ |
 
 **Verdict.** The replay driver is built (REFERENCE §9), so the ✔ column above is no longer a plan — it is what
-`replay_dump` does today, and §2's shader patching widens it. A harness is worth writing only for the ✖
-column: running a shader with hand-built constants — e.g. feed the mobile base-pass pixel shader the HISM's baked
-SH to prove the shader path in isolation — and even that can often be avoided by patching the shader in replay
-instead.
+`replay_dump` does today. `patch` builds a replacement shader and substitutes it for the capture's own, which
+is the same door one step further open; what it has *not* yet shown is the replacement reaching a draw, so a
+harness is still worth writing for the ✖ column: running a shader with hand-built constants — e.g. feed the
+mobile base-pass pixel shader the HISM's baked SH to prove the shader path in isolation — and the first thing
+to settle either way is whether a patched shader changes a render (REFERENCE §9 has the measurement).
 
 **Sketch.** One `ID3D12Device` + a compute-style or full-screen-triangle PSO + a root signature matching the
 shader's bind points (the offline tool can now print that layout: `rootsig`, REFERENCE §4.1); upload a 256-byte
@@ -336,18 +326,16 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — exploration and experiments**
-1. **Shader patching + differential replay, and RT contact sheets (§2, §3)** — the "what if" pair, and the
-   honest way to answer "what does this branch contribute".
-2. **Pixel history (§2)** — "why is this pixel this colour", gated on the capture supporting it.
-3. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
-4. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
+1. **Pixel history (§2)** — "why is this pixel this colour", gated on the capture supporting it.
+2. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
+3. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
    detector could use from it has landed as the usage-chain rules).
 
 **Phase 2 — comparisons and the long tail**
-6. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
-7. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
+4. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
+5. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-8. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+6. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
    REFERENCE §8 bullet that is not replay's job.
-9. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
-10. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.
+7. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
+8. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.

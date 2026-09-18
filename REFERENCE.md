@@ -1071,6 +1071,51 @@ and carry on. One thing to know when driving it: a script piped in by PowerShell
 the first token is then `\xEF\xBB\xBFstate`; the driver strips it (and `--stdin < script.txt` avoids the
 question entirely, which is the tested path).
 
+**The frame's pictures, and the one experiment (`sheet`, `imgdiff`, `patch`).** `sheet <rdc> [outDir]` renders
+one image per pass -- taken at the pass's last call that has a bound target, not at its last call, because a
+barrier or a clear at the end of a pass has no state at all (measured: the `Clear` pass's last call has no
+render target, no depth target and no root signature) -- writes them as BMPs, lays thumbnails out in a montage
+and writes an index that names every tile with its marker eid, image eid and hash. `--list` prints what the
+sheet *would* contain without rendering anything. `--every N`/`--max N` thin it, `--tile N` sets the thumbnail
+size (the display readback is square, so tiles are square and nothing is cropped).
+
+`imgdiff <a.bmp> <b.bmp>` reports both halves of "did the picture change": how many pixels differ and by how
+much (exact), and a 64-bit difference hash of each and the distance between them (perceptual) -- because a
+re-render on another driver differs in a handful of pixels and in none of the hash's bits, while a shader that
+stopped writing colour differs in both. It reads back the BMPs this tool writes and the uncompressed 24- and
+32-bit ones a viewer writes; anything else is refused with what it is rather than half-read. `--out` writes a
+heat map. Like `bundle-verify`, it needs no device -- it runs inside a session, but nothing about the answer
+depends on one.
+
+One consequence worth knowing, because it is a bundle-visible change and was measured rather than assumed: the
+display readback is **24-bit for some targets** (the hobby capture's 256x256 targets come back as 196,608 bytes,
+three bytes per pixel), and such an image is now expanded to RGBA and written as a BMP -- where the old code
+handed the wrong byte count to `WriteBMP`, failed, and fell back to the engine's own PNG encoder. So a bundle's
+`rt/` set can now hold BMPs where it used to hold PNGs, with the same pixels: more images, not different ones.
+The bundle's own manifest check (a dump hashed against the previous build) is what would catch an unintended
+difference here, and the writer's bytes are unchanged -- `WriteBMP` itself was moved, not edited.
+
+`patch <rdc> <eid> <stage> [outDir] [--from <file>] [--enc hlsl|dxbc|dxil|glsl|spirv] [--entry <name>]
+[--flag name=value] [--dump <file>] [--compare] [--encodings]` is the "what if" command: it compiles a shader
+for *this replay device* with `BuildTargetShader`, substitutes it for the capture's own with `ReplaceResource`,
+clears the replay cache, re-runs the frame, and with `--compare` writes `before.bmp`, `after.bmp` and
+`diff.bmp` plus the same numbers `imgdiff` prints. `--dump` writes the shader's disassembly so there is
+something to read, `--encodings` prints what the target builds (measured on the hobby capture: **dxbc, dxil,
+hlsl**), and every failure says which one it was -- an unbuildable encoding, a compiler message, or no shader of
+that stage bound at that event.
+
+**What is proven about `patch`, and what is not.** Proven: it builds HLSL/DXBC/DXIL for the target, dumps real
+disassembly (112 KB for one of the hobby capture's pixel shaders), compiles a hand-written replacement, reports
+the compiler's own message when one fails, installs the replacement, re-runs the frame, and writes the three
+images with an exact difference. **Not proven: that the replacement reaches the draw.** A pixel shader that
+`discard`s every pixel -- a change no bookkeeping can fake -- rendered byte-identically to the original at the
+event measured, with and without `ClearReplayCache`, so on this capture the substitution is either not reaching
+the draw or that event's draw does not write the colour the display shows (its pass's colour may come from
+earlier draws while the last one still has the target bound). The next step is to point it at an event that is
+demonstrably the colour source -- `sheet`'s index names one image eid per pass, and `draws` says what kind of
+call it is -- and only then treat a `patch` render as evidence. Reporting this is the point: the tool says
+"nothing changed" rather than implying the patch worked.
+
 * **`probe` runs alone.** It forces non-events on purpose, and a forced non-event keeps the last real
   event's state, so mixing it with other commands makes *one* of the two answers wrong whichever order
   they run in. The driver warns when a batch does it.

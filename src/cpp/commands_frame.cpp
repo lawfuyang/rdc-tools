@@ -344,83 +344,6 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
   return 0;
 }
 
-//: Little-endian field writers: BMP's byte order is fixed by the file format, not by the machine
-//: that happens to be writing it, so the bytes are written one at a time rather than by copying a
-//: host-order integer into the header.
-void PutLE16(uint8_t *dst, uint16_t value)
-{
-  dst[0] = (uint8_t)(value & 0xffu);
-  dst[1] = (uint8_t)((value >> 8) & 0xffu);
-}
-
-void PutLE32(uint8_t *dst, uint32_t value)
-{
-  dst[0] = (uint8_t)(value & 0xffu);
-  dst[1] = (uint8_t)((value >> 8) & 0xffu);
-  dst[2] = (uint8_t)((value >> 16) & 0xffu);
-  dst[3] = (uint8_t)((value >> 24) & 0xffu);
-}
-
-//: A 24-bit BMP of the texture display at one event. BMP rather than PNG because it needs no
-//: encoder: the pixels come back as RGBA and the header is 54 bytes.
-//:
-//: The size arithmetic is done in `size_t` and checked before it is used, because the width and
-//: height come from the engine as `int32_t`: `width * height * 4` in `int` can overflow
-//: ([expr.mul], [ub:expr.mul.representable.type.result]), and the wrapped value is exactly what a
-//: bounds check would then be trusting. Every write is checked too -- a short write leaves a
-//: truncated image that otherwise looks like success.
-bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t height)
-{
-  if(width <= 0 || height <= 0)
-    return false;
-
-  const size_t w = (size_t)width;
-  const size_t h = (size_t)height;
-
-  // The buffer has to hold w*h pixels of 4 bytes; the division detects a wrapped product.
-  const size_t needed = w * h * 4;
-  if(needed / 4 / h != w || rgba.size() < needed)
-    return false;
-
-  const size_t rowBytes = w * 3;
-  const size_t pad = (4 - (rowBytes % 4)) % 4;
-  const size_t imageSize = (rowBytes + pad) * h;
-  if(imageSize > 0xffffffffu - 54u)
-    return false;    // the header's size fields are 32-bit
-
-  uint8_t header[54] = {};
-  header[0] = 'B';
-  header[1] = 'M';
-  PutLE32(header + 2, (uint32_t)(54u + imageSize));
-  PutLE32(header + 10, 54u);
-  PutLE32(header + 14, 40u);
-  PutLE32(header + 18, (uint32_t)w);
-  PutLE32(header + 22, (uint32_t)h);
-  PutLE16(header + 26, 1u);
-  PutLE16(header + 28, 24u);
-  PutLE32(header + 34, (uint32_t)imageSize);
-
-  FILE *f = fopen(path, "wb");
-  if(f == NULL)
-    return false;
-
-  bool bOk = fwrite(header, 1, sizeof(header), f) == sizeof(header);
-  std::vector<uint8_t> row(rowBytes + pad, 0);
-  for(size_t line = 0; line < h && bOk; line++)
-  {
-    const size_t y = h - 1 - line;    // BMP rows are bottom-up
-    const uint8_t *px = rgba.data() + y * w * 4;
-    for(size_t x = 0; x < w; x++)
-    {
-      row[x * 3 + 0] = px[x * 4 + 2];
-      row[x * 3 + 1] = px[x * 4 + 1];
-      row[x * 3 + 2] = px[x * 4 + 0];
-    }
-    bOk = fwrite(row.data(), 1, row.size(), f) == row.size();
-  }
-  return (fclose(f) == 0) && bOk;
-}
-
 //: Defined with the bundle (ROADMAP §1), used here too: `image` and the bundle's `rt/` images save
 //: a target through the same code so the two cannot drift apart.
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
@@ -676,32 +599,21 @@ int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
                      std::string &written, int32_t &width, int32_t &height)
 {
-  IReplayOutput *out =
-      ctrl->CreateOutput(CreateHeadlessWindowingData(256, 256), ReplayOutputType::Texture);
-  if(out == NULL)
-  {
-    fprintf(stderr, "warning: could not create a texture output for res%s\n", IdText(target).c_str());
-    return false;
-  }
-
-  TextureDisplay disp;
-  disp.resourceId = target;
-  disp.typeCast = CompType::Typeless;
-  disp.rangeMin = 0.0f;
-  disp.rangeMax = 1.0f;
-  out->SetTextureDisplay(disp);
-  out->Display();
-
-  const rdcpair<int32_t, int32_t> dims = out->GetDimensions();
-  const bytebuf pixels = out->ReadbackOutputTexture();
-  width = dims.first;
-  height = dims.second;
-  bool bOk = WriteBMP(outBase, pixels, dims.first, dims.second);
-  out->Shutdown();
+  // The pixels come from `ReadTargetImage`, which is the same display-and-readback the contact sheet
+  // uses: one implementation, so a pass image and a tile cannot be two interpretations of a target.
+  ImageData img;
+  std::string why;
+  bool bOk = ReadTargetImage(ctrl, target, img, why);
+  width = img.m_Width;
+  height = img.m_Height;
   written = std::string(outBase);
+  if(bOk)
+    bOk = WriteBMPImage(outBase, img);
 
   if(!bOk)
   {
+    // The engine's own encoder, for the cases the display readback cannot serve: a target it will not
+    // show (measured: one texture in the Android capture came back empty through the display path).
     TextureSave save;
     save.resourceId = target;
     save.destType = FileType::PNG;
@@ -711,6 +623,10 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
     {
       written = png;
       bOk = true;
+    }
+    else if(!why.empty())
+    {
+      fprintf(stderr, "warning: %s\n", why.c_str());
     }
   }
   return bOk;

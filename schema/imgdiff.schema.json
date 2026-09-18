@@ -1,0 +1,32 @@
+{
+  "title": "imgdiff",
+  "description": "How two images differ, exactly and perceptually: how many pixels changed, by how much, and the difference hash of each. The two must be the same size -- comparing different sizes is a different question, not a smaller difference.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "a", "b",
+               "width", "height", "pixels", "differing", "percentDiffering", "meanDelta", "maxDelta",
+               "hashA", "hashB", "hashDistance", "identical", "visuallySame", "heatMap"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string", "description": "the capture the command was run against (unused)"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "a": {"type": "string", "description": "the first image's path"},
+    "b": {"type": "string"},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "pixels": {"type": "integer"},
+    "differing": {"type": "integer", "description": "pixels with any channel difference"},
+    "percentDiffering": {"type": "string", "description": "a percentage with three decimals, as text: the writer has no fractional field"},
+    "meanDelta": {"type": "string", "description": "average channel difference over changed pixels, three decimals"},
+    "maxDelta": {"type": "integer", "description": "the largest single-channel difference"},
+    "hashA": {"type": "string", "description": "16 hex digits: a 64-bit difference hash"},
+    "hashB": {"type": "string"},
+    "hashDistance": {"type": "integer", "description": "bits that differ, 0-64"},
+    "identical": {"type": "boolean"},
+    "visuallySame": {"type": "boolean", "description": "hash distance <= 2"},
+    "heatMap": {"type": "string", "description": "the difference image written, empty when --out was not given"}
+  },
+  "additionalProperties": false
+}

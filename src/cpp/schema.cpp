@@ -577,6 +577,123 @@ const SchemaDoc kSchemas[] = {
   },
   "additionalProperties": false
 })sc"},
+
+    {"sheet", "sheet", R"sc({
+  "title": "sheet",
+  "description": "One image per pass of the frame, a montage of them, and an index that names each tile. The image is taken at the pass's last call, from the first bound render target of that event. `--list` writes nothing and stops after `shown`, so the last three members are absent there.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "outDir",
+               "passesInFrame", "every", "max", "tile", "shown", "passes"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "outDir": {"type": "string", "description": "where the images went, empty for --list"},
+    "passesInFrame": {"type": "integer", "description": "markers containing at least one call"},
+    "every": {"type": "integer"},
+    "max": {"type": "integer"},
+    "tile": {"type": "integer", "description": "thumbnail width in the montage"},
+    "shown": {"type": "integer", "description": "passes this run selected"},
+    "skipped": {"type": "integer", "description": "passes whose target could not be read or written"},
+    "montage": {"type": "string", "description": "the montage's path, empty when no tile was readable"},
+    "index": {"type": "string", "description": "the Markdown index's path"},
+    "passes": {"type": "array", "items": {
+      "type": "object",
+      "required": ["markerEid", "imageEid", "depth", "calls", "name", "path"],
+      "properties": {
+        "markerEid": {"type": "integer", "description": "the marker's own event id"},
+        "imageEid": {"type": "integer", "description": "the last call inside it: where the image is from"},
+        "depth": {"type": "integer"},
+        "calls": {"type": "integer"},
+        "name": {"type": "string"},
+        "path": {"type": "string", "description": "the full `A > B` marker path"},
+        "file": {"type": "string", "description": "absent when this pass has no image"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "hash": {"type": "string", "description": "16 hex digits: the image's difference hash"},
+        "note": {"type": "string", "description": "why this pass has no image, or that the image is the depth target because no colour target was bound"}
+      },
+      "additionalProperties": false
+    }}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"imgdiff", "imgdiff", R"sc({
+  "title": "imgdiff",
+  "description": "How two images differ, exactly and perceptually: how many pixels changed, by how much, and the difference hash of each. The two must be the same size -- comparing different sizes is a different question, not a smaller difference.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "a", "b",
+               "width", "height", "pixels", "differing", "percentDiffering", "meanDelta", "maxDelta",
+               "hashA", "hashB", "hashDistance", "identical", "visuallySame", "heatMap"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string", "description": "the capture the command was run against (unused)"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "a": {"type": "string", "description": "the first image's path"},
+    "b": {"type": "string"},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "pixels": {"type": "integer"},
+    "differing": {"type": "integer", "description": "pixels with any channel difference"},
+    "percentDiffering": {"type": "string", "description": "a percentage with three decimals, as text: the writer has no fractional field"},
+    "meanDelta": {"type": "string", "description": "average channel difference over changed pixels, three decimals"},
+    "maxDelta": {"type": "integer", "description": "the largest single-channel difference"},
+    "hashA": {"type": "string", "description": "16 hex digits: a 64-bit difference hash"},
+    "hashB": {"type": "string"},
+    "hashDistance": {"type": "integer", "description": "bits that differ, 0-64"},
+    "identical": {"type": "boolean"},
+    "visuallySame": {"type": "boolean", "description": "hash distance <= 2"},
+    "heatMap": {"type": "string", "description": "the difference image written, empty when --out was not given"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"patch", "patch", R"sc({
+  "title": "patch",
+  "description": "A shader built for this replay target and substituted for the capture's own. The document has three shapes: `--encodings` reports only what the target builds, `--dump` adds the disassembly it wrote, and `--from` adds the compile result -- plus, with `--compare`, the before/after images and their difference.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "stage": {"type": "string", "enum": ["vs", "hs", "ds", "gs", "ps", "cs", "as", "ms"]},
+    "shader": {"type": "string", "description": "e.g. res1234: the capture's own shader"},
+    "reflection": {"type": "string", "description": "whether the engine has a reflection for it"},
+    "encodings": {"type": "string", "description": "what this replay target builds"},
+    "entry": {"type": "string", "description": "the entry point the source was compiled with"},
+    "encoding": {"type": "string", "enum": ["hlsl", "dxbc", "dxil", "glsl", "spirv", "spirv-asm"]},
+    "flags": {"type": "integer", "description": "how many --flag name=value pairs were passed"},
+    "built": {"type": "string", "description": "the new shader's id, e.g. res9001"},
+    "compiled": {"type": "boolean"},
+    "compiler": {"type": "string", "description": "the compiler's own message, when it had one"},
+    "replaced": {"type": "boolean", "description": "the replacement was installed"},
+    "dumped": {"type": "string", "description": "the disassembly file written, empty if none was"},
+    "before": {"type": "string"},
+    "after": {"type": "string"},
+    "diff": {"type": "string", "description": "the difference map written"},
+    "wroteImages": {"type": "boolean"},
+    "pixels": {"type": "integer"},
+    "differing": {"type": "integer"},
+    "percentDiffering": {"type": "string", "description": "a percentage with three decimals, as text"},
+    "maxDelta": {"type": "integer"},
+    "hashBefore": {"type": "string", "description": "16 hex digits: a 64-bit difference hash"},
+    "hashAfter": {"type": "string"},
+    "hashDistance": {"type": "integer", "description": "bits that differ, 0-64"}
+  },
+  "additionalProperties": false
+})sc"},
 };
 
 const int kSchemaCount = (int)(sizeof(kSchemas) / sizeof(kSchemas[0]));

@@ -230,10 +230,10 @@ not exist yet, everything else runs today.
   `debug`, `usage`, `probe`, `batch`, `--repl`/`--stdin`, the bundle pair `dump` + `bundle-verify`, and the
   contract pair `schema` + `selftest` (REFERENCE §9). `find` and an event id argument both take a **marker
   path** as well as a number, so a command can be pointed at a pass rather than an id.
-* **Roadmap** — `watch`, `debug --group`, `schema`, `sweep` (ROADMAP §1), pixel history, shader patching,
-  shader debugging, overlays (ROADMAP §2), contact sheets, per-pass counters, `mesh --stage/--obj`, texture
-  subresources (ROADMAP §3), `deps`, memory/aliasing report, `--format`, structural `diff` (ROADMAP §4),
-  `replaydiff` (ROADMAP §5), the capture corpus and the golden/fixture tests (ROADMAP §6).
+* **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), pixel history, shader debugging, overlays
+  (ROADMAP §2), per-pass counters, `mesh --stage/--obj`, texture subresources (ROADMAP §3), `deps`,
+  memory/aliasing report, `--format`, structural `diff` (ROADMAP §4), `replaydiff` (ROADMAP §5), the capture
+  corpus and the golden/fixture tests (ROADMAP §6).
 
 ### The rule, and why it is the rule
 
@@ -263,7 +263,7 @@ offline tool, and it survives the process that produced it; stdout does not, and
 | named constant values | `cb <eid> <stage> <slot>`, or the bundle's `cbuffers/` (REFERENCE §9) | what the shader actually read: the numbers behind "the light is too bright" |
 | buffer contents | `buffer <resId> [offset] [len] [--as u32\|f32\|hex\|ascii]` (REFERENCE §9) | what is really in a buffer that reflection cannot describe (index data, structured buffers) |
 | textures | `textures --save <dir>` today; subresources and raw/HDR options *(ROADMAP §3)* | decoded pixels to look at, plus the format/dimension facts for the audit |
-| render targets | `image <eid> <out.bmp>` today; bundle `rt/` (REFERENCE §9) and contact sheets *(ROADMAP §3)* | what the pass produced — the fastest way to see "this pass drew nothing" |
+| render targets | `image <eid> <out.bmp>`, or `sheet <rdc> <dir>` for every pass at once; bundle `rt/` (REFERENCE §9) | what the pass produced — the fastest way to see "this pass drew nothing" |
 | geometry | `mesh <eid>` today; other stages and `--obj` *(ROADMAP §3)* | what the VS/GS emitted, which is where vertex bugs show themselves |
 | GPU counters | `counters` today; per-pass fold *(ROADMAP §3)* | where the time went, where the driver supports it |
 | debug messages | `debug` | the API's own complaints — the highest-value red flags there are |

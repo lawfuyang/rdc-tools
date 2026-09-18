@@ -256,6 +256,16 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `bytes`/`bytearray`, and `BufferLike` is the wider shape the `u16/u32/u64` primitives accept. A mapped file
   is locked against writing on Windows, so a test that rewrites a capture releases the map first, and the
   stream cache's format is versioned (v2 pads the header so the stream starts on an `mmap` boundary).
+- **The JSON writer has no fractional field, on purpose.** A `double` overload of `Field` was tried and made
+  every existing `Field(key, 0)` ambiguous -- an `int` converts to both `long long` and `double`, so it is a
+  compile error in twenty call sites rather than a wrong number in one. A fractional value is written with
+  `Fmt("%.3f", ...)` and typed as a string in its schema. A bare `const char *` is the other half of the same
+  trap: it converts to both `string_view` and `rdcstr`, so wrap it in `std::string(...)` (which is why the rest
+  of the driver does).
+- **Synthesised pictures live in `image.cpp`** -- BMP in and out, thumbnails, a montage, a difference and a
+  difference hash -- and are tested device-free in `selftest.cpp`, because a contact sheet is a picture nobody
+  can check by reading the code. `WriteBMP` is the writer the bundle's `rt/` images go through, so its bytes are
+  a contract there too: the bundle gate covers it, and a reader must round-trip what it writes.
 - **The same rule on the offline side**: `$RDC_PROFILE=1` prints a phase table and `$RDC_PROGRESS=1` the live
   progress lines, both to **stderr** (stdout is the contract, and a command's stderr stays empty otherwise).
   The phase names are the `rdc_profile.timed(...)` decorators on the layers — one name per call site, so a

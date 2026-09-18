@@ -70,6 +70,21 @@ void Usage()
       "  textures <rdc> [filter] [--save <dir>]   texture list; --save decodes to PNG\n"
       "  mesh    <rdc> <eid> [instance] [max]     post-VS vertices for one instance\n"
       "  image   <rdc> <eid> <out.bmp>     the texture display at that event, as a BMP\n"
+      "  sheet   <rdc> [outDir=sheet] [--every N] [--max N] [--tile N] [--list]   one image per "
+      "pass,\n"
+      "                                    a montage of them and an index; --list writes nothing\n"
+      "  imgdiff <rdc> <a.bmp> <b.bmp> [--out <heat.bmp>]   how two images differ: how many "
+      "pixels,\n"
+      "                                    how far, and a perceptual hash of each\n"
+      "  patch   <rdc> <eid> <stage> [--from <file>] [--enc hlsl|dxbc|dxil|glsl|spirv] [--entry "
+      "<name>]\n"
+      "          [outDir=patch] [--flag name=value] [--dump <file>] [--compare] [--encodings]\n"
+      "                                    build a shader for this replay target, substitute it "
+      "for\n"
+      "                                    the capture's own and see what the frame does "
+      "(--compare\n"
+      "                                    renders before and after and writes both plus a diff "
+      "map)\n"
       "  counters <rdc>                    available GPU counters and their values\n"
       "  debug   <rdc>                     debug messages (validation layer, etc.)\n"
       "  usage   <rdc> <resId>             every event that touches a resource\n"
@@ -94,6 +109,18 @@ void Usage()
       "reads at it, like `buffer`). A marker path survives a re-capture where an id does not.\n"
       "Where the path resolved to is written to the log, so an answer taken from a path can be\n"
       "checked: `find <substring>` lists the paths and their ids.\n"
+      "\n"
+      "`sheet` and `patch` are the frame's pictures. `sheet` renders the last event of every pass "
+      "and\n"
+      "lays the images out in a montage with an index that names them. `patch` builds a shader for "
+      "this\n"
+      "target out of a file you edited, substitutes it for the capture's own, replays the frame, "
+      "and\n"
+      "with `--compare` writes the before and after images plus their difference. What can be "
+      "built is\n"
+      "the target's business -- `patch --encodings` prints the list -- and the disassembly `patch "
+      "--dump`\n"
+      "writes is readable but is not one of them.\n"
       "\n"
       "`--repl` and `--stdin` keep the capture open and read commands from the terminal (or a "
       "pipe),\n"
@@ -263,6 +290,30 @@ unsigned long long ParseSize(const std::string &text)
   return strtoull(text.c_str(), NULL, 0);
 }
 
+//: The value of `--name` in an argument list, or `fallback` when it is absent, and whether it is
+//: there at all. Options are read here rather than inside each command because the dispatcher is
+//: what makes them mean the same thing in `main`, in a batch file and in a session -- and because a
+//: command that parses its own options cannot be told apart from one that silently ignored a typo.
+const char *OptValue(const std::vector<std::string> &args, const char *name, const char *fallback)
+{
+  for(size_t i = 0; i + 1 < args.size(); i++)
+  {
+    if(args[i] == name)
+      return args[i + 1].c_str();
+  }
+  return fallback;
+}
+
+bool HasOpt(const std::vector<std::string> &args, const char *name)
+{
+  for(size_t i = 0; i < args.size(); i++)
+  {
+    if(args[i] == name)
+      return true;
+  }
+  return false;
+}
+
 //: Runs one command against an already-open capture. Shared by `main`, `batch` and `--repl`, so a
 //: command name, its arguments and its options mean the same thing however they were spelled.
 int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
@@ -284,7 +335,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   // dispatch -- is what keeps every command below unaware of both: `state BasePass` reads args[1] and
   // finds a number in it. A path that matches nothing is an error rather than a silent event 0.
   const bool bTakesEid = !strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "cb") ||
-                         !strcmp(cmd, "mesh") || !strcmp(cmd, "image") || !strcmp(cmd, "statediff");
+                         !strcmp(cmd, "mesh") || !strcmp(cmd, "image") ||
+                         !strcmp(cmd, "statediff") || !strcmp(cmd, "patch");
   if(!atMarkerText.empty())
   {
     std::string matched;
@@ -348,6 +400,15 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     return CmdBuffer(ctrl, file, path, args[1].c_str(), args.size() > 2 ? ParseSize(args[2]) : 0,
                      args.size() > 3 ? ParseSize(args[3]) : 0,
                      asMode.empty() ? NULL : asMode.c_str());
+  if(!strcmp(cmd, "sheet"))
+    return CmdSheet(ctrl, file, path, args.size() > 1 ? args[1].c_str() : NULL,
+                    ToInt(OptValue(args, "--every", "1"), 1),
+                    ToInt(OptValue(args, "--max", "24"), 24),
+                    ToInt(OptValue(args, "--tile", "320"), 320), HasOpt(args, "--list"));
+  if(!strcmp(cmd, "imgdiff") && args.size() > 2)
+    return CmdImgDiff(file, path, args[1].c_str(), args[2].c_str(), OptValue(args, "--out", NULL));
+  if(!strcmp(cmd, "patch"))
+    return CmdPatch(ctrl, file, path, args);
   if(!strcmp(cmd, "shaders") && args.size() > 1)
     return CmdShaders(ctrl, file, path, ToInt(args[1], 0), bWantDisasm);
   if(!strcmp(cmd, "cb") && args.size() > 3)

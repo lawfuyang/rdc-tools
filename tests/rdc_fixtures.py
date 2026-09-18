@@ -140,6 +140,29 @@ def lz4_literal_block(data: bytes) -> bytes:
     return head + data
 
 
+def lz4_match_block(literals: bytes, offset: int, match_len: int, tail: bytes) -> bytes:
+    """One raw LZ4 block: a literal run, a match, and the literal run a block must end with.
+
+    The shape is dictated by what an LZ4 *decoder* accepts, measured against the vendored one: the
+    stored match nibble cannot be 0 (`match_len` at least 5) and a block must end with at least 5
+    literals (`LASTLITERALS`). A block that gets either wrong is refused rather than decoded
+    differently, which is why hand-writing one is a trap worth this function. Both runs are capped at
+    14 bytes so no length extension is needed, and `offset` may reach back into the *previous* block --
+    which is the case worth building: the pages of a section are one continuous stream.
+    """
+    if not 5 <= match_len <= 18:
+        raise ValueError('match_len must be 5..18 (a stored nibble of 0 is refused, 15 means extend)')
+    if len(literals) > 14 or not 5 <= len(tail) <= 14:
+        raise ValueError('literals and tail must be 0..14 and 5..14 bytes (no length extensions here)')
+    if not 1 <= offset <= 0xFFFF:
+        raise ValueError('offset must be 1..65535')
+    out = bytearray([(len(literals) << 4) | (match_len - 4)])
+    out += literals
+    out += bytes([offset & 0xFF, offset >> 8])
+    out.append(len(tail) << 4)
+    out += tail
+    return bytes(out)
+
 def lz4_container(data: bytes, block_count: int = 1) -> bytes:
     """A `flags & 0x2` section body: [u32 compressedBlockLength][raw LZ4 block] repeated."""
     if not data:

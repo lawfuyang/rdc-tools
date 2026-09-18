@@ -339,16 +339,20 @@ def parse_rdef(data: Buffer) -> List[ShaderBind]:
     return binds
 
 @rdc_profile.timed('shader bind names')
-def shader_bind_names(stream: Buffer) -> Dict[str, Dict[Tuple[str, int, int], str]]:
+def shader_bind_names(stream: Buffer,
+                      source: Optional[CacheEntry] = None) -> Dict[str, Dict[Tuple[str, int, int], str]]:
     """`stage -> (kind, register, space) -> name` for every `RDEF` the capture still has.
 
     This is the only source of root-parameter *names* in a capture: the root signature
     itself has none, so a name can only come from what a shader says about its bindings. Keyed by
     stage because the same slot may be named differently in different stages, and the lookup in
     `_root_param_label` refuses to pick one when they disagree.
+
+    `source` is the stream-cache entry, passed down to the container search so its whole-stream `find`
+    can be split across processes (`rdc_scan.find_all`); without it the search is the serial loop.
     """
     out: Dict[str, Dict[Tuple[str, int, int], str]] = {}
-    for _off, _size, _hash, parts in parse_dxil_containers(stream):
+    for _off, _size, _hash, parts in parse_dxil_containers(stream, source):
         part = next((p for p in parts if p[0] == 'RDEF'), None)
         if part is None:
             continue

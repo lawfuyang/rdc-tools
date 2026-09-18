@@ -18,7 +18,7 @@ import io
 import os
 import sys
 import unittest
-from typing import Dict, Tuple
+from typing import Dict, List, Sequence, Tuple
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -153,6 +153,89 @@ class TestScanRuns(TempDirCase):
                                side_effect=AssertionError('mapped a stream too short to check')):
             counts, firsts = R.scan_runs(stream, 6, self.source_for(stream, 'short.bin'))
         self.assertEqual((counts, firsts), serial_runs(stream, 6))
+
+# =========================================================================== the byte-pattern find
+class TestFindAll(TempDirCase):
+    """`find_all`: the sliced `find` the DXBC container search goes through.
+
+    Its cut rule is not `split_ranges`' -- a byte pattern may start anywhere, so the slices are even
+    cuts with a `len(needle) - 1` byte overlap -- and the whole answer depends on that overlap: a
+    needle starting inside the overlap belongs to the *next* slice, and one that starts in a slice
+    must not be reported by it twice. Both are planted below, right at the cuts.
+    """
+
+    def source_for(self, stream: bytes, name: str = 'find.bin') -> R.CacheEntry:
+        """A cache-file stand-in: a header the find never reads, then exactly `stream`."""
+        path = os.path.join(self.tmp, name)
+        with open(path, 'wb') as fh:
+            fh.write(b'RDCCACHE' + b'\x00' * 8)
+            fh.write(stream)
+        return {'file': path, 'hdrLen': 16, 'streamLen': len(stream), 'section': 0, 'method': 1,
+                'blocks': 1, 'srcPath': 'test', 'srcSize': len(stream), 'srcMtime': 1}
+
+    def planted(self, needles: Sequence[int], size: int = 4000) -> Tuple[bytes, List[int]]:
+        """`size` bytes of filler with `DXBC` planted at offsets that sit on the 4-slice cuts."""
+        data = bytearray(b'A' * size)
+        for at in needles:
+            data[at:at + 4] = b'DXBC'
+        stream = bytes(data)
+        expected = [i for i in range(0, len(stream) - 3) if stream[i:i + 4] == b'DXBC']
+        return stream, expected
+
+    def test_the_pool_finds_exactly_what_a_find_loop_finds(self):
+        stream = sample_stream()
+        needle = b'\x00\xff'
+        expected = [i for i in range(0, len(stream) - 1) if stream[i:i + 2] == needle]
+        self.assertGreater(len(expected), 10)
+        self.assertEqual(R.find_all(stream, needle), expected)
+        self.assertEqual(R.find_all(stream, needle, self.source_for(stream), procs=4), expected)
+
+    def test_a_needle_across_a_cut_is_found_once(self):
+        # With `procs=4` the cuts of this stream are at 1000, 2000 and 3000, and a needle starts one
+        # or two bytes before each of them -- plus one at each end.
+        stream, expected = self.planted([0, 998, 1998, 2999, 3996])
+        self.assertEqual(len(expected), 5)
+        self.assertEqual(R.find_all(stream, b'DXBC', self.source_for(stream), procs=4), expected)
+
+    def test_a_run_of_needles_right_up_to_a_cut_is_found_once_each(self):
+        # Four needles back to back, the last of them ending one byte past the cut at 2000: a slice
+        # that reported a hit it does not hold, or dropped one it does, shows up here.
+        stream, expected = self.planted([1988, 1992, 1996, 2000, 2004])
+        self.assertEqual(len(expected), 5)
+        self.assertEqual(R.find_all(stream, b'DXBC', self.source_for(stream), procs=4), expected)
+
+    def test_no_source_means_no_pool(self):
+        stream, expected = self.planted([100, 2000])
+        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+                               side_effect=AssertionError('a pool was started without a source')):
+            self.assertEqual(R.find_all(stream, b'DXBC'), expected)
+
+    def test_a_small_stream_does_not_start_a_pool(self):
+        # `procs=None` is "only if the stream is big enough to pay for the start", which a 4 KB
+        # fixture never is: `FIND_MIN_BYTES` is a gigabyte, measured (a pool costs 0.48 s here).
+        stream, expected = self.planted([100, 2000])
+        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+                               side_effect=AssertionError('a pool was started for a small stream')):
+            self.assertEqual(R.find_all(stream, b'DXBC', self.source_for(stream)), expected)
+
+    def test_a_pool_that_cannot_start_still_answers(self):
+        stream, expected = self.planted([0, 1998, 2999, 3996])
+        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+                               side_effect=OSError('no processes here')):
+            self.assertEqual(R.find_all(stream, b'DXBC', self.source_for(stream), procs=4), expected)
+
+    def test_a_file_that_is_not_this_stream_is_ignored(self):
+        stream, expected = self.planted([0, 1998, 3996])
+        source = self.source_for(stream)
+        with open(source['file'], 'wb') as fh:      # same length, different bytes
+            fh.write(b'RDCCACHE' + b'\x00' * 8)
+            fh.write(b'z' * len(stream))
+        self.assertEqual(R.find_all(stream, b'DXBC', source, procs=4), expected)
+
+    def test_an_empty_needle_matches_nothing(self):
+        stream, _expected = self.planted([100])
+        self.assertEqual(R.find_all(stream, b''), [])
+        self.assertEqual(R.find_all(stream, b'', self.source_for(stream), procs=4), [])
 
 # =========================================================================== profiling and progress
 class TestProfile(unittest.TestCase):

@@ -57,12 +57,13 @@ rdc-tools/
     bundle.cpp          the bundle producer and verifier the report reads
     selftest.cpp        the driver checking itself + publishing its schemas
     src/cpp/schema.cpp src/cpp/schema.h the schema table — data; the tool prints, writes and checks it
+    src/cpp/third_party/lz4/  the vendored LZ4 decoder (§1), built into bin/rdc_lz4.dll for the offline tool
   CMakeLists.txt      builds the driver against the installed renderdoc.dll (output in .\bin\)
   .clang-format       RenderDoc's own C++ style, copied (the driver is a RenderDoc client)
   tools/              deploy_dlls.cmake — copies the engine's DLLs next to the exe
   schema/             the driver's schemas, checked in (`schema --check` fails when they drift, §4.12)
   engine-schemas/     a known engine's names and what each one means (REFERENCE §4.11; `$RDC_ENGINE_SCHEMAS`)
-  bin/                the built driver and the DLLs it loads (gitignored)
+  bin/                the built driver, the DLLs it loads, and rdc_lz4.dll (§1) (gitignored)
   build/              the CMake build tree (gitignored)
   README.md           this file — setup, quick start, and the playbook for an AI agent
   REFERENCE.md        the detail behind it: internals (3), commands (4), examples (5), payload facts (6),
@@ -81,7 +82,8 @@ rdc-tools/
 | Requirement | Notes |
 |---|---|
 | Python 3.8+ | tested with `C:\Program Files\Python311\python.exe` |
-| `zstandard` (optional) | only for Zstd-compressed sections. Not needed for the captures used so far (they are LZ4, which is implemented in-file). `pip install zstandard` if `sections` reports `zstd`. |
+| `zstandard` (optional) | only for Zstd-compressed sections. Not needed for the captures used so far (they are LZ4, which the next row covers). `pip install zstandard` if `sections` reports `zstd`. |
+| **`bin/rdc_lz4.dll`** | **the decoder, and the build writes it** (`cmake --build build`, from `src/cpp/third_party/lz4`) — so a tree that has not built it cannot read a capture's stream, and says so, naming the command. Nothing to install and no `pip` package involved; `$RDC_LZ4_DLL` points at a system `liblz4` (`lz4.dll` / `liblz4.so.1` / `liblz4.dylib`) instead if one is there. Decodes the hobby capture's 1.47 GB stream in **0.54 s** (REFERENCE §3.2). |
 | **RenderDoc source tree** | **Fetched for you** — the tool reads the *real implementation of RenderDoc* (the chunk-name enums) from a `renderdoc-src` folder in the root folder, and downloads the latest tagged source into it the first time a command needs a name (see §1.1). Nothing to clone. On a machine with no network the tool still runs, printing numeric chunk IDs (`1040`) instead of names (`List_DrawIndexedInstanced`); `bootstrap` fetches it up front, and `$RDC_NO_BOOTSTRAP` turns the fetch off. |
 | A `.rdc` capture | any D3D12 capture; Vulkan captures parse at container level but the chunk decoders are D3D12-specific |
 

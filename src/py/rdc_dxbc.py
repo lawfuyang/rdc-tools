@@ -5,21 +5,26 @@ from __future__ import annotations
 from rdc_types import *  # noqa: F401,F403
 from rdc_stream import *  # noqa: F401,F403
 from rdc_cache import *  # noqa: F401,F403
+from rdc_scan import *  # noqa: F401,F403  (the sliced byte find, which sits below this module)
+import rdc_cache        # called qualified: `stream_source` is the cache's own answer
+import rdc_scan         # called qualified: a test's `mock.patch.object` has to reach it
 
-from typing import Dict, Iterator, List, Sequence, TypedDict
+from typing import Dict, Iterator, List, Optional, Sequence, TypedDict
 
-def parse_dxil_containers(stream: Buffer) -> Iterator[DxbcContainer]:
+def parse_dxil_containers(stream: Buffer,
+                          source: Optional[CacheEntry] = None) -> Iterator[DxbcContainer]:
     """Yield `(offset, size, hash_hex, parts)` for every DXBC/DXIL container in `stream`.
 
     Container header: 'DXBC' magic(4) | hash(16) | version(4) | size(4) | partCount(4) |
     partOffsets[partCount](4) ; each part at +offset: fourcc(4) | size(4) | data.
+
+    Finding the containers is a `find` over the whole stream, which is 1.25 s of the 1.47 GB hobby
+    capture's `draws` and `dxbc` -- so with a `source` (the stream-cache entry, see `load_stream`) the
+    search goes through `rdc_scan.find_all`, which splits it across processes for a stream big enough to
+    pay for them. Without one it is the same serial loop as before, and the containers are identical
+    either way: the offsets come back in the order this would have found them.
     """
-    pos = 0
-    while True:
-        i = stream.find(b'DXBC', pos)
-        if i < 0:
-            return
-        pos = i + 4
+    for i in rdc_scan.find_all(stream, b'DXBC', source):
         if i + 32 > len(stream):
             continue
         part_count = u32(stream, i + 28)
@@ -65,10 +70,10 @@ def cmd_dxbc(path: str) -> None:
     GI-ish strings and `TEXCOORD6..12`; that harvest was a worse answer to a question replay answers
     exactly, so it was removed rather than kept.
     """
-    _info, stream, how = load_stream(path)
+    info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
     rows: List[DxbcRow] = []
-    for off, size, h, parts in parse_dxil_containers(stream):
+    for off, size, h, parts in parse_dxil_containers(stream, rdc_cache.stream_source(path, info)):
         names = [p[0] for p in parts]
         osg = next((p for p in parts if p[0] == 'OSG1'), None)
         osg_s = part_strings(stream, osg[1], osg[2], 3) if osg else []

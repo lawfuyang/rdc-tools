@@ -97,6 +97,28 @@ add_custom_command(TARGET replay_dump POST_BUILD
           -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/deploy_dlls.cmake"
   COMMENT "deploying the engine's DLLs next to the exe" VERBATIM)
 
+# --- the LZ4 decoder the offline tool loads with ctypes ------------------------------------------------
+# A capture's frame-capture section is one LZ4 stream of 1 MB pages, and this is what the offline tool decodes
+# it with: `rdc_stream.decompress_lz4` looks for a library exporting `LZ4_decompress_safe_usingDict` —
+# `bin/rdc_lz4.dll` first, then whatever the system has (`$RDC_LZ4_DLL` names one) — and raises if there is
+# none, because the tool has no decoder of its own and a stream decoded by anything laxer is one every command
+# downstream would read as fact. Measured: 0.22 s for the hobby capture's 1.47 GB, 0.5 s end to end with the
+# container's own body copy (REFERENCE §3.2).
+#
+# The source is the decoder the replay engine itself vendors (`renderdoc-src/renderdoc/3rdparty/lz4`, LZ4
+# v1.9.2, BSD-2-Clause, LICENSE beside it), copied into `src/cpp/third_party` so that building this does not
+# depend on a fetched tree. `/W3` and no `/WX`: it is not this project's code to hold to its own warning
+# rules. `LZ4_DLL_EXPORT` is what makes `LZ4LIB_API` `__declspec(dllexport)` — without it the DLL exports
+# nothing at all and the tool finds no function in it.
+enable_language(C)
+add_library(rdc_lz4 SHARED "${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/third_party/lz4/lz4.c")
+target_include_directories(rdc_lz4 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/third_party/lz4")
+target_compile_definitions(rdc_lz4 PRIVATE LZ4_DLL_EXPORT=1)
+set_target_properties(rdc_lz4 PROPERTIES PREFIX "")
+if(MSVC)
+  target_compile_options(rdc_lz4 PRIVATE /W3 /utf-8)
+endif()
+
 # --- formatting ----------------------------------------------------------------------------------------
 # The style is RenderDoc's own (.clang-format, copied from the tree): the driver is a RenderDoc client, and a
 # reader should not have to switch conventions between the two. `clang-format` rewrites, `clang-format-check`

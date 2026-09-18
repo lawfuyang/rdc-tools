@@ -29,14 +29,33 @@ walks this into `info['sections']`, stopping at the first byte that is not 0 (th
 
 * **Zstd** — auto-detected by the `28 b5 2f fd` magic (at offset 0 or 4); needs the `zstandard` module.
 * **LZ4** (`flags & 0x2`) — a sequence of `u32 compressedBlockLength` prefixes, each followed by one **raw LZ4
-  block** (no frame header). `lz4_block()` is a ~40-line decoder written in-file so the tool has no
-  dependency; `decompress_lz4()` loops until `uncompLen` bytes are produced.
+  block** (no frame header), decoded by `decompress_lz4()` through the vendored library
+  (`LZ4_decompress_safe_usingDict`, called with `ctypes`): one destination of exactly `uncompLen` bytes, one
+  call per page, and the 64 KB before the write position as the dictionary. Measured on this repo's captures:
+  **0.54 s** for the hobby capture's 1.47 GB and **0.14 s** for the PC capture's 631 MB — the decode itself is
+  0.219 s / 0.078 s (6.4 and 7.7 GB/s) and the rest is the container's own body copy and the zeroed
+  destination.
+
+  The library is `bin/rdc_lz4.dll`, written by `cmake --build build` from the vendored decoder in
+  `src/cpp/third_party/lz4` (its own target, §9); `$RDC_LZ4_DLL` names another explicitly, and a system
+  `lz4.dll` / `liblz4.so.1` / `liblz4.dylib` is accepted, so a Linux box with `liblz4` needs no build of ours.
+  **There is no second decoder** (deliberately): with none of those present `decompress_lz4` raises
+  `FrameError` naming the command that fixes it, because a stream decoded by something laxer than this library
+  is a stream every command downstream would go on to read as fact. A page the library refuses, and a body
+  that does not come out at exactly `uncompLen` bytes, raise for that same reason. A cache hit (§4.8) pays
+  nothing at all, which is what most commands are.
+
+  The speed comes from the shape rather than the library: the dictionary is the destination's own tail, which
+  is the contiguous case LZ4 has a fast path for, so nothing is allocated or copied per page. A decoder API
+  that hands back a fresh `bytes` object per page (the `lz4` PyPI package, which measured 562 MB/s for exactly
+  that reason) is what this replaced, and no `pip` package is involved.
 
   The blocks are **pages of one continuous LZ4 stream, not independent frames**: RenderDoc compresses with
   `LZ4_compress_fast_continue` and decompresses with `LZ4_decompress_safe_continue` over a shared stream
-  context (`serialise/lz4io.cpp`), so a match may point up to 64 KB back into the previous page.
-  `decompress_lz4()` therefore carries a single output buffer across the blocks, and the blocks **cannot** be
-  decoded in parallel — see §8 and `decompress_lz4`'s docstring for the measured evidence.
+  context (`serialise/lz4io.cpp`), so a match may point up to 64 KB back into the previous page. That is why
+  one destination is carried across the blocks and why the blocks **cannot** be decoded in parallel: a pooled
+  attempt produced 625,911,281 bytes for `PC Renderer.rdc` where the section declares 630,790,592. See §8 and
+  `decompress_lz4`'s docstring for the measured evidence.
 * **raw** — copied as-is.
 
 Only **section 0** (the frame capture) is decompressed; other sections are listed by `sections` but not parsed.
@@ -131,7 +150,7 @@ parts (`fourcc, offset, length`). Part meanings:
 | `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 | `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the numeric-id fallback. Needs no capture file |
-| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare** — no binary or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison itself and says so in its log (§9) |
+| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare** — no binary or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison itself and says so in its log (§9). The same command also writes `bin/rdc_lz4.dll` (§3.2); `--check` speaks for the exe only, because a stale library decodes the same bytes at a different speed, where a stale exe answers from code it was not built with |
 
 ### 4.2 Stream text mining
 
@@ -560,9 +579,10 @@ seconds with the rate and what is left.
 
 The slots are `container parse`, `stream: cache read`, `stream: decompress`, `stream: cache write`,
 `resource table`, `descriptor heaps`, `root signatures`, `chunk payload decode`, `verify: walk`,
-`report: bundle read`, `report: detectors`, `string scan (serial)` and `string scan (parallel)`; each is the
-`rdc_profile.timed(...)` decorator on the layer that does the work, so a command that calls a layer twice
-adds two calls to one slot rather than inventing a slot per command.
+`shader bind names`, `report: bundle read`, `report: detectors`, `string scan (serial)`, `string scan
+(parallel)` and `byte find (parallel)`; each is the `rdc_profile.timed(...)` decorator on the layer that does
+the work, so a command that calls a layer twice adds two calls to one slot rather than inventing a slot per
+command.
 
 **Read the numbers as ratios.** The same serial scan of the same stream measured 14.5 s and 25.2 s an hour
 apart on this machine (64 cores, other processes running); what stayed stable is the parallel path being
@@ -597,14 +617,28 @@ the only lever, and `rdc_scan` pulls it:
   serial 31.1 s, 8 slices 7.3 s, 16 slices 5.3 s, 32 slices 4.0 s at `minlen=6`; 26.6 / 4.9 / 2.7 / 2.1 s at
   `minlen=10`.
 
+**A byte pattern is the same shape with different arithmetic** (`rdc_scan.find_all`). The DXBC container
+search that `draws`, `rootsig`, `dxbc` and `dump-shaders` each pay for is a `find` over the whole stream, not
+a string run, so `split_ranges`' cut rule does not apply -- a byte pattern may start anywhere -- and the
+slices are even cuts with a `len(needle) - 1` byte overlap, each hit reported by the slice that holds its
+*first* byte. Both bounds are load-bearing and both are off by `len(needle) - 1`: the search starts early so
+a needle straddling a cut is findable, and it runs *past* the slice end because `find` only reports a match
+that fits inside its bounds -- a needle in the last three bytes of a slice ends outside it, and that slice is
+the one that owns it. Measured in one session on the 1.47 GB capture, with byte-identical output: `draws`
+1.32 s -> 0.88 s, `dxbc` 1.12 s -> 0.70 s, `rootsig` 1.14 s -> 0.74 s. `FIND_MIN_BYTES` is a **gigabyte**,
+sixteen times `MIN_BYTES`, because this scan is 1 s where the string scan is 14: the pool costs 0.48 s to
+start here, so on the 631 MB PC capture the same change measured 0.53 s -> 0.62 s, i.e. *slower* -- and there
+the serial loop runs, which is why `find_all` carries its own threshold instead of borrowing `MIN_BYTES`.
+
 **A worker is a fresh interpreter**, so whatever starts a pool must be importable without side effects:
 `rdc_analysis.py` guards its `main()` and is fine; a script or test module that decompresses at module level
 does it again once per worker (that is what one "stuck" measurement turned out to be). The suite never reaches
 for a pool by accident -- its fixtures are far under `MIN_BYTES`, and the tests that exercise the pool pass
 `procs=` explicitly.
 
-**Caching is the other half, and it is already there.** A cold command pays 12-35 s of pure-Python LZ4 for
-the 1.47 GB stream; a warm one pays 0.4-0.9 s to read it from disk (§4.8). Nothing *derived* is cached: a
+**Caching is the other half, and it is already there.** A cold command pays the 1.47 GB stream's decode —
+**0.5 s** through the library the build writes (§3.2) — and a warm one pays 0.4-0.9 s to read it from disk
+(§4.8). Nothing *derived* is cached: a
 string index would be tens of MB per capture to save a scan that is now seconds. The one derived thing worth
 computing differently was per-chunk: `chunk_strings` stops as soon as it holds `limit` strings and skips the
 UTF-16 pass entirely when the ASCII half already filled the cap -- the answer the old order produced (ASCII
@@ -620,13 +654,29 @@ identical output, and none of the saving was in the decode.
 | `unittest` (+ `http.client`) imported by every command | ~120 ms + ~90 ms | 0 -- both are imported where they are used (`selftest`, an actual download) |
 | `sections`, `summary`, `markers`, `resources`, `descriptors`, `verify` | 1.1-1.8 s | 0.55-0.68 s |
 
-`shader_bind_names` is deliberately **not** optimised, and is at least visible now: it scans the stream for
-`DXBC` containers so a root parameter can be given the name its reflection offers, which costs 1.2-1.7 s on the
-hobby capture and returns **no names at all** (that capture's DXIL has reflection stripped). The scan is one
-`find` pass at the primitive's own rate -- 1.2 GB/s over the map, which is *not* slower than over `bytes` -- the
-containers are really there (85 of them), and a shader can sit inside any payload, so gating the scan on a chunk
-name would be a guess rather than a check. It has a `$RDC_PROFILE` slot now; the reason `draws` looked
-mysterious for an hour is that its largest cost had no name in the table.
+`shader_bind_names` scans the stream for `DXBC` containers so a root parameter can be given the name its
+reflection offers: 1.2-1.7 s on the hobby capture, and **no names at all** on it (that capture's DXIL has
+reflection stripped). Gating that scan on a chunk *name* would be a guess rather than a check -- a shader can
+sit inside any payload, and the containers really are there (85 of them) -- so what it gets is the same sliced
+`find` as everything else (`find_all`, above): the same one full pass, split across processes when the stream
+is big enough. It has a `$RDC_PROFILE` slot (`shader bind names`) either way, because the reason `draws`
+looked mysterious for an hour is that its largest cost had no name in the table.
+
+**A third look** (2026-09-18, later the same day) measured what is *left*, and the largest numbers are not in
+the scan at all:
+
+| what | measured | why it stays |
+|---|---|---|
+| interpreter + `site`, before any work | 0.37 s of **every** command, and of every pool worker | `python -c pass` costs 0.37 s here, 0.14 s of it a `sitecustomize` an IDE installs; nothing inside the tool can change that |
+| the stream's pages, in a fresh process | 0.78 s warm, 1.54 s once the file cache has dropped them | a full-stream scan faults them itself. `madvise(MADV_WILLNEED)` does not exist on Windows (checked: `mmap` has no `madvise`) and `PrefetchVirtualMemory` needs a *writable* buffer, which a read-only map cannot give `ctypes`; reading the stream into memory instead was already measured 0.30 s slower plus 1.5 GB (§4.14) |
+| starting a pool | 0.39 s for 8 workers, 0.44 s for 16, 0.48 s for 32 | every worker is a fresh interpreter again -- which is why `MIN_BYTES` and `FIND_MIN_BYTES` are thresholds rather than "always use 32" |
+| a derived container/name index | would remove this scan outright (~0.4 s) | declined again: a second on-disk artefact with its own invalidation, for less than the stream cache already saves |
+| `count <rdc> <pattern>...` | 0.9 s per pattern, one full stream pass each | the same `find_all` applies and is not wired to it yet |
+| re-running the string scan's own merge | the parent merges 586,944 keys in 0.257 s of a 1.74 s scan | not worth moving into the workers (added complexity for 15%) |
+
+For the driver half of the same question, see §9: `dump` is one `SetFrameEvent` per event plus a sweep, and
+the sweep cache is what makes a re-run affordable (measured: a full `PC Renderer.rdc` dump 128 s cold, 60 s
+with the sweep answered from the cache).
 
 ### 4.14 Reading the file: mapped, not copied
 
@@ -898,6 +948,15 @@ cmake -S . -B build -A x64 && cmake --build build --config Release   # MSVC + th
 .\bin\replay_dump.exe shaders 'capture.rdc' 270 --disasm    # ... with the disassembly
 ```
 
+The same build writes a second thing into `bin/`: `rdc_lz4.dll`, the LZ4 decoder the offline tool loads with
+`ctypes` (§3.2), compiled from the vendored source in `src/cpp/third_party/lz4` (the decoder RenderDoc itself
+vendors, v1.9.2, BSD-2-Clause — its own target, so it never touches this exe and is held to its own warning
+level rather than this project's `/W4 /WX`). It is what the offline tool decodes an LZ4 section with, so a
+tree that has not built it cannot read a capture's stream: `blocks` and `info` never needed it and still
+answer, `sections` prints its table and then says so (it reports the decompressed size, which is a cache miss
+away from a decode), and every command that walks the stream reports the same one-line `error:` and exits 1
+rather than a traceback.
+
 | Command | Gives |
 |---|---|
 | `info <rdc>` | RenderDoc version, driver, API properties (`pixelHistory` among them: the flag `pixelhistory` is gated on), resource/texture/buffer/chunk counts |
@@ -973,6 +1032,13 @@ frame's last event *clamp* to it rather than coming back empty (measured: `probe
 state on a capture whose structured file has 723 chunks). All of it is written into the bundle's own
 `notInThisBundle` list, so a reader does not conclude that the frame had no copies. Deriving the engine's ids
 from the file is the open item in `ROADMAP.md` §3.
+
+**The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
+that change the answer; `$RDC_NO_CACHE` turns it off), because it is the most expensive thing the driver does
+and a re-run asks the same question again. Measured on a full `PC Renderer.rdc` frame (2,132 ids, 2,251
+scanned): **128 s** with the sweep and **60 s** with it answered from the cache -- the sweep is 40 s of that,
+and the per-event pass (~28 ms per `SetFrameEvent`) is the rest, which is the engine's own cost (REFERENCE
+§9's "the engine is a black box behind a call").
 
 **Three things a replay host must do**, and the reason this file has a long comment about them: put
 `REPLAY_PROGRAM_MARKER()` at file scope, call `RENDERDOC_InitialiseReplay()` before opening anything,

@@ -4,6 +4,11 @@ Two commands -- `strings` and `names` -- scan every byte of the frame stream wit
 single `re` call is the whole cost of the command: measured on the 1.47 GB hobby capture, 14.5 s of a
 17.6 s run, at ~100 MB/s. Nothing around it matters (the container is 0.4 s, counting and
 de-duplicating the 588,900 matches 0.3 s), and no cache can help a first look.
+A third kind of scan is not a string run at all: the DXBC container search that `draws`, `rootsig`, `dxbc`
+and `dump-shaders` each pay over the whole stream is a byte-pattern `find` (`find_all` below). The same shape
+of problem with different arithmetic -- `find` runs at ~1.2 GB/s where the `re` pass runs at ~100 MB/s -- so
+its pool has to save less before it pays, and it carries its own threshold (`FIND_MIN_BYTES`, a gigabyte,
+measured) rather than borrowing `MIN_BYTES`.
 
 Threads cannot help either: `re` holds the GIL for the length of the call, so the work is one core's.
 Processes can, and this module is that: the stream is cut into slices at boundaries no match can cross,
@@ -43,6 +48,14 @@ CUT_SEARCH = 4 << 20
 #: The serial path scans in windows this big, so a long scan can report progress at all -- one
 #: `finditer` over 1.4 GB cannot say how far it is.
 SERIAL_WINDOW = 128 << 20
+
+#: A byte-pattern find costs a *pool* to parallelise, and a pool costs 0.48 s here (every worker is a
+#: fresh interpreter, 0.37 s of that its own startup -- see `MIN_BYTES`), so it only pays where the find
+#: is long enough. Measured on the two captures in this repository: the 1.47 GB hobby stream goes
+#: 1.25 s -> 0.67 s in 16 or 32 slices, while the 631 MB PC stream goes 0.53 s -> 0.62 s, i.e. *slower*.
+#: Hence a gigabyte -- sixteen times the string scan's threshold, because that scan is 14 s where this
+#: one is 1 s -- and the serial loop below it, which is what every caller got before this existed.
+FIND_MIN_BYTES = 1 << 30
 
 #: text -> times seen in the slice, text -> first offset in the slice (offset relative to the stream).
 Counts = Dict[str, int]
@@ -158,6 +171,84 @@ def _merge_firsts(into: Firsts, part: Firsts) -> None:
             into[text] = offset
 
 
+def _find_serial(stream: Buffer, needle: bytes) -> List[int]:
+    """Every offset of `needle`, in one `find` loop -- what `find_all` is measured against."""
+    hits: List[int] = []
+    at = stream.find(needle)
+    while at >= 0:
+        hits.append(at)
+        at = stream.find(needle, at + 1)
+    return hits
+
+
+def _find_worker(job: Tuple[str, int, int, int, bytes]) -> List[int]:
+    """One slice, in a worker process: the offsets of `needle` whose first byte is inside it.
+
+    Two bounds matter, and both are off by `len(needle) - 1` in opposite directions. The search starts
+    that far *before* the slice, so a needle beginning in the previous slice's tail is still findable
+    here (and then dropped, because its first byte is not in this slice). And it runs that far *past*
+    the slice, because `find` only reports a match that fits inside its bounds -- a needle starting in
+    the last three bytes of a slice ends outside it, and this slice is the one that owns it. Without
+    that second bound the needle is owned by nobody: measured by the test that plants one two bytes
+    before each cut, which found 2 of 5 needles until the bound was fixed.
+    """
+    path, base, start, end, needle = job
+    with open(path, 'rb') as fh:
+        with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            hits: List[int] = []
+            limit = min(len(mapped), base + end + len(needle) - 1)
+            at = mapped.find(needle, base + max(0, start - (len(needle) - 1)), limit)
+            while at >= 0:
+                offset = at - base
+                if offset >= end:
+                    break
+                if offset >= start:
+                    hits.append(offset)
+                at = mapped.find(needle, at + 1, limit)
+            return hits
+
+
+def find_all(stream: Buffer, needle: bytes, source: Optional[CacheEntry] = None,
+             procs: Optional[int] = None) -> List[int]:
+    """Every offset of `needle` in `stream`, ascending: a `find` loop's answer, in slices.
+
+    For the scans that are a *byte pattern* rather than a string run -- the DXBC container search that
+    `draws`, `rootsig`, `dxbc` and `dump-shaders` each pay for over the whole stream. `split_ranges` is
+    not used here: its cut rule exists because a string run may cross a boundary, and a byte pattern may
+    start anywhere, so even cuts with a `len(needle) - 1` byte overlap give exactly the same answer with
+    a cheaper split. The parallel path needs the same two things `scan_runs` does -- a stream big enough
+    (`FIND_MIN_BYTES`, measured) and a cache file to map instead of copying the bytes -- and falls back
+    to the serial loop when either is missing, or when the pool itself cannot start.
+
+    No progress bar: where this is parallel at all the whole find is under a second, and the bar's own
+    eight-second threshold would print nothing for it.
+    """
+    if not needle:
+        return []
+    total = len(stream)
+    workers = min(os.cpu_count() or 1, MAX_SLICES) if procs is None else max(1, procs)
+    parallel = (workers > 1 and source is not None
+                and (procs is not None or total >= FIND_MIN_BYTES)
+                and _source_holds_stream(stream, source))
+    if not parallel:
+        return _find_serial(stream, needle)
+
+    assert source is not None    # narrowed by `parallel`
+    cuts = [total * i // workers for i in range(workers + 1)]
+    jobs = [(source['file'], source['hdrLen'], cuts[i], cuts[i + 1], needle) for i in range(workers)]
+    try:
+        with rdc_profile.phase('byte find (parallel)'):
+            with multiprocessing.Pool(len(jobs)) as pool:
+                parts = pool.map(_find_worker, jobs)
+    except Exception:    # noqa: BLE001 - any pool failure just means "do it here instead"
+        return _find_serial(stream, needle)
+
+    hits: List[int] = []
+    for part in parts:
+        hits.extend(part)
+    return hits
+
+
 def scan_runs(stream: Buffer, minlen: int, source: Optional[CacheEntry] = None,
               procs: Optional[int] = None, counts: bool = True) -> Tuple[Counts, Firsts]:
     """Every string run of `minlen` or more: (times seen, first offset) per text, over `stream`.
@@ -208,9 +299,11 @@ def scan_runs(stream: Buffer, minlen: int, source: Optional[CacheEntry] = None,
 
 __all__ = [
     'CUT_SEARCH',
+    'FIND_MIN_BYTES',
     'MAX_SLICES',
     'MIN_BYTES',
     'SERIAL_WINDOW',
+    'find_all',
     'scan_runs',
     'split_ranges',
 ]

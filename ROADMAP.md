@@ -50,7 +50,9 @@ The **D3D12 harness** (§7.5) absorbs nothing: it exists for the one question re
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
-(LZ4 in-file, Zstd optional) and caches it on disk so repeat commands are instant (REFERENCE §4.8), walks the
+(LZ4 through the built `bin/rdc_lz4.dll`, and Zstd optional) and caches it on disk so
+repeat
+commands are instant (REFERENCE §4.8), walks the
 SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the resource table
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (REFERENCE §4.10) and the root signatures (REFERENCE §3.4), inventories the
 DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other

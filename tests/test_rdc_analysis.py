@@ -17,6 +17,7 @@ implemented and says so in a comment.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import io
 import mmap
 import os
@@ -36,6 +37,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
 import rdc_analysis as R            # noqa: E402
 import rdc_cache as cache           # the tests patch the module that *owns* a name: a star import
 import rdc_fixtures as F            # noqa: E402
+import rdc_stream as stream         # noqa: E402  (the LZ4 cases stand in for its `_lz4_c_function`)
 
 from rdc_testcase import *          # noqa: E402,F401,F403
 
@@ -179,140 +181,159 @@ class TestParseContainer(TempDirCase):
             R.parse_container(os.path.join(self.tmp, 'nope.rdc'))
 
 # =========================================================================== LZ4
-class TestLz4Block(unittest.TestCase):
-    def test_literals_only(self):
-        src = bytes([6 << 4]) + b'abcdef'
-        self.assertEqual(R.lz4_block(src, bytearray()), b'abcdef')
+def _real_lz4_c() -> Any:
+    """The library's entry point, or None when no lz4 library is there to load."""
+    return stream._lz4_c_function()
 
-    def test_empty_input(self):
-        self.assertEqual(R.lz4_block(b'', bytearray()), b'')
+def _literal_only(block: bytes) -> bytes:
+    """Decode a literal-only LZ4 block -- all `F.lz4_literal_block` ever writes.
 
-    def test_literal_length_extension(self):
-        lit = b'A' * 528
-        src = b'\xF0\xFF\xFF\x03' + lit      # 15 + 255 + 255 + 3
-        self.assertEqual(R.lz4_block(src, bytearray()), lit)
+    The fakes below are handed nothing else, and what those cases are about is the *addressing* the
+    caller does rather than LZ4 itself, so this deliberately understands one sequence shape.
+    """
+    n = block[0] >> 4
+    i = 1
+    if n == 15:
+        while block[i] == 255:
+            n += 255
+            i += 1
+        n += block[i]
+        i += 1
+    return block[i:i + n]
 
-    def test_match_with_offset_at_least_matchlength(self):
-        # 4 literals then a match of length 4 at offset 4 (offsets are little endian)
-        out = R.lz4_block(b'\x40abcd' + b'\x04\x00', bytearray())
-        self.assertEqual(out, b'abcdabcd')
+class TestLz4WithoutALibrary(unittest.TestCase):
+    """No library is not an empty stream: it is a failure that names the fix.
 
-    def test_overlapping_match_repeats_pattern(self):
-        # offset 2 < matchlength 6 -> the LZ4 "repeat the tail" case
-        out = R.lz4_block(bytes([(2 << 4) | 2]) + b'ab' + b'\x02\x00', bytearray())
-        self.assertEqual(out, b'abababab')
-
-    def test_match_length_extension(self):
-        src = b'\x0F' + b'\x01\x00' + b'\xFF\x05'   # mlen = 15 + 255 + 5 + 4
-        out = R.lz4_block(src, bytearray(b'X'))
-        self.assertEqual(out, b'X' * 280)
-
-    def test_zero_offset_stops_decoding(self):
-        self.assertEqual(R.lz4_block(b'\x00\x00\x00', bytearray(b'abc')), b'abc')
-
-    def test_appends_to_existing_output(self):
-        # offset 3, match length 4: copies "xyz" then wraps around for the last byte
-        out = R.lz4_block(b'\x30xyz' + b'\x03\x00', bytearray(b'abc'))
-        self.assertEqual(out, b'abcxyzxyzx')
-
-    def test_trailing_literals_without_match(self):
-        out = R.lz4_block(b'\x40abcd' + b'\x04\x00' + b'\x30xyz', bytearray())
-        self.assertEqual(out, b'abcdabcdxyz')
-
-    def test_literal_count_past_end_copies_what_is_there(self):
-        # lenient: a literal run longer than the block copies the remainder
-        self.assertEqual(R.lz4_block(b'\x90ab', bytearray()), b'ab')
-
-class TestDecompressLz4(unittest.TestCase):
-    #: sample payload shared by every test in this class.
-    payload: bytes
-
-    def setUp(self) -> None:
-        self.payload = bytes(range(256)) * 2
-
-    def test_single_block_roundtrip(self):
-        blob = F.lz4_container(self.payload)
-        out, blocks = R.decompress_lz4(blob, len(self.payload))
-        self.assertEqual(out, self.payload)
-        self.assertEqual(blocks, 1)
-
-    def test_multi_block_roundtrip_and_block_count(self):
-        blob = F.lz4_container(self.payload, block_count=3)
-        out, blocks = R.decompress_lz4(blob, len(self.payload))
-        self.assertEqual(out, self.payload)
-        self.assertEqual(blocks, 3)
-
-    def test_expect_zero_consumes_every_block(self):
-        blob = F.lz4_container(self.payload, block_count=3)
-        out, blocks = R.decompress_lz4(blob, 0)
-        self.assertEqual(out, self.payload)
-        self.assertEqual(blocks, 3)
-
-    def test_stops_once_expect_is_reached(self):
-        per_block = (len(self.payload) + 2) // 3
-        blob = F.lz4_container(self.payload, block_count=3)
-        out, blocks = R.decompress_lz4(blob, per_block)
-        self.assertEqual(blocks, 1)
-        self.assertEqual(out, self.payload[:per_block])
-
-    def test_zero_block_length_stops(self):
-        self.assertEqual(R.decompress_lz4(F.u32b(0) + b'junkjunk', 100), (b'', 0))
-
-    def test_block_length_past_end_stops(self):
-        self.assertEqual(R.decompress_lz4(F.u32b(999) + b'\x00' * 4, 100), (b'', 0))
-
-    def test_short_blob(self):
-        self.assertEqual(R.decompress_lz4(b'\x01\x02', 100), (b'', 0))
-        self.assertEqual(R.decompress_lz4(b'', 100), (b'', 0))
-
-    def test_empty_payload(self):
-        self.assertEqual(R.decompress_lz4(b'', 0), (b'', 0))
-
-class TestLz4BlocksShareHistory(unittest.TestCase):
-    """The blocks of a section are pages of one continuous LZ4 stream, not independent frames.
-
-    RenderDoc compresses with `LZ4_compress_fast_continue` and decompresses with
-    `LZ4_decompress_safe_continue` over a shared stream context (serialise/lz4io.cpp), so a match in
-    one 1 MB page may point up to 64 KB back into the previous page. `decompress_lz4` therefore
-    carries one output buffer across the blocks -- and a block-parallel decoder is impossible:
-    decoding a block on its own loses the bytes its matches reach for. (A pooled version of this
-    function produced 625,911,281 bytes for the PC capture in this repo where the section declares
-    630,790,592 -- which is why there is no parallel LZ4 path.)
+    `decompress_lz4` decodes every section body there is and has no second decoder to fall back to, so
+    a machine without `bin/rdc_lz4.dll` and without a system lz4 has to be told once, with the command
+    that does something about it.
     """
 
-    #: 32 distinct bytes, compressed as a literal-only block, so the output is recognisable.
-    first_plain = bytes(range(65, 97))
-    first_block = F.lz4_literal_block(first_plain)
-    #: 1 literal ('Z') then a match of 8 bytes at offset 8: the match starts 7 bytes inside the
-    #: previous block, so it can only be decoded with that block's output as history.
-    second_block = b'\x14' + b'Z' + b'\x08\x00'
+    def test_no_library_raises_with_the_fix_in_the_message(self):
+        with mock.patch.object(stream, '_lz4_c_function', return_value=None):
+            with self.assertRaises(R.FrameError) as caught:
+                R.decompress_lz4(b'anything at all', 10)
+        message = str(caught.exception)
+        self.assertIn('cmake --build', message)
+        self.assertIn('RDC_LZ4_DLL', message)
 
-    def blob(self) -> bytes:
-        return (F.u32b(len(self.first_block)) + self.first_block
-                + F.u32b(len(self.second_block)) + self.second_block)
+    def test_a_section_that_declares_nothing_is_empty_and_takes_no_library(self):
+        with mock.patch.object(stream, '_lz4_c_function', return_value=None):
+            self.assertEqual(R.decompress_lz4(b'', 0), (bytearray(), 0))
 
-    def test_a_match_may_reach_into_the_previous_block(self):
-        out, blocks = R.decompress_lz4(self.blob(), 0)
-        self.assertEqual(blocks, 2)
-        self.assertEqual(out[:32], self.first_plain)
-        self.assertEqual(out[32:33], b'Z')
-        # the 8-byte match copies out[25:33]: 7 bytes of the previous block plus this block's literal
-        self.assertEqual(out[33:], self.first_plain[25:] + b'Z')
-        self.assertEqual(len(out), 32 + 1 + 8)
+class TestLz4Pages(unittest.TestCase):
+    """What `decompress_lz4` asks the library for, page by page, seen through a stand-in.
 
-    def test_the_same_block_alone_loses_the_history_bytes(self):
-        # offset 8 with only one byte of output so far: the slice clamps to the one literal, so the
-        # block contributes 2 bytes on its own instead of the 9 it contributes with its history
-        alone = bytes(R.lz4_block(self.second_block, bytearray()))
-        self.assertEqual(alone, b'ZZ')
+    The fake stands in for `LZ4_decompress_safe_usingDict` and decodes through the pointers the real one
+    is given -- the block read with `string_at`, the answer written with `memmove` -- so what these
+    cases check is the arithmetic the caller does. That is the part that would corrupt a stream rather
+    than fail loudly, and it is the same arithmetic the real library runs.
+    """
 
-    def test_expect_is_a_budget_checked_before_each_block(self):
-        # 32 bytes are already there, so the second block is never decoded...
-        out, blocks = R.decompress_lz4(self.blob(), 32)
-        self.assertEqual((out, blocks), (self.first_plain, 1))
-        # ...but a budget of 33 pulls it in whole (41 bytes: the decoder never splits a block)
-        out, blocks = R.decompress_lz4(self.blob(), 33)
-        self.assertEqual((len(out), blocks), (41, 2))
+    #: 3 blocks of 256 bytes: enough to tell the blocks apart, cheap to decode in Python.
+    payload = bytes(range(256)) * 8
+    per = (len(payload) + 2) // 3
+
+    def fake_c(self, calls: List[Any], refuse: int = 0) -> Any:
+        """A stand-in for the library's entry point, decoding honestly through the given pointers."""
+
+        def fn(src: int, dst: int, srcsize: int, cap: int, dstart: int, dsize: int) -> int:
+            calls.append((srcsize, cap, dst, dstart, dsize))
+            if len(calls) == refuse:
+                return -1
+            data = _literal_only(ctypes.string_at(src, srcsize))
+            ctypes.memmove(dst, data, len(data))
+            return len(data)
+
+        return fn
+
+    def blob(self, block_count: int = 3) -> bytes:
+        return F.lz4_container(self.payload, block_count=block_count)
+
+    def test_every_page_goes_through_the_library(self):
+        calls: List[Any] = []
+        with mock.patch.object(stream, '_lz4_c_function', return_value=self.fake_c(calls)):
+            out, blocks = R.decompress_lz4(self.blob(), len(self.payload))
+        self.assertEqual((out, blocks), (self.payload, 3))
+        self.assertEqual(len(calls), 3)
+
+    def test_each_page_is_written_where_the_previous_one_ended(self):
+        calls: List[Any] = []
+        with mock.patch.object(stream, '_lz4_c_function', return_value=self.fake_c(calls)):
+            R.decompress_lz4(self.blob(), len(self.payload))
+        # the dictionary ends exactly where the page is written, which is the contiguity LZ4 has a
+        # fast path for, and it is the output so far up to 64 KB
+        self.assertEqual([c[3] + c[4] for c in calls], [c[2] for c in calls])
+        self.assertEqual([c[4] for c in calls], [0, self.per, 2 * self.per])
+        # and the room offered is everything the section still expects
+        self.assertEqual([c[1] for c in calls],
+                         [len(self.payload), len(self.payload) - self.per,
+                          len(self.payload) - 2 * self.per])
+
+    def test_the_dictionary_stops_at_64_kb(self):
+        # a real section's pages never reach the limit, so it is pinned where it is decided
+        self.assertEqual(stream._lz4_dict_size(0), 0)
+        self.assertEqual(stream._lz4_dict_size(1234), 1234)
+        self.assertEqual(stream._lz4_dict_size(1 << 16), 1 << 16)
+        self.assertEqual(stream._lz4_dict_size(1 << 24), 1 << 16)
+
+    def test_a_refused_page_raises_and_says_which_one(self):
+        calls: List[Any] = []
+        with mock.patch.object(stream, '_lz4_c_function', return_value=self.fake_c(calls, refuse=2)):
+            with self.assertRaises(R.FrameError) as caught:
+                R.decompress_lz4(self.blob(), len(self.payload))
+        self.assertEqual(len(calls), 2)                 # it stopped asking at the refusal
+        self.assertIn('page 1', str(caught.exception))  # 0-based, and the page is what went wrong
+
+    def test_a_section_that_comes_out_short_raises(self):
+        # a truncated stream returned as if it were whole is a stream every command would read as fact
+        calls: List[Any] = []
+        with mock.patch.object(stream, '_lz4_c_function', return_value=self.fake_c(calls)):
+            with self.assertRaises(R.FrameError) as caught:
+                R.decompress_lz4(self.blob(), len(self.payload) + 1)
+        self.assertIn(str(len(self.payload)), str(caught.exception))
+
+@unittest.skipUnless(_real_lz4_c() is not None, 'no lz4 library to load (build bin/rdc_lz4.dll)')
+class TestLz4LibraryReal(unittest.TestCase):
+    """The library itself rather than a stand-in: `bin/rdc_lz4.dll`, or a system liblz4."""
+
+    payload = bytes(range(256)) * 8
+
+    def test_a_section_decodes_to_the_size_it_declares(self):
+        blob = F.lz4_container(self.payload, block_count=3)
+        out, blocks = R.decompress_lz4(blob, len(self.payload))
+        self.assertEqual((bytes(out), blocks), (self.payload, 3))
+
+    def test_a_body_that_ends_early_raises(self):
+        # short in the framing and short in the last page: both are the same failure to the caller
+        blob = F.lz4_container(self.payload, block_count=3)
+        with self.assertRaises(R.FrameError):
+            R.decompress_lz4(blob, len(self.payload) + 1)
+        with self.assertRaises(R.FrameError):
+            R.decompress_lz4(blob[:-4], len(self.payload))
+
+    def test_a_page_the_library_refuses_names_the_page(self):
+        # a match at offset 8 with a single trailing literal: LZ4 refuses a block whose last sequence
+        # is a match, and one whose match nibble is 0 -- the two rules `lz4_match_block` exists to
+        # respect, and the reason a hand-built block is not the same as a valid one
+        bad = b'\x14' + b'Z' + b'\x08\x00'
+        with self.assertRaises(R.FrameError) as caught:
+            R.decompress_lz4(F.u32b(len(bad)) + bad, 9)
+        self.assertIn('page 0', str(caught.exception))
+
+    def test_a_page_may_match_into_the_previous_one(self):
+        # the property the whole design rests on: the 64 KB before the write position is the
+        # dictionary, so a page whose match reaches into the page before it decodes to exactly the
+        # bytes it was compressed from
+        page1 = bytes(range(64))
+        first = F.lz4_literal_block(page1)
+        # 4 literals, then 8 bytes matched 20 back -- a match that starts 16 bytes before the end of
+        # page 1 -- and the 5 literal bytes LZ4 requires a block to end with
+        second = F.lz4_match_block(page1[0:4], 20, 8, b'!!!!!')
+        blob = F.u32b(len(first)) + first + F.u32b(len(second)) + second
+        out, blocks = R.decompress_lz4(blob, len(page1) + 17)
+        self.assertEqual((blocks, bytes(out)),
+                         (2, page1 + page1[0:4] + page1[48:56] + b'!!!!!'))
 
 # =========================================================================== zstd
 class TestDecompressZstd(unittest.TestCase):

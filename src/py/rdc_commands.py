@@ -214,9 +214,9 @@ def cmd_dump(path: str, start: int, length: int, minlen: int = 4) -> None:
 
 def cmd_rootsig(path: str, limit: int = 40) -> None:
     """Print every root signature the capture creates: flags, cost, parameters and ranges."""
-    _info, stream, _how = load_stream(path)
+    info, stream, _how = load_stream(path)
     sigs = parse_root_signatures(stream)
-    binds = shader_bind_names(stream)
+    binds = shader_bind_names(stream, rdc_cache.stream_source(path, info))
     print('root signatures: %d%s' % (len(sigs), '' if binds else
                                      '  (no RDEF reflection in this capture: parameters are typed,'
                                      ' not named)'))
@@ -310,12 +310,12 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
     `parse_resource_table`), and every `rpN` with what its root parameter *is*
     (`rp2(cbv b1 s0)`, see `_root_param_label`).
     """
-    _info, stream, _how = load_stream(path)
+    info, stream, _how = load_stream(path)
     names = rdc_chunkmap.load_chunk_names()
     resources = parse_resource_table(stream, names)
     heaps = parse_descriptor_heaps(stream, names)
     sigs = parse_root_signatures(stream, names)
-    binds = shader_bind_names(stream)
+    binds = shader_bind_names(stream, rdc_cache.stream_source(path, info))
     stack: List[str] = []
     states: Dict[int, DrawState] = {}
     n_draw = 0
@@ -420,11 +420,11 @@ def cmd_dump_shaders(path: str, outdir: str) -> None:
     `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
     reflection's job, and the reflection is the replay driver's (REFERENCE §9).
     """
-    _info, stream, _how = load_stream(path)
+    info, stream, _how = load_stream(path)
     os.makedirs(outdir, exist_ok=True)
     lines: List[str] = []
     n = 0
-    for off, size, h, parts in parse_dxil_containers(stream):
+    for off, size, h, parts in parse_dxil_containers(stream, rdc_cache.stream_source(path, info)):
         names = [p[0] for p in parts]
         if 'RTS0' in names:
             continue

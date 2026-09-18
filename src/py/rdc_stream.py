@@ -8,10 +8,11 @@ import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from in
 import rdc_profile
 
 import mmap
+import os
 import re
 import struct
 
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 def _run_pattern(minlen: int) -> re.Pattern[bytes]:
     """Return the cached printable-ASCII run pattern for `minlen` (clamped to >= 1)."""
@@ -128,85 +129,143 @@ def parse_container(path: str) -> CaptureInfo:
         o = sec['dataOffset'] + sec['compLen']
     return info
 
-def lz4_block(src: BufferLike, out: bytearray) -> bytearray:
-    """Decompress one raw LZ4 block, appending to `out` and returning it.
+#: An LZ4 match may reach 64 KB back, so that much of the output is the dictionary a block needs.
+_LZ4_DICT = 1 << 16
 
-    The return value is the same `bytearray` object that was passed in (tests compare it against
-    `bytes` literals, which works because `bytearray == bytes` compares contents).
+#: Past this a section cannot be addressed by the C API's `int` sizes; it takes the per-block paths.
+_LZ4_C_MAX = 0x7FFFFFFF
+
+#: The library names to try after `bin/rdc_lz4.dll`: what a system package installs, on Windows, Linux and
+#: macOS. `liblz4.so.1` deliberately before `liblz4.so`, which only exists with a -dev package.
+_LZ4_LIBS = ('lz4.dll', 'liblz4.so.1', 'liblz4.so', 'liblz4.dylib')
+
+
+def _lz4_dict_size(written: int) -> int:
+    """How much of the output so far a block's matches may reach back into: the last 64 KB of it.
+
+    LZ4's own limit, and the reason a page can be decoded knowing only the page before it -- see
+    `decompress_lz4`. Named because it is one line of arithmetic that a wrong sign or a wrong constant
+    would turn into a wrong stream, and the tests pin it where the pages do not reach it.
     """
-    i = 0
-    n = len(src)
-    while i < n:
-        token = src[i]
-        i += 1
-        lit = token >> 4
-        if lit == 15:
-            while True:
-                b = src[i]
-                i += 1
-                lit += b
-                if b != 255:
-                    break
-        if lit:
-            out += src[i:i + lit]
-            i += lit
-        if i >= n:
-            break
-        offset = src[i] | (src[i + 1] << 8)
-        i += 2
-        if offset == 0:
-            break
-        mlen = token & 0x0F
-        if mlen == 15:
-            while True:
-                b = src[i]
-                i += 1
-                mlen += b
-                if b != 255:
-                    break
-        mlen += 4
-        start = len(out) - offset
-        if offset >= mlen:
-            out += out[start:start + mlen]
-        else:
-            pat = bytes(out[start:])
-            out += (pat * ((mlen + offset - 1) // offset))[:mlen]
-    return out
+    return written if written < _LZ4_DICT else _LZ4_DICT
+
+
+def _lz4_c_function() -> Optional[Callable[..., int]]:
+    """`LZ4_decompress_safe_usingDict` from whatever library has it, or None.
+
+    `$RDC_LZ4_DLL` names one explicitly; otherwise the `bin/rdc_lz4.dll` this repository's build writes is
+    tried (it is built from the vendored decoder in `src/cpp/third_party/lz4`), then the names a system
+    package uses -- so a machine with `liblz4` needs no build of its own. A library older than 1.8 has no
+    `usingDict` and is refused by the symbol lookup rather than by a version check.
+
+    The signature is set rather than left to ctypes' guessing, which would truncate the pointers this call
+    is entirely made of. `ctypes` itself is imported here, not at module level: the common run reads a
+    cached stream and never comes near this.
+    """
+    import ctypes
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(os.path.dirname(here))
+    candidates = [os.path.join(root, 'bin', 'rdc_lz4.dll')]
+    named = os.environ.get('RDC_LZ4_DLL')
+    if named:
+        candidates.insert(0, named)
+    candidates.extend(_LZ4_LIBS)
+
+    for name in candidates:
+        try:
+            lib = ctypes.CDLL(name)
+        except OSError:
+            continue
+        fn = getattr(lib, 'LZ4_decompress_safe_usingDict', None)
+        if fn is None:
+            continue
+        fn.restype = ctypes.c_int
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+                       ctypes.c_int]
+        return fn
+    return None
+
 
 def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
     """Decompress a section body made of [u32 compressedBlockLength][raw LZ4 block]*.
 
-    Returns the produced bytes and the number of blocks consumed. `expect` is the expected
-    uncompressed size; 0 means "consume every block regardless of size".
+    The decoder is the C library (`_lz4_c_function`), asked for the whole section at once: one
+    destination of exactly `expect` bytes, one call per page, and the 64 KB before the write position as
+    the dictionary. So the dictionary is the destination's own tail -- the contiguous case LZ4 has a
+    fast path for -- and nothing is allocated or copied per page. Measured on this repo's captures:
+    **0.54 s** for the hobby capture's 1.47 GB and **0.14 s** for PC Renderer's 631 MB, the decode itself
+    being 0.219 s / 0.078 s (6.4 and 7.7 GB/s).
 
-    The one `out` buffer is carried across blocks on purpose: the blocks are **not** independent.
+    `expect` is the section's declared `uncompLen`, and the stream has to produce exactly that. A page
+    the library refuses, a body that ends early, and a section declaring more than it decodes all raise
+    `FrameError`: a truncated stream returned as if it were whole is a stream every command downstream
+    would then read as fact. A section declaring no bytes is empty whatever the body says, and takes no
+    library at all.
+
+    The one destination is carried across the pages on purpose: they are **not** independent.
     RenderDoc writes a section as a single continuous LZ4 stream cut into 1 MB pages and both ends
     use the streaming API (`LZ4_compress_fast_continue` / `LZ4_decompress_safe_continue` with a
     shared stream context, serialise/lz4io.cpp), so a match can point up to 64 KB back into the
-    previous page. Decoding blocks on their own therefore loses data -- a block-parallel version of
+    previous page. Decoding pages on their own therefore loses data -- a block-parallel version of
     this function returned 625,911,281 bytes for the PC capture in this repo where the section
-    declares (and the serial walk produces) 630,790,592. That is why there is no parallel decoder
-    here: the speedup is the stream cache instead (`cache_dir`), measured at 3.6 s -> 0.27 s on
-    that capture.
+    declares (and the serial walk produces) 630,790,592 -- which is why there is no parallel decoder
+    here. The speedup for repeat work is the stream cache (`cache_dir`), free for every command after
+    the first.
     """
-    out = bytearray()
+    import ctypes
+
+    if expect <= 0:
+        return bytearray(), 0
+
+    fn = _lz4_c_function()
+    if fn is None:
+        raise FrameError('no LZ4 decoder to decompress the section with: build bin/rdc_lz4.dll with '
+                         '`cmake --build build`, or point $RDC_LZ4_DLL at a library exporting '
+                         'LZ4_decompress_safe_usingDict (a system lz4.dll / liblz4.so.1 works)')
+    if expect > _LZ4_C_MAX or len(blob) > _LZ4_C_MAX:
+        raise FrameError('section too large for the LZ4 decoder: %d byte(s) of body, %d byte(s) of '
+                         'output, and the C API takes int sizes' % (len(blob), expect))
+
+    out = bytearray(expect)
+    dst_ref = ctypes.c_char.from_buffer(out)    # held for the call: an export stops the buffer moving
+    dst = ctypes.addressof(dst_ref)
+
+    if isinstance(blob, bytearray):
+        src_ref = ctypes.c_char.from_buffer(blob)   # exported where it lies, so no copy at all
+    else:
+        # A `c_char_p` points into `bytes` without copying and keeps it alive for as long as it is held,
+        # and a read-only buffer -- a memory view over a read-only map -- is copied once into one. Both
+        # real captures arrive as `bytes`: the container map is sliced, and an mmap slice is a copy, so
+        # the copying branch is the one a test takes.
+        src_ref = ctypes.c_char_p(blob if isinstance(blob, bytes) else bytes(blob))
+    src = ctypes.cast(src_ref, ctypes.c_void_p).value
+    if src is None:     # ctypes types a pointer's value as Optional; a live buffer's is never None
+        raise FrameError('the LZ4 decoder was given no buffer to read')
+
+    bar = rdc_profile.progress('lz4 decode (%d bytes of blocks)' % len(blob), expect, 'bytes')
+    bar.begin()
     o = 0
     blocks = 0
-    bar = rdc_profile.progress('lz4 decode (%d bytes of blocks)' % len(blob), expect or len(blob),
-                               'bytes')
-    bar.begin()
-    while o + 4 <= len(blob) and (expect == 0 or len(out) < expect):
+    written = 0
+    while o + 4 <= len(blob) and written < expect:
         clen = u32(blob, o)
         o += 4
         if clen == 0 or o + clen > len(blob):
             break
-        lz4_block(blob[o:o + clen], out)
+        dsize = _lz4_dict_size(written)
+        produced = fn(src + o, dst + written, clen, expect - written, dst + written - dsize, dsize)
+        if produced < 0:
+            bar.done(written)
+            raise FrameError('page %d of the section did not decode (%d of %d byte(s) of output, %d '
+                             'byte(s) of input from offset %d)' % (blocks, written, expect, clen, o))
+        written += produced
         o += clen
         blocks += 1
-        bar.tick(len(out))
-    bar.done(len(out))
-    # The bytearray goes out as it is: converting it copied the whole stream once more (1.47 GB for the
-    # hobby capture, ~0.2 s and a second copy of it in memory), and everything downstream accepts it.
+        bar.tick(written)
+    bar.done(written)
+    if written != expect:
+        raise FrameError('the section decoded to %d byte(s) but declares %d' % (written, expect))
     return out, blocks
 
 def decompress_zstd(blob: Buffer) -> bytes:
@@ -229,10 +288,11 @@ def decompress_zstd(blob: Buffer) -> bytes:
 # ---------------------------------------------------------------------------
 # Decompressed-stream cache.
 #
-# Decompressing a frame-capture section costs seconds (pure-Python LZ4 over a few hundred MB of
-# blocks) and every command needs the same stream, so the decompressed bytes are cached on disk
-# and keyed by the capture's identity: absolute path + size + mtime + section index + format
-# version. A hit shows up in the method label as `lz4(N blocks, cached)`.
+# Decompressing a frame-capture section costs seconds (LZ4 over a few hundred MB of blocks -- 0.54 s for the
+# hobby capture's 1.47 GB, through the built library) and every command needs the
+# same stream, so the decompressed bytes are cached on disk and keyed by the capture's identity:
+# absolute path + size + mtime + section index + format version. A hit shows up in the method label as
+# `lz4(N blocks, cached)`.
 #
 # The cache is pure optimisation. `$RDC_NO_CACHE=1` disables it, `$RDC_CACHE_DIR` moves it, an
 # unusable directory only warns (once), and a stale, truncated or foreign file is detected and
@@ -240,7 +300,10 @@ def decompress_zstd(blob: Buffer) -> bytes:
 # ---------------------------------------------------------------------------
 class FrameError(Exception):
     """A chunk frame that cannot be true -- raised by `iter_chunks(strict=True)`, collected by
-    `check_stream()`. The default walk stops at such a frame instead (see `iter_chunks`)."""
+    `check_stream()`. The default walk stops at such a frame instead (see `iter_chunks`).
+
+    Also what `decompress_lz4` raises when a section body cannot be decoded -- there is no library to
+    decode it with, or the bytes do not come out at the size the section declares."""
 
 def _read_frame(stream: Buffer, pos: int) -> Optional[Tuple[ChunkInfo, int]]:
     """Parse the frame at `pos`: return `(chunk, next_pos)`, or None at the end of the stream.
@@ -427,7 +490,6 @@ __all__ = [
     'decompress_lz4',
     'decompress_zstd',
     'iter_chunks',
-    'lz4_block',
     'parse_container',
     'string_runs',
     'u16',

@@ -40,7 +40,10 @@ Usage:
                                                           #   and build it (`--check` only reports)
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 
-Speed (REFERENCE 4.13): `$RDC_PROFILE=1` prints a per-phase table on stderr when the run ends, and
+Speed (REFERENCE 4.13): the one decode a capture needs is 0.5 s, through `bin/rdc_lz4.dll` -- the same
+`cmake --build build` writes it -- and it is free after that from the stream cache. A tree without that
+library cannot read an LZ4 section, and says so. `$RDC_PROFILE=1` prints a per-phase table on
+stderr when the run ends, and
 `$RDC_PROGRESS=1` adds the live progress lines (neither ever touches stdout). The whole-stream scans
 (`strings`, `names`) split the stream across processes, each mapping the cached stream -- so a capture whose
 stream is not cached (`$RDC_NO_CACHE`) runs the same scan in one process, several times slower. `chunks` and
@@ -198,7 +201,20 @@ def cmd_bootstrap(argv: Sequence[str]) -> int:
     return 0
 
 def main() -> None:
-    """CLI entry point: dispatch `sys.argv[1]` to the matching `cmd_*` function."""
+    """CLI entry point: dispatch `sys.argv[1]` to the matching `cmd_*` function.
+
+    A section that cannot be decompressed is the one failure here the user can act on -- the message says
+    which library to build and a traceback would bury it -- so `FrameError` is what this turns into an
+    `error:` line and exit code 1. Every other failure keeps its traceback, because it is a bug.
+    """
+    try:
+        _dispatch()
+    except FrameError as exc:
+        print('error: %s' % exc)
+        sys.exit(1)
+
+def _dispatch() -> None:
+    """`main()`'s body: the command table, one `cmd_*` per command."""
     argv = sys.argv
     if len(argv) > 1 and argv[1] in ('test', 'selftest'):
         sys.exit(cmd_selftest(argv[2:]))

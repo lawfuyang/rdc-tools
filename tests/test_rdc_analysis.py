@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import mmap
 import os
 import struct
 import sys
@@ -90,7 +91,9 @@ class TestParseContainer(TempDirCase):
         self.assertEqual(info['version'], 0x10E)
         self.assertEqual(info['progVersion'], '1.46')
         self.assertEqual(info['thumbnail'], (64, 64, len(thumb)))
-        self.assertEqual(info['_data'], data)
+        # `_data` is the container's bytes, and since 2026-09-18 that may be an `mmap` of the file
+        # rather than a copy of it (REFERENCE 4.14): `bytes()` is the way to ask for a plain copy.
+        self.assertEqual(bytes(info['_data']), data)
         # 40 (file header) + thumbnail + 13 + nameLen (metadata) + 16 (timebase)
         self.assertEqual(info['headerLength'], 40 + len(thumb) + 13 + len('D3D12') + 1 + 16)
         self.assertEqual(info['sections'][0]['dataOffset'],
@@ -457,11 +460,16 @@ class CacheCase(TempDirCase):
                     section: int = 0, at_section: Optional[int] = None, method: int = R.METHOD_LZ4,
                     blocks: int = 2, src_size: Optional[int] = None,
                     src_mtime: Optional[int] = None, stream_len: Optional[int] = None) -> str:
-        """Write a cache file by hand, so a single header field can be made wrong."""
+        """Write a cache file by hand, so a single header field can be made wrong.
+
+        The header is padded exactly as `cache_store` pads it, so these hand-written files go down the
+        same `mmap` path a real hit does (and a wrong header field is still wrong where it counts).
+        """
         st = os.stat(self.capture)
         default = os.path.normcase(os.path.abspath(self.capture))
         path_bytes = (default if src is None else src).encode('utf-8')
-        head = R.CACHE_HEADER.pack(magic, version, R.CACHE_HEADER.size + len(path_bytes), section,
+        head_len = R.align_up(R.CACHE_HEADER.size + len(path_bytes), R.CACHE_ALIGN)
+        head = R.CACHE_HEADER.pack(magic, version, head_len, section,
                                    method, st.st_size if src_size is None else src_size,
                                    st.st_mtime_ns if src_mtime is None else src_mtime,
                                    len(stream) if stream_len is None else stream_len, blocks)
@@ -470,8 +478,19 @@ class CacheCase(TempDirCase):
         with open(cfile, 'wb') as fh:
             fh.write(head)
             fh.write(path_bytes)
+            fh.write(b'\x00' * (head_len - R.CACHE_HEADER.size - len(path_bytes)))
             fh.write(stream)
         return cfile
+
+    def release_container(self) -> None:
+        """Let go of the capture's mapping: Windows will not let a mapped file be rewritten.
+
+        `parse_container` maps the capture instead of reading it (REFERENCE 4.14), so a test that
+        replaces or truncates the capture on disk has to close that map first.
+        """
+        data = self.info['_data']
+        if isinstance(data, mmap.mmap):
+            data.close()
 
 class TestCacheDir(unittest.TestCase):
     def test_env_var_wins(self):
@@ -510,8 +529,11 @@ class TestCacheStoreAndLookup(CacheCase):
         cfile = self.store()
         self.assertIsNotNone(cfile)
         self.assertTrue(os.path.isfile(cfile or ''))
-        self.assertEqual(R.cache_lookup(self.capture, self.info),
-                         (self.stream, 'lz4(2 blocks, cached)'))
+        hit = R.cache_lookup(self.capture, self.info)
+        self.assertIsNotNone(hit)
+        # a hit is an `mmap` of the cache file, not a copy of it, so compare the bytes it stands for
+        self.assertEqual(bytes(hit[0]) if hit else None, self.stream)
+        self.assertEqual(hit[1] if hit else '', 'lz4(2 blocks, cached)')
 
     def test_stats_answer_from_the_header(self):
         self.store()
@@ -553,7 +575,10 @@ class TestCacheStoreAndLookup(CacheCase):
         self.assertEqual(entry['method'], R.METHOD_LZ4)
         self.assertEqual(entry['blocks'], 2)
         self.assertEqual(entry['streamLen'], len(self.stream))
-        self.assertEqual(entry['hdrLen'], R.CACHE_HEADER.size + len(os.path.abspath(self.capture)))
+        # the header is padded so the stream starts on an mmap boundary (REFERENCE 4.14)
+        self.assertEqual(entry['hdrLen'],
+                         R.align_up(R.CACHE_HEADER.size + len(os.path.abspath(self.capture)),
+                                    R.CACHE_ALIGN))
 
     def test_the_payload_follows_the_header(self):
         cfile = self.store() or ''
@@ -574,8 +599,9 @@ class TestCacheStoreAndLookup(CacheCase):
         self.store()
         other = self.capture[0].swapcase() + self.capture[1:]
         self.assertEqual(R._cache_identity(other), R._cache_identity(self.capture))
-        self.assertEqual(R.cache_lookup(other, R.parse_container(other)),
-                         (self.stream, 'lz4(2 blocks, cached)'))
+        hit = R.cache_lookup(other, R.parse_container(other))
+        self.assertIsNotNone(hit)
+        self.assertEqual(bytes(hit[0]) if hit else None, self.stream)
         self.assertEqual(len(R._cache_names()), 1)
         self.store()
         self.assertIsNone(R.cache_lookup(self.capture, self.info, 1))
@@ -697,8 +723,9 @@ class TestStreamCaching(CacheCase):
     def test_first_call_decompresses_and_the_second_comes_from_the_cache(self):
         _, first, how_first = R.load_stream(self.capture)
         _, second, how_second = R.load_stream(self.capture)
-        self.assertEqual(first, self.stream)
-        self.assertEqual(second, self.stream)
+        # the second read is a hit, and a hit is an `mmap` of the cache file (REFERENCE 4.14)
+        self.assertEqual(bytes(first), self.stream)
+        self.assertEqual(bytes(second), self.stream)
         self.assertEqual(how_first, 'lz4(2 blocks)')
         self.assertEqual(how_second, 'lz4(2 blocks, cached)')
 
@@ -747,6 +774,7 @@ class TestStreamCaching(CacheCase):
     def test_a_changed_capture_is_decompressed_again(self):
         R.load_stream(self.capture)
         other = [F.chunk(1000, b'different-' * 8)]
+        self.release_container()
         F.write_bytes(self.capture, F.capture(other, lz4=True))
         _, stream, how = R.load_stream(self.capture)
         self.assertEqual(stream, b''.join(other))

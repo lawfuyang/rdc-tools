@@ -610,6 +610,48 @@ UTF-16 pass entirely when the ASCII half already filled the cap -- the answer th
 first, then wide, then the cap), so `chunks <rdc> 0` went from over five minutes to under twenty seconds with
 identical output, and none of the saving was in the decode.
 
+### 4.14 Reading the file: mapped, not copied
+
+Every command used to pay two full reads before doing anything: the container (601 MB for the hobby capture,
+in `parse_container`) and the stream (1.47 GB, in `load_stream`). Both are now `mmap`s, because nothing needs
+the bytes all at once -- the header and section table are a few KB, one section body is decompressed on a
+cache miss, and a command that only walks the frame touches one 4 KB page per chunk header. Measured on
+`HobbyRenderer FlyingWorld.rdc`, in one session:
+
+| phase | before | after |
+|---|---|---|
+| `container parse` | 0.12-0.18 s | 0.00 s |
+| `stream: cache read` | 0.30 s | 0.00 s |
+| a frame walk (`iter_chunks` over 29,212 chunks) | 0.489 s (0.459 read + 0.030 walk) | 0.038 s |
+| a full scan (one `re` pass over every byte) | 14.50 s | 14.59 s |
+
+So the commands that walk lost 0.5-1.1 s each -- `chunks`, `summary`, `markers`, `resources`, `descriptors`,
+`verify` and `sections` now run in 0.6-0.8 s where they were 1.5-2.6 s -- the scan commands lost the same read
+and pay ~0.6% more for the regex over a map, and no command allocates 2 GB to look at a 601 MB capture any
+more (the same stream also stops being copied out of the cache file, and `decompress_lz4` no longer copies the
+1.47 GB it produced into `bytes`).
+
+Three consequences worth knowing:
+
+* **A stream may be an `mmap`, a `bytearray` or `bytes`** -- the type is `rdc_types.Buffer`, and everything
+  that reads a capture takes one. Slicing it gives `bytes`, which is what the decoders do; a caller that needs
+  plain bytes (to compare with `==`, or to keep after the call) writes `bytes(stream)`.
+* **The cache format is version 2**: the header is padded to `CACHE_ALIGN` (Windows' 64 KB allocation
+  granularity) so the stream begins where `mmap(offset=...)` accepts. Version 1 entries are ignored rather
+  than misread, so the first run after this change decompresses once more; `cache clear` reclaims the old
+  files, which `cache list` counts as unusable until then.
+* **A mapped file is locked against writing on Windows** while a command runs: a capture cannot be replaced
+  mid-run, and `cache clear` in another process fails on the file in use (it says so and moves on).
+  `$RDC_NO_CACHE`, an unmappable file or a zero-length one falls back to reading.
+
+What is left, and where the line is: the per-chunk loops inside the commands (`draws` is 2.8 s because it
+walks all 29,212 chunks in Python and slices every payload; `summary` and `markers` do the same work for
+0.8 s), the `re` pass `strings` and `names` are built on (14.5 s, split across processes -- §4.13), and the
+report's detectors (1.4 s of a 2.5 s `report`). The walk itself is 0.038 s, so splitting those loop bodies
+across processes would mean handing each worker the chunk index for its slice -- a real change, for about a
+second. Nothing derived is cached for the same reason §4.13 gives: a table or index cache is a new class of
+artefact on disk to avoid work that is already sub-second.
+
 ---
 
 ## 5. Worked examples
@@ -1040,6 +1082,16 @@ that matters for anyone tempted by it:
 > (and the document writers' own re-positioning) cut the run from 89 s to 71 s and changed three files of the
 > bundle; both were reverted after hashing the bundles against a known-good reference. **The second read is
 > not a redundant refresh: it is what makes the state complete.**
+
+**The host's own timing is part of that too** (measured 2026-09-18). A change that only makes the *host
+thread* faster between engine calls also changes what the engine answers: buffering the bundle's document
+writes -- `setvbuf(stdout, NULL, _IOFBF, 1 << 20)` inside `CaptureStdout` -- took a 300-event dump from 36.5 s
+to 30.1 s and moved `states/841.state.json` (3148 bytes against 2717) and `events.json`. It reproduced both
+ways: five buffered dumps agreed with each other, two unbuffered ones agreed with the pre-change bundle byte
+for byte. So the writer stays unbuffered, with a comment at `CaptureStdout` saying why, and the rule for a
+future driver change is stronger than "hash the bundle against a fresh run": **hash it against a bundle from
+the *previous* build**. What the host does between engine calls is not free time, it is part of the input; the
+same is true of the offline side, which is why `$RDC_PROFILE` measures rather than assumes (4.13).
 
 **The sweep is cached** (`$RDC_CACHE_DIR` moves the cache, `$RDC_NO_CACHE` disables it,
 `%LOCALAPPDATA%\rdc-tools\cache` by default — the offline tool's own directory, so both halves have one cache

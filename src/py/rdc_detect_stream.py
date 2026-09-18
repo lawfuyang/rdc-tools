@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rdc_bundle import *  # noqa: F401,F403
+from rdc_types import *  # noqa: F401,F403  (the buffer shapes these detectors carry payloads in)
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_cache  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_stream  # noqa: F401  (used qualified: the loader is called from inside functions)
@@ -15,7 +16,7 @@ POP_MARKER_CHUNKS = ('PopMarker', 'Queue_EndEvent')
 #: How many unattributed draws are named before the rest are counted.
 UNATTRIBUTED_LIMIT = 10
 
-def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, str, bytes]]]:
+def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, str, Buffer]]]:
     """`(chunk index, name, payload)` for the chunks whose name is in `wanted`, or None if this tool cannot
     name chunks at all.
 
@@ -34,7 +35,7 @@ def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, 
     if not names:
         return None
 
-    found: List[Tuple[int, str, bytes]] = []
+    found: List[Tuple[int, str, Buffer]] = []
     for index, chunk in enumerate(rdc_stream.iter_chunks(stream), 1):
         name = names.get(chunk['id'], '')
         if name in wanted:

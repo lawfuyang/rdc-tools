@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mmap
 import re
 from typing import Dict, List, Optional, Tuple, TypedDict, Union
 
@@ -46,7 +47,7 @@ class CaptureInfo(TypedDict):
     thumbnail: Tuple[int, int, int]
     meta: CaptureMetaData
     sections: List[SectionInfo]
-    _data: bytes
+    _data: Buffer
 
 class ChunkInfo(TypedDict):
     """One framed SDChunk.
@@ -188,7 +189,19 @@ DxbcPart = Tuple[str, int, int]
 DxbcContainer = Tuple[int, int, str, List[DxbcPart]]
 
 #: Any object `struct.unpack_from` accepts (bytes, bytearray, memoryview).
-Buffer = Union[bytes, bytearray, memoryview]
+#: Read-only bytes the tool walks: `bytes`/`bytearray` built in memory, or an `mmap` of a file it is only
+#: reading (the container, the cached stream). All three index, slice, compare, `.find` and unpack the
+#: same way, and all three are accepted by `re` -- which is what the decoders use. Mapping a 1.5 GB stream
+#: instead of reading it is worth ~0.3 s and 1.5 GB of memory per command, and a frame walk over a map is
+#: 0.038 s against 0.489 s for the walk over a read-in copy (REFERENCE 4.14). A *slice* of one of these is
+#: always `bytes` (or `bytearray`), never a map, which is why the payload readers below can still rely on
+#: `bytes`-only methods.
+Buffer = Union[bytes, bytearray, 'mmap.mmap']
+
+#: What `struct.unpack_from`, `re` and `.find` accept: the buffers above, plus a `memoryview` of one. A
+#: stream is never a view (a slice of one must be `bytes`, and `mmap` has no `decode`), but the primitives
+#: here are handed views by tests and by anything that has already taken a slice in its own way.
+BufferLike = Union[bytes, bytearray, memoryview, 'mmap.mmap']
 
 #: Cached `rb'[\x20-\x7e]{minlen,}'` patterns, keyed by the effective minimum length. `STR_RE` is the
 #: entry for the historical default of 6.
@@ -199,6 +212,7 @@ _WIDE_PATTERNS: Dict[int, re.Pattern[str]] = {}
 
 __all__ = [
     'Buffer',
+    'BufferLike',
     'CacheEntry',
     'CaptureInfo',
     'CaptureMetaData',

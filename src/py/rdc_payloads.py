@@ -12,7 +12,7 @@ import rdc_profile
 from typing import Dict, List, Optional, Tuple
 
 @rdc_profile.timed('chunk payload decode')
-def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
+def decode_chunk(name: Optional[str], blob: Buffer) -> List[str]:
     """Decode the known D3D12 chunk payload layouts (each element is raw, ResourceId = u64)."""
     out: List[str] = []
     # The broad catch is deliberate: `blob` comes straight from a stream we only heuristically
@@ -91,7 +91,7 @@ def _draw_state() -> DrawState:
     return DrawState(pso=None, gfxSig=None, compSig=None, gfxCbv={}, compCbv={}, gfxTable={},
                      compTable={}, vbs={}, ib=None)
 
-def _apply_state_chunk(name: str, blob: bytes, states: Dict[int, DrawState]) -> bool:
+def _apply_state_chunk(name: str, blob: Buffer, states: Dict[int, DrawState]) -> bool:
     """Apply one state-changing `List_*` chunk; True when `name` is one of the tracked setters.
 
     Every command-list payload starts with the `u64` resource id of its command list, so the state

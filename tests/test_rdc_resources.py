@@ -444,7 +444,7 @@ class TestParseRdef(unittest.TestCase):
 class TestShaderBindNames(RootSigCase):
     """`shader_bind_names`: `RDEF` parts of the shaders a capture still carries, by stage."""
 
-    def stream_of(self, *chunks: bytes) -> bytes:
+    def stream_of(self, *chunks: bytes) -> R.Buffer:
         path = self.cap(*chunks)
         _info, stream, _how = R.load_stream(path)
         return stream

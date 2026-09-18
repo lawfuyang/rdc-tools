@@ -497,6 +497,11 @@ silence.
 * **Whatever starts a pool must be importable without side effects.** On Windows a worker re-imports
   `__main__`, so a script or test module that decompresses at module level does it once per worker. The tool
   itself guards `main()`; a throwaway harness has to do the same.
+* **A command maps the capture; it does not read it** (REFERENCE §4.14). That is where a walk command's last
+  second went, but it also means the file is locked against writing while the command runs — you cannot
+  replace a capture mid-analysis, and `cache clear` in another process reports the file in use. The stream
+  cache's format is versioned: after an upgrade the first run decompresses once more, and the old files show
+  up in `cache list` as unusable until `cache clear` removes them.
 
 ### What "best analysis" means here
 

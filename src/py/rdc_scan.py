@@ -54,7 +54,7 @@ def _printable(byte: int) -> bool:
     return 0x20 <= byte <= 0x7E
 
 
-def split_ranges(stream: bytes, want: int) -> List[Tuple[int, int]]:
+def split_ranges(stream: Buffer, want: int) -> List[Tuple[int, int]]:
     """Cut `stream` into at most `want` ranges, each ending where no string run crosses.
 
     A boundary is only safe where the byte is *not* printable: a run cannot contain such a byte, so no
@@ -81,7 +81,7 @@ def split_ranges(stream: bytes, want: int) -> List[Tuple[int, int]]:
     return ranges
 
 
-def _safe_cut(stream: bytes, pos: int) -> Optional[int]:
+def _safe_cut(stream: Buffer, pos: int) -> Optional[int]:
     """The first offset at or after `pos` holding a non-printable byte, or None within `CUT_SEARCH`."""
     limit = min(len(stream), pos + CUT_SEARCH)
     at = pos
@@ -92,7 +92,7 @@ def _safe_cut(stream: bytes, pos: int) -> Optional[int]:
     return None
 
 
-def _scan_range(buf: object, start: int, end: int, minlen: int, base: int, counts: bool,
+def _scan_range(buf: Buffer, start: int, end: int, minlen: int, base: int, counts: bool,
                 into_counts: Optional[Counts] = None,
                 into_firsts: Optional[Firsts] = None) -> Tuple[Counts, Firsts]:
     """Scan `buf[start:end]`: return (times seen, first offset) per text, offsets relative to `base`.
@@ -125,7 +125,7 @@ def _worker(job: Tuple[str, int, int, int, int, bool]) -> Tuple[Counts, Firsts]:
             return _scan_range(mapped, base + start, base + end, minlen, base, counts)
 
 
-def _source_holds_stream(stream: bytes, source: CacheEntry) -> bool:
+def _source_holds_stream(stream: Buffer, source: CacheEntry) -> bool:
     """True when `source`'s cached stream is byte-identical to `stream` at both ends.
 
     A stale or foreign cache file is already rejected by the cache's own identity check; this is the
@@ -158,7 +158,7 @@ def _merge_firsts(into: Firsts, part: Firsts) -> None:
             into[text] = offset
 
 
-def scan_runs(stream: bytes, minlen: int, source: Optional[CacheEntry] = None,
+def scan_runs(stream: Buffer, minlen: int, source: Optional[CacheEntry] = None,
               procs: Optional[int] = None, counts: bool = True) -> Tuple[Counts, Firsts]:
     """Every string run of `minlen` or more: (times seen, first offset) per text, over `stream`.
 

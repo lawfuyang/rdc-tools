@@ -29,7 +29,7 @@ def load_format_names(src_root: Optional[str] = None) -> Dict[int, str]:
         raw = parse_chunk_enum(fh.read(), 'DXGI_FORMAT')
     return {fmt_id: name.replace('DXGI_FORMAT_', '', 1) for fmt_id, name in raw.items()}
 
-def _parse_resource(blob: bytes, desc_off: int) -> Optional[ResourceInfo]:
+def _parse_resource(blob: Buffer, desc_off: int) -> Optional[ResourceInfo]:
     """Decode the `D3D12_RESOURCE_DESC` of one creation payload, or None if it does not fit.
 
     The dimension field is the check that this really is a descriptor (0/unknown means it is not),
@@ -47,7 +47,7 @@ def _parse_resource(blob: bytes, desc_off: int) -> Optional[ResourceInfo]:
                         depth=u16(blob, desc_off + 24), mips=u16(blob, desc_off + 26),
                         format=u32(blob, desc_off + 28), gpuAddress=u64(blob, len(blob) - 8))
 
-def _parse_acceleration_structure(blob: bytes) -> Optional[Tuple[int, ResourceInfo]]:
+def _parse_acceleration_structure(blob: Buffer) -> Optional[Tuple[int, ResourceInfo]]:
     """`(id, info)` of one `CreateAS` payload, or None when it does not fit the layout.
 
     The buffer and offset it lives at are decoded by `AS_KINDS`' caller but not recorded: the id is
@@ -62,7 +62,7 @@ def _parse_acceleration_structure(blob: bytes) -> Optional[Tuple[int, ResourceIn
                                        depth=0, mips=0, format=0, gpuAddress=0)
 
 @rdc_profile.timed('resource table')
-def parse_resource_table(stream: bytes,
+def parse_resource_table(stream: Buffer,
                          names: Optional[Dict[int, str]] = None) -> Dict[int, ResourceInfo]:
     """Build the resource table (id -> description) from the creation chunks and `SetName`.
 
@@ -101,7 +101,7 @@ def parse_resource_table(stream: bytes,
             entry['name'] = name
     return table
 
-def _portable_handle(blob: bytes, offset: int) -> Optional[Tuple[int, int]]:
+def _portable_handle(blob: Buffer, offset: int) -> Optional[Tuple[int, int]]:
     """`(heapId, index)` of the `PortableHandle` at `offset`, or None when it does not fit.
 
     A `PortableHandle` is `u64 heapId, u32 index` (`d3d12_manager.h`): 12 bytes, no padding, and the
@@ -112,7 +112,7 @@ def _portable_handle(blob: bytes, offset: int) -> Optional[Tuple[int, int]]:
     return u64(blob, offset), u32(blob, offset + 8)
 
 @rdc_profile.timed('descriptor heaps')
-def parse_descriptor_heaps(stream: bytes, names: Optional[Dict[int, str]] = None
+def parse_descriptor_heaps(stream: Buffer, names: Optional[Dict[int, str]] = None
                            ) -> Dict[int, Dict[int, DescriptorInfo]]:
     """Build `heapId -> {index: DescriptorInfo}` from the descriptor writes and copies.
 
@@ -213,7 +213,7 @@ RDEF_KINDS: Dict[int, str] = {0: 'cbv', 1: 'srv', 2: 'srv', 3: 'sampler', 4: 'ua
 RDEF_STAGES: Dict[int, str] = {0xffff: 'ps', 0xfffe: 'vs', 0x4353: 'cs', 0x4753: 'gs', 0x4853: 'hs',
                                0x4453: 'ds'}
 
-def _parse_root_signature(data: bytes) -> Optional[RootSignature]:
+def _parse_root_signature(data: Buffer) -> Optional[RootSignature]:
     """Decode one `RTS0` part's data, or None when it does not fit the layout.
 
     Every offset in the blob is relative to `data`, and each one is checked against its length before
@@ -268,7 +268,7 @@ def _parse_root_signature(data: bytes) -> Optional[RootSignature]:
                          params=params, samplers=num_samplers)
 
 @rdc_profile.timed('root signatures')
-def parse_root_signatures(stream: bytes,
+def parse_root_signatures(stream: Buffer,
                           names: Optional[Dict[int, str]] = None) -> Dict[int, RootSignature]:
     """Every root signature the capture creates, by the resource id that binds it.
 
@@ -303,7 +303,7 @@ def parse_root_signatures(stream: bytes,
         sigs[sig['id']] = sig
     return sigs
 
-def parse_rdef(data: bytes) -> List[ShaderBind]:
+def parse_rdef(data: Buffer) -> List[ShaderBind]:
     """Decode the resource bindings of one `RDEF` part (`dxbc_container.cpp` `RDEFHeader`).
 
     Header: `cbuffers(u32 count, u32 offset) | resources(u32 count, u32 offset) | u16 targetVersion
@@ -338,7 +338,7 @@ def parse_rdef(data: bytes) -> List[ShaderBind]:
                                 count=u32(data, e + 24)))
     return binds
 
-def shader_bind_names(stream: bytes) -> Dict[str, Dict[Tuple[str, int, int], str]]:
+def shader_bind_names(stream: Buffer) -> Dict[str, Dict[Tuple[str, int, int], str]]:
     """`stage -> (kind, register, space) -> name` for every `RDEF` the capture still has.
 
     This is the only source of root-parameter *names* in a capture: the root signature

@@ -135,6 +135,11 @@ public:
     m_File = fopen(path, "wb");
     if(m_File != NULL && m_Saved >= 0)
       _dup2(_fileno(m_File), fd);
+    // Do NOT buffer this. A document is written between engine calls, so making the host thread faster
+    // there changes what the engine answers: `setvbuf(stdout, NULL, _IOFBF, 1 << 20)` here took a
+    // 300-event dump from 36.5 s to 30.1 s and moved `states/841.state.json` and `events.json` --
+    // reproduced both ways, and the unbuffered build matched the pre-change bundles exactly. The
+    // syscalls are the cost of every engine call seeing the same host timing as before (REFERENCE 9).
   }
   ~CaptureStdout()
   {

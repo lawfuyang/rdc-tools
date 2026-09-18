@@ -238,6 +238,17 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   load-bearing** (a forward step gives an incomplete state; only a backwards one makes the engine replay the
   frame from its start), which is why `REFERENCE §9` carries the hashes of the bundles that proved it. Change
   it only with a byte-identical-bundle check against a cold run.
+- **A change that alters the host's timing is not content-neutral** (measured 2026-09-18). Buffering the
+  bundle's document writes took a 300-event dump from 36.5 s to 30.1 s and moved two files of the bundle:
+  the engine's answer depends on how fast the host gets back to it. The writer therefore stays unbuffered,
+  and a driver change is checked against a bundle from the *previous* build, not against a fresh run of
+  itself. `CaptureStdout` carries the numbers.
+- **The offline tool maps rather than reads** (REFERENCE 4.14): the container and the cached stream are
+  `mmap`s, which is 0.5-1.1 s and ~2 GB of allocation per command. A stream is an `rdc_types.Buffer` (bytes,
+  bytearray or map -- never a view, so `chunk_strings` can still call `.decode`); a *slice* of any of them is
+  `bytes`/`bytearray`, and `BufferLike` is the wider shape the `u16/u32/u64` primitives accept. A mapped file
+  is locked against writing on Windows, so a test that rewrites a capture releases the map first, and the
+  stream cache's format is versioned (v2 pads the header so the stream starts on an `mmap` boundary).
 - **The same rule on the offline side**: `$RDC_PROFILE=1` prints a phase table and `$RDC_PROGRESS=1` the live
   progress lines, both to **stderr** (stdout is the contract, and a command's stderr stays empty otherwise).
   The phase names are the `rdc_profile.timed(...)` decorators on the layers — one name per call site, so a

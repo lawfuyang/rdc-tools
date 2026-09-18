@@ -7,10 +7,11 @@ from rdc_chunkmap import *  # noqa: F401,F403
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_profile
 
+import mmap
 import re
 import struct
 
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 def _run_pattern(minlen: int) -> re.Pattern[bytes]:
     """Return the cached printable-ASCII run pattern for `minlen` (clamped to >= 1)."""
@@ -30,7 +31,7 @@ def _wide_pattern(minlen: int) -> 're.Pattern[str]':
         _WIDE_PATTERNS[m] = pat
     return pat
 
-def string_runs(blob: Buffer, minlen: int = 6, start: int = 0,
+def string_runs(blob: BufferLike, minlen: int = 6, start: int = 0,
                 end: Optional[int] = None) -> Iterator[Tuple[int, str]]:
     """Yield `(offset, text)` for every run of `minlen` or more printable ASCII bytes in `blob`.
 
@@ -42,17 +43,32 @@ def string_runs(blob: Buffer, minlen: int = 6, start: int = 0,
     for m in _run_pattern(minlen).finditer(blob, start, stop):
         yield m.start(), m.group().decode('ascii', 'replace')
 
-def u16(b: Buffer, o: int) -> int:
+def u16(b: BufferLike, o: int) -> int:
     """Read a little-endian unsigned 16-bit value at offset `o`."""
     return struct.unpack_from('<H', b, o)[0]
 
-def u32(b: Buffer, o: int) -> int:
+def u32(b: BufferLike, o: int) -> int:
     """Read a little-endian unsigned 32-bit value at offset `o`."""
     return struct.unpack_from('<I', b, o)[0]
 
-def u64(b: Buffer, o: int) -> int:
+def u64(b: BufferLike, o: int) -> int:
     """Read a little-endian unsigned 64-bit value at offset `o`."""
     return struct.unpack_from('<Q', b, o)[0]
+
+def _read_container(path: str) -> Buffer:
+    """The container's bytes: a read-only `mmap` when the file can be mapped, else a plain read.
+
+    Nothing here needs the whole file at once -- the header, the section table, and (on a cache miss)
+    one section body -- so mapping it costs nothing and saves the 630 MB read the 601 MB capture used to
+    pay per command. `mmap` is also what a 32-bit or heavily loaded machine needs: the bytes stay on
+    disk until something touches them.
+    """
+    try:
+        with open(path, 'rb') as fh:
+            return mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+    except (OSError, ValueError):       # an empty file, a share, a lock: read it instead
+        with open(path, 'rb') as fh:
+            return fh.read()
 
 @rdc_profile.timed('container parse')
 def parse_container(path: str) -> CaptureInfo:
@@ -61,8 +77,7 @@ def parse_container(path: str) -> CaptureInfo:
     The section walk stops at the first byte that is not 0: that byte is the end-of-sections
     marker (see REFERENCE 3.1). Section names are decoded as UTF-8 and NUL-trimmed.
     """
-    with open(path, 'rb') as fh:
-        data: bytes = fh.read()
+    data: Buffer = _read_container(path)
     assert data[:4] == b'RDOC', 'not an rdc file'
 
     info: CaptureInfo = {
@@ -113,7 +128,7 @@ def parse_container(path: str) -> CaptureInfo:
         o = sec['dataOffset'] + sec['compLen']
     return info
 
-def lz4_block(src: bytes, out: bytearray) -> bytearray:
+def lz4_block(src: BufferLike, out: bytearray) -> bytearray:
     """Decompress one raw LZ4 block, appending to `out` and returning it.
 
     The return value is the same `bytearray` object that was passed in (tests compare it against
@@ -158,7 +173,7 @@ def lz4_block(src: bytes, out: bytearray) -> bytearray:
             out += (pat * ((mlen + offset - 1) // offset))[:mlen]
     return out
 
-def decompress_lz4(blob: bytes, expect: int) -> Tuple[bytes, int]:
+def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
     """Decompress a section body made of [u32 compressedBlockLength][raw LZ4 block]*.
 
     Returns the produced bytes and the number of blocks consumed. `expect` is the expected
@@ -190,9 +205,11 @@ def decompress_lz4(blob: bytes, expect: int) -> Tuple[bytes, int]:
         blocks += 1
         bar.tick(len(out))
     bar.done(len(out))
-    return bytes(out), blocks
+    # The bytearray goes out as it is: converting it copied the whole stream once more (1.47 GB for the
+    # hobby capture, ~0.2 s and a second copy of it in memory), and everything downstream accepts it.
+    return out, blocks
 
-def decompress_zstd(blob: bytes) -> bytes:
+def decompress_zstd(blob: Buffer) -> bytes:
     """Decompress a Zstd section body.
 
     The optional dependency is imported *inside* the function on purpose: the module stays
@@ -225,7 +242,7 @@ class FrameError(Exception):
     """A chunk frame that cannot be true -- raised by `iter_chunks(strict=True)`, collected by
     `check_stream()`. The default walk stops at such a frame instead (see `iter_chunks`)."""
 
-def _read_frame(stream: bytes, pos: int) -> Optional[Tuple[ChunkInfo, int]]:
+def _read_frame(stream: Buffer, pos: int) -> Optional[Tuple[ChunkInfo, int]]:
     """Parse the frame at `pos`: return `(chunk, next_pos)`, or None at the end of the stream.
 
     Raises `FrameError` when the frame claims bytes the stream does not hold (truncated metadata or
@@ -269,7 +286,7 @@ def _read_frame(stream: bytes, pos: int) -> Optional[Tuple[ChunkInfo, int]]:
                         'pad_len': align_up(pad_start) - pad_start}
     return chunk, align_up(pad_start)
 
-def iter_chunks(stream: bytes, limit: int = 0, strict: bool = False) -> Iterator[ChunkInfo]:
+def iter_chunks(stream: Buffer, limit: int = 0, strict: bool = False) -> Iterator[ChunkInfo]:
     """Yield one `ChunkInfo` per framed SDChunk in `stream` (see the framing note above).
 
     The walk is lenient by default: a frame that cannot be true ends the iteration, which is what a
@@ -293,7 +310,7 @@ def iter_chunks(stream: bytes, limit: int = 0, strict: bool = False) -> Iterator
         if limit and n >= limit:
             return
 
-def chunk_strings(stream: bytes, ch: ChunkInfo, minlen: int = 4, limit: int = 6) -> List[str]:
+def chunk_strings(stream: Buffer, ch: ChunkInfo, minlen: int = 4, limit: int = 6) -> List[str]:
     """Strings inside a payload (ASCII **and** UTF-16LE), de-duplicated and capped at `limit`.
 
     The cap is applied *while* collecting, and the wide half is skipped once `limit` ASCII strings are
@@ -321,12 +338,16 @@ def chunk_strings(stream: bytes, ch: ChunkInfo, minlen: int = 4, limit: int = 6)
                 break
     return out
 
-def chunk_payload(stream: bytes, ch: ChunkInfo) -> bytes:
-    """The payload bytes of a chunk (use this, never `off + 8`)."""
+def chunk_payload(stream: Buffer, ch: ChunkInfo) -> Union[bytes, bytearray]:
+    """The payload bytes of a chunk (use this, never `off + 8`).
+
+    A slice of an `mmap` is `bytes` and a slice of a `bytearray` is a `bytearray`; both decode, index
+    and unpack the same way, which is all any caller here does.
+    """
     return stream[ch['payload_offset']:ch['payload_offset'] + ch['length']]
 
 @rdc_profile.timed('verify: walk')
-def check_stream(stream: bytes, names: Optional[Dict[int, str]] = None,
+def check_stream(stream: Buffer, names: Optional[Dict[int, str]] = None,
                  note_samples: int = 5) -> Tuple[List[str], List[str]]:
     """Walk `stream` and return `(problems, notes)`; used by `verify`.
 

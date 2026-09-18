@@ -8,7 +8,7 @@ from rdc_cache import *  # noqa: F401,F403
 
 from typing import Dict, Iterator, List, Sequence, TypedDict
 
-def parse_dxil_containers(stream: bytes) -> Iterator[DxbcContainer]:
+def parse_dxil_containers(stream: Buffer) -> Iterator[DxbcContainer]:
     """Yield `(offset, size, hash_hex, parts)` for every DXBC/DXIL container in `stream`.
 
     Container header: 'DXBC' magic(4) | hash(16) | version(4) | size(4) | partCount(4) |
@@ -43,7 +43,7 @@ def parse_dxil_containers(stream: bytes) -> Iterator[DxbcContainer]:
         end = max(p[1] + p[2] for p in parts)
         yield i, end - i, stream[i + 4:i + 20].hex(), parts
 
-def part_strings(blob: bytes, off: int, ln: int, minlen: int = 4) -> List[str]:
+def part_strings(blob: Buffer, off: int, ln: int, minlen: int = 4) -> List[str]:
     """Return the ASCII strings (>= `minlen`) inside `blob[off:off+ln]`."""
     return [s for _, s in string_runs(blob, minlen, off, off + ln)]
 
@@ -89,13 +89,28 @@ def cmd_dxbc(path: str) -> None:
         print('%-4d 0x%-8x %-8d %-8s %-34s %s'
               % (idx, r['off'], r['size'], r['stage'], r['hash'][:32], ','.join(r['parts'])))
 
+def count_in(buf: Buffer, needle: bytes) -> int:
+    """`bytes.count` for a buffer that may be an `mmap`, which has no `count`.
+
+    Counts non-overlapping occurrences, exactly as `count` does, and answers `len(buf) + 1` for an empty
+    needle (`bytes.count(b'')` does the same). A `find` loop is the only way to that number on a map.
+    """
+    if not needle:
+        return len(buf) + 1
+    hits = 0
+    at = buf.find(needle)
+    while at >= 0:
+        hits += 1
+        at = buf.find(needle, at + len(needle))
+    return hits
+
 def cmd_count(path: str, pats: Sequence[str]) -> None:
     """Print the occurrence count and first offset of each pattern (verbatim, `-1` included)."""
     _info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
     for p in pats:
         b = p.encode()
-        print('  %-30s count=%-8d first=0x%x' % (p, stream.count(b), stream.find(b)))
+        print('  %-30s count=%-8d first=0x%x' % (p, count_in(stream, b), stream.find(b)))
 
 def cmd_hex(path: str, start: str, length: str) -> None:
     """Hex + ASCII dump of `[start, start+length)` (both arguments accept decimal and 0x hex)."""

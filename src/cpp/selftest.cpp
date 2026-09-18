@@ -591,6 +591,220 @@ int CmdSelftest()
     t.Equal(RejectionText(both), "scissor clipped, depth test failed", "pixelhistory-reason-order");
   }
 
+  // ------------------------------------------------------------------ per-pass folding
+  {
+    // A pass is a maximal run of consecutive *calls* sharing a marker path. The marker's own row is
+    // not a call and must not break the run, and a path that closes and reopens is two passes.
+    const struct
+    {
+      int eid;
+      bool bCall;
+      const char *path;
+    } kRows[] = {
+        {10, true, "A > B"}, {11, false, "A > B"},    // a marker's own row: not an event the pass's cost covers
+        {12, true, "A > B"}, {13, true, "A"},      {14, true, "A > B"}, {15, true, "A > B"},
+    };
+    std::vector<ActionNode> rows;
+    for(const auto &row : kRows)
+    {
+      ActionNode node;
+      node.m_Eid = row.eid;
+      node.m_bCall = row.bCall;
+      node.m_Path = row.path;
+      rows.push_back(node);
+    }
+
+    const std::vector<PassRange> passes = PassesFromActions(rows);
+    t.Check(passes.size() == 3, "passes-groups-consecutive-calls",
+            "consecutive calls under one marker path are not one pass");
+    if(passes.size() == 3)
+    {
+      t.Check(passes[0].m_First == 10 && passes[0].m_Last == 12, "passes-spans-its-calls",
+              "a pass's range is not its first and last call");
+      t.Equal(passes[0].m_Name, "A > B", "passes-name-is-the-marker-path");
+      t.Check(passes[1].m_First == 13 && passes[1].m_Last == 13, "passes-one-call-is-a-pass",
+              "a single call under its own path is not a pass");
+      t.Check(passes[2].m_First == 14 && passes[2].m_Last == 15,
+              "passes-reopened-path-is-two-passes",
+              "a path that closes and reopens is not one pass");
+    }
+
+    const std::string path = DefaultLogStem() + ".passes.txt";
+    {
+      FILE *f = fopen(path.c_str(), "wb");
+      if(f == NULL)
+        return Fail(1, "cannot write %s for the selftest", path.c_str());
+      fprintf(f, "# one pass per line\n");
+      fprintf(f, "\n");
+      fprintf(f, "100 140 BasePass\n");
+      fprintf(f, "141 150   Shadow > DirLight\n");
+      fprintf(f, "200 260\n");
+      fclose(f);
+    }
+    std::vector<PassRange> ranges;
+    std::string why;
+    const bool bRead = ReadPassRanges(path.c_str(), ranges, why);
+    remove(path.c_str());
+    t.Check(bRead, "read-pass-ranges", why.c_str());
+    if(bRead)
+    {
+      t.Check(ranges.size() == 3, "read-pass-ranges-skips-comments-and-blanks",
+              "a comment or a blank line was read as a pass");
+      if(ranges.size() == 3)
+      {
+        t.Check(ranges[0].m_First == 100 && ranges[0].m_Last == 140, "read-pass-ranges-ids",
+                "the range is not the two ids on the line");
+        t.Equal(ranges[0].m_Name, "BasePass", "read-pass-ranges-name");
+        t.Equal(ranges[1].m_Name, "Shadow > DirLight", "read-pass-ranges-name-keeps-its-spaces");
+        t.Equal(ranges[2].m_Name, "eid 200-260", "read-pass-ranges-unnamed-is-named-by-its-range");
+      }
+    }
+    {
+      FILE *f = fopen(path.c_str(), "wb");
+      if(f == NULL)
+        return Fail(1, "cannot write %s for the selftest", path.c_str());
+      fprintf(f, "100\n");
+      fclose(f);
+    }
+    std::vector<PassRange> bad;
+    std::string badWhy;
+    const bool bBad = ReadPassRanges(path.c_str(), bad, badWhy);
+    remove(path.c_str());
+    t.Check(!bBad, "read-pass-ranges-rejects-a-line-that-is-not-a-range",
+            "a line with one id was read as a pass");
+    t.Check(badWhy.find("line 1") != std::string::npos, "read-pass-ranges-says-which-line",
+            "the error does not name the line that is wrong");
+  }
+
+  // ------------------------------------------------------------------ folding a counter over passes
+  {
+    // The arithmetic of `counters --per-pass` is checked here because it cannot be checked against
+    // a capture: this machine's replays publish 16 counters and produce no results for either real
+    // one, so a pass's sum, peak and measured count are otherwise never exercised.
+    std::vector<PassRange> passes;
+    const struct
+    {
+      int first, last;
+      const char *name;
+    } kPasses[] = {{10, 12, "A"}, {20, 20, "B"}, {30, 39, "C"}};
+    for(const auto &p : kPasses)
+    {
+      PassRange pass;
+      pass.m_First = p.first;
+      pass.m_Last = p.last;
+      pass.m_Name = p.name;
+      passes.push_back(pass);
+    }
+
+    // The action tree is the authority for how many calls a pass holds.
+    int calls[] = {10, 11, 12, 20, 30, 31};
+    std::vector<ActionNode> rows;
+    for(size_t i = 0; i < sizeof(calls) / sizeof(calls[0]); i++)
+    {
+      ActionNode node;    // the check counts calls and nothing else, so there is no path to set
+      node.m_Eid = calls[i];
+      node.m_bCall = true;
+      rows.push_back(node);
+    }
+
+    rdcarray<CounterResult> results;
+    const struct
+    {
+      int eid;
+      double value;
+    } kValues[] = {{11, 2.0}, {10, 1.5}, {30, 4.0}, {99, 7.0}};
+    for(size_t i = 0; i < sizeof(kValues) / sizeof(kValues[0]); i++)
+    {
+      CounterResult result;
+      result.eventId = (uint32_t)kValues[i].eid;
+      result.counter = GPUCounter::EventGPUDuration;
+      result.value.d = kValues[i].value;
+      results.push_back(result);
+    }
+
+    const std::vector<PassCost> costs =
+        FoldPassCosts(results, GPUCounter::EventGPUDuration, CompType::Float, passes, rows);
+    t.Check(costs.size() == 3, "fold-one-row-per-pass",
+            "the folding did not produce one row a pass");
+    if(costs.size() == 3)
+    {
+      t.Check(
+          costs[0].m_Events == 3 && costs[0].m_Measured == 2, "fold-measured-is-not-events",
+          "a pass's event count and the events the counter answered for are not the same thing");
+      t.Check(costs[0].m_Sum > 3.4999 && costs[0].m_Sum < 3.5001, "fold-sums-the-pass",
+              "a pass's cost is not the sum of the counter over its events");
+      t.Check(costs[0].m_Max > 1.9999 && costs[0].m_Max < 2.0001, "fold-peak-is-the-largest-event",
+              "the peak is not the largest single value in the pass");
+      t.Check(costs[0].m_First == 10 && costs[0].m_Last == 12, "fold-keeps-the-range", "");
+      t.Equal(costs[0].m_Name, "A", "fold-keeps-the-pass-name");
+      // A pass with no answer from the counter is a pass that measured nothing, not a free pass.
+      t.Check(costs[1].m_Events == 1 && costs[1].m_Measured == 0 && costs[1].m_Sum == 0.0,
+              "fold-unmeasured-is-not-free", "a pass the counter skipped was given a cost");
+      // An event outside every pass contributes to nothing, and neither does another counter's.
+      t.Check(costs[2].m_Events == 2 && costs[2].m_Measured == 1 && costs[2].m_Sum > 3.9999,
+              "fold-ignores-ids-outside-the-pass", "an id outside every pass was folded in");
+    }
+
+    // A u64 counter read through `.d` is a different number, which is why the result type decides.
+    CounterResult counted;
+    counted.eventId = 10;
+    counted.counter = GPUCounter::EventGPUDuration;
+    counted.value.u64 = 9007199254740993ull;    // 2^53 + 1: exactly representable as u64, not double
+    rdcarray<CounterResult> ints;
+    ints.push_back(counted);
+    const std::vector<PassCost> folded =
+        FoldPassCosts(ints, GPUCounter::EventGPUDuration, CompType::UInt, passes, rows);
+    t.Check(!folded.empty() && folded[0].m_Sum == 9007199254740993.0, "fold-reads-a-u64-as-a-u64",
+            "a u64 counter was read as a double");
+  }
+
+  // ------------------------------------------------------------------ the cross-check comparisons
+  {
+    // `SignatureLinkText` returns empty for "this links", which is the one answer a reader cannot
+    // see from the call site -- and a check that says nothing when it passes is easy to get wrong.
+    SigParameter written;
+    written.semanticName = "TEXCOORD";
+    written.semanticIndex = 0;
+    written.compCount = 4;
+    written.varType = VarType::Float;
+
+    SigParameter read = written;
+    t.Check(SignatureLinkText(written, read).empty(), "link-identical-is-silent",
+            "the same element on both sides is reported as a mismatch");
+
+    read.compCount = 2;    // reading fewer than the writer produced is the normal case
+    t.Check(SignatureLinkText(written, read).empty(), "link-reading-fewer-components-is-silent",
+            "reading fewer components than were written is not a mismatch");
+
+    read.compCount = 4;
+    read.varType = VarType::Half;    // the same component family as Float
+    t.Check(SignatureLinkText(written, read).empty(), "link-float-and-half-are-one-family",
+            "float and half are the same component family");
+
+    read.varType = VarType::UInt;
+    t.Equal(SignatureLinkText(written, read), "written as float, read as uint",
+            "link-type-mismatch");
+
+    read.compCount = 5;    // more than the writer produced: those components were never written
+    t.Equal(SignatureLinkText(written, read), "written with 4 component(s), read as 5",
+            "link-reading-more-components");
+
+    // A render target's format is compared with what the shader writes by *family*: a float4 into a
+    // unorm target is the normal case, and `Typeless` is the capture saying it does not know.
+    t.Check(ComponentClass(CompType::UNorm) == CompType::Float, "component-class-unorm-is-float",
+            "a unorm target is not the float family a shader writes");
+    t.Check(ComponentClass(CompType::UInt) == CompType::UInt, "component-class-uint-is-uint", "");
+    t.Check(ComponentClass(CompType::SInt) == CompType::SInt, "component-class-sint-is-sint", "");
+    t.Check(ComponentClass(CompType::Typeless) == CompType::Typeless,
+            "component-class-keeps-i-do-not-know",
+            "typeless was folded into a family the state did not state");
+
+    ResourceFormat fmt;
+    fmt.compType = CompType::UNorm;
+    fmt.compCount = 4;
+    t.Equal(FormatText(fmt), "unorm4", "format-text");
+  }
+
   // ------------------------------------------------------------------ the help text and the DLL
   {
     std::string usage;
@@ -613,6 +827,10 @@ int CmdSelftest()
             "the usage text omits dump");
     t.Check(usage.find("pixelhistory") != std::string::npos, "usage-lists-pixelhistory",
             "the usage text omits pixelhistory");
+    t.Check(usage.find("crosscheck") != std::string::npos, "usage-lists-crosscheck",
+            "the usage text omits crosscheck");
+    t.Check(usage.find("--per-pass") != std::string::npos, "usage-lists-per-pass",
+            "the usage text omits counters --per-pass");
 
     HMODULE dll = LoadReplayDLL();
     if(dll == NULL)

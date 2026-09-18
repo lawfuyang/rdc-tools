@@ -381,23 +381,390 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   return bOk ? 0 : 1;
 }
 
-int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path)
+// --------------------------------------------------------------------------- per-pass counters
+//
+// `FetchCounters` answers per event and takes no range, so a pass's cost is folded here out of the
+// per-event list (ROADMAP 3). Three things about that are worth saying rather than assuming:
+//
+// * Which counter *is* the cost is the engine's choice, not ours: `EventGPUDuration` when this
+//   replay produced one, and the first counter it did produce otherwise. It is named in the
+//   document either way, because a cost column headed `counter(7)` says nothing.
+// * A pass is folded over `[firstEid, lastEid]`, both inclusive, and `measured` says how many of
+//   the pass's events actually produced a value -- a pass the counter skipped is not a free pass.
+// * A run with no counter results is *not* a run where every pass costs zero. GPU counters are a
+//   driver feature and are off, or unsupported, on plenty of machines: `available` and `note` carry
+//   that, and no table of zeros is printed to suggest otherwise.
+
+//: One counter folded over each pass. `FetchCounters` answers per event and takes no range, so a
+//: pass's cost is the sum of the values at the events in `[first, last]`, both inclusive -- and
+//: `measured` is how many of the pass's events produced one, because a pass the counter skipped is
+//: not a pass that cost nothing.
+//:
+//: Free of the controller on purpose: this machine's replays publish 16 counters and produce no
+//: results for either real capture, so the arithmetic is the one part of `--per-pass` that a check
+//: can reach.
+//: A counter result as a double, reading whichever member of the union the counter's own
+//: `resultType` says is meaningful. Reading `.d` for every counter -- which is what a first cut did
+//: -- prints a `u64` as a double, and a table of those is worse than no table.
+static double CounterValueAsDouble(const CounterResult &result, CompType resultType)
 {
-  PrintCaptureHeader(file, path);
+  switch(ComponentClass(resultType))
+  {
+    case CompType::UInt: return (double)result.value.u64;
+    case CompType::SInt: return (double)(long long)result.value.u64;
+    default: return result.value.d;
+  }
+}
+
+std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUCounter cost,
+                                    CompType resultType, const std::vector<PassRange> &passes,
+                                    const std::vector<ActionNode> &rows)
+{
+  std::vector<PassCost> costs;
+  costs.reserve(passes.size());
+  for(size_t p = 0; p < passes.size(); p++)
+  {
+    PassCost pc;
+    pc.m_Index = (int)p + 1;
+    pc.m_Name = passes[p].m_Name;
+    pc.m_First = passes[p].m_First;
+    pc.m_Last = passes[p].m_Last;
+    for(size_t i = 0; i < rows.size(); i++)
+      if(rows[i].m_bCall && rows[i].m_Eid >= pc.m_First && rows[i].m_Eid <= pc.m_Last)
+        pc.m_Events++;
+    for(size_t i = 0; i < results.size(); i++)
+    {
+      if(results[i].counter != cost)
+        continue;
+      const int id = (int)results[i].eventId;
+      if(id < pc.m_First || id > pc.m_Last)
+        continue;
+      const double value = CounterValueAsDouble(results[i], resultType);
+      pc.m_Sum += value;
+      if(pc.m_Measured == 0 || value > pc.m_Max)
+        pc.m_Max = value;
+      pc.m_Measured++;
+    }
+    costs.push_back(pc);
+  }
+  return costs;
+}
+
+std::vector<PassRange> PassesFromActions(const std::vector<ActionNode> &rows)
+{
+  std::vector<PassRange> passes;
+  for(size_t i = 0; i < rows.size(); i++)
+  {
+    if(!rows[i].m_bCall)
+      continue;
+    const std::string path(rows[i].m_Path.c_str(), rows[i].m_Path.size());
+    if(!passes.empty() && passes.back().m_Name == path)
+    {
+      // Same marker path as the call before it: still the same pass, which is what makes a pass the
+      // maximal run of consecutive calls sharing one and not merely one marker's own rows.
+      passes.back().m_Last = rows[i].m_Eid;
+      continue;
+    }
+    PassRange pass;
+    pass.m_Name = path;
+    pass.m_First = rows[i].m_Eid;
+    pass.m_Last = rows[i].m_Eid;
+    passes.push_back(pass);
+  }
+  return passes;
+}
+
+//: Reads the next integer in `line` from `pos`, and leaves `pos` just past it. Deliberately not
+//: `ParseInt` on a token: this is the front of a line whose tail is a free-text name, so there is
+//: nothing to split on and nothing to escape.
+static bool ReadRangeInt(const std::string &line, size_t &pos, int &value)
+{
+  pos = line.find_first_not_of(" \t", pos);
+  if(pos == std::string::npos)
+    return false;
+  const size_t start = pos;
+  while(pos < line.size() && line[pos] >= '0' && line[pos] <= '9')
+    pos++;
+  if(pos == start)
+    return false;
+  int parsed = 0;
+  if(!ParseInt(line.substr(start, pos - start).c_str(), parsed))
+    return false;
+  value = parsed;
+  return true;
+}
+
+bool ReadPassRanges(const char *path, std::vector<PassRange> &ranges, std::string &why)
+{
+  std::string text;
+  if(!ReadWholeFile(path, text))
+  {
+    why = Fmt("cannot read '%s'", path);
+    return false;
+  }
+
+  ranges.clear();
+  size_t at = 0;
+  int lineNo = 0;
+  while(at < text.size())
+  {
+    size_t end = text.find('\n', at);
+    if(end == std::string::npos)
+      end = text.size();
+    std::string line = text.substr(at, end - at);
+    at = end + 1;
+    lineNo++;
+    while(!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+      line.pop_back();
+
+    const size_t first = line.find_first_not_of(" \t");
+    if(first == std::string::npos || line[first] == '#')
+      continue;
+
+    size_t pos = first;
+    int firstEid = 0, lastEid = 0;
+    if(!ReadRangeInt(line, pos, firstEid) || !ReadRangeInt(line, pos, lastEid))
+    {
+      why = Fmt("line %d: expected '<first eid> <last eid> [<name>]', got \"%s\"", lineNo,
+                line.c_str());
+      return false;
+    }
+    if(firstEid <= 0 || lastEid < firstEid)
+    {
+      why = Fmt("line %d: %d..%d is not a range of event ids", lineNo, firstEid, lastEid);
+      return false;
+    }
+
+    PassRange pass;
+    pass.m_First = firstEid;
+    pass.m_Last = lastEid;
+    const size_t nameStart = line.find_first_not_of(" \t", pos);
+    // The name is optional and free text, so a pass nobody named is named by its range rather than
+    // by an invented one.
+    pass.m_Name = nameStart == std::string::npos ? Fmt("eid %d-%d", firstEid, lastEid)
+                                                 : line.substr(nameStart);
+    ranges.push_back(pass);
+  }
+
+  if(ranges.empty())
+  {
+    why = Fmt("'%s' names no passes", path);
+    return false;
+  }
+  return true;
+}
+
+//: The engine's own unit for a counter, which is the only authority for it: `EventGPUDuration`
+//: being milliseconds is a fact about the counter, not about the number.
+static const char *CounterUnitText(CounterUnit unit)
+{
+  switch(unit)
+  {
+    case CounterUnit::Seconds: return "s";
+    case CounterUnit::Percentage: return "%";
+    case CounterUnit::Ratio: return "x";
+    case CounterUnit::Bytes: return " bytes";
+    case CounterUnit::Cycles: return " cycles";
+    case CounterUnit::Hertz: return " Hz";
+    case CounterUnit::Volt: return " V";
+    case CounterUnit::Celsius: return " C";
+    default: return "";    // Absolute: the value is the value
+  }
+}
+
+int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPerPass,
+                const char *passesPath, int topN)
+{
   rdcarray<CounterResult> results = ctrl->FetchCounters(rdcarray<GPUCounter>());
 
-  // RenderDoc's own counter names live in its (unexported) stringise.cpp, so the enum value is what
-  // gets printed here; `GPUCounter`'s numbering is in the API headers.
-  ArrayOpen("counters");
-  for(size_t i = 0; i < results.size(); i++)
-    Row(Fmt("eid %-7u %-18s = %f", (unsigned)results[i].eventId,
-            CounterText(results[i].counter).c_str(), results[i].value.d));
-  ArrayClose(false);    // total follows
-  g_Indent = g_bJson ? 1 : 0;
-  Field("total", (long long)results.size(), true);
+  if(!bPerPass)
+  {
+    PrintCaptureHeader(file, path);
+
+    // RenderDoc's own counter names live in its (unexported) stringise.cpp, so the enum value is
+    // what gets printed here; `GPUCounter`'s numbering is in the API headers.
+    ArrayOpen("counters");
+    for(size_t i = 0; i < results.size(); i++)
+      Row(Fmt("eid %-7u %-18s = %f", (unsigned)results[i].eventId,
+              CounterText(results[i].counter).c_str(), results[i].value.d));
+    ArrayClose(false);    // total follows
+    g_Indent = g_bJson ? 1 : 0;
+    Field("total", (long long)results.size(), true);
+    g_Indent = 0;
+    if(g_bJson)
+      printf("}\n");
+    return 0;
+  }
+
+  // ---- one row per pass --------------------------------------------------------------------
+  PrintCaptureHeader(file, path);
+
+  // The action tree is where both the passes and the per-pass event counts come from, so it is
+  // fetched whether or not `--passes` supplies the ranges.
+  int calls = 0;
+  bool bTruncated = false;
+  const std::vector<ActionNode> rows = ActionTree(ctrl, calls, bTruncated);
+
+  std::vector<PassRange> passes;
+  std::string passesSource = "the frame's markers";
+  if(passesPath != NULL && passesPath[0] != '\0')
+  {
+    std::string why;
+    if(!ReadPassRanges(passesPath, passes, why))
+      return Fail(1, "counters: --passes: %s", why.c_str());
+    passesSource = passesPath;
+  }
+  else
+  {
+    passes = PassesFromActions(rows);
+  }
+
+  // Which counters this replay even has: the descriptions name them and give the unit and the
+  // result type, all of which are the engine's answer and not ours.
+  const rdcarray<GPUCounter> available = ctrl->EnumerateCounters();
+  std::map<GPUCounter, CounterDescription> descriptions;
+  for(size_t i = 0; i < available.size(); i++)
+    descriptions[available[i]] = ctrl->DescribeCounter(available[i]);
+
+  GPUCounter cost = GPUCounter::EventGPUDuration;
+  bool bHaveCost = false;
+  for(size_t i = 0; i < results.size() && !bHaveCost; i++)
+  {
+    if(results[i].counter == GPUCounter::EventGPUDuration)
+    {
+      cost = results[i].counter;
+      bHaveCost = true;
+    }
+  }
+  if(!bHaveCost && !results.empty())
+  {
+    cost = results[0].counter;
+    bHaveCost = true;
+  }
+
+  std::string costName = CounterText(cost);
+  std::string unit;
+  CompType resultType = CompType::Float;
+  const std::map<GPUCounter, CounterDescription>::const_iterator dit = descriptions.find(cost);
+  if(dit != descriptions.end())
+  {
+    if(!dit->second.name.empty())
+      costName = dit->second.name.c_str();
+    unit = CounterUnitText(dit->second.unit);
+    resultType = dit->second.resultType;
+  }
+
+  // Wrapped: `Field` has a `rdcstr` and a `string_view` overload and a bare literal is ambiguous
+  // between them.
+  Field("mode", std::string("per-pass"));
+  Field("costCounter", costName);
+  Field("unit", unit);
+  Field("passesFrom", passesSource);
+  Field("available", (long long)results.size());
+
+  if(!bHaveCost)
+  {
+    // Not "every pass costs zero": a table of zeros is a fact this machine did not give.
+    const std::string note =
+        available.empty()
+            ? std::string(
+                  "this replay publishes no counters at all -- GPU counters are a driver "
+                  "feature and are not available here, so no pass cost can be folded")
+            : Fmt("this replay publishes %d counter(s) but produced no results for this frame -- "
+                  "nothing was measured, so no pass cost can be folded",
+                  (int)available.size());
+    // The arrays are written empty rather than left out: a document whose members come and go with
+    // the answer is one a consumer cannot validate against one schema.
+    ArrayOpen("passes");
+    ArrayClose(false);
+    ArrayOpen("top");
+    ArrayClose(false);
+    Field("topCount", (long long)0);
+    Field("note", note, true);
+    g_Indent = 0;
+    if(g_bJson)
+      printf("}\n");
+    Log("counters: %s", note.c_str());
+    return 0;
+  }
+
+  const std::vector<PassCost> costs = FoldPassCosts(results, cost, resultType, passes, rows);
+
+  std::vector<int> order;
+  order.reserve(costs.size());
+  for(size_t i = 0; i < costs.size(); i++)
+    order.push_back((int)i);
+  std::stable_sort(order.begin(), order.end(), [&costs](int a, int b) {
+    if(costs[(size_t)a].m_Sum != costs[(size_t)b].m_Sum)
+      return costs[(size_t)a].m_Sum > costs[(size_t)b].m_Sum;
+    return a < b;    // a tie keeps frame order, so the same run prints the same thing twice
+  });
+  const int top = topN > 0 ? std::min<int>(topN, (int)order.size()) : (int)order.size();
+
+  ArrayOpen("passes");
+  for(size_t i = 0; i < costs.size(); i++)
+  {
+    const PassCost &pc = costs[i];
+    if(g_bJson)
+    {
+      ObjectOpen();
+      Field("pass", (long long)pc.m_Index);
+      Field("name", pc.m_Name);
+      Field("firstEid", (long long)pc.m_First);
+      Field("lastEid", (long long)pc.m_Last);
+      Field("events", (long long)pc.m_Events);
+      Field("measured", (long long)pc.m_Measured);
+      Field("cost", Fmt("%.3f", pc.m_Sum));
+      Field("peak", Fmt("%.3f", pc.m_Max), true);
+      ObjectClose();
+    }
+    else
+    {
+      const std::string name = pc.m_Name.empty() ? std::string("(no marker)") : pc.m_Name;
+      Row(Fmt("pass %-4d eid %-7d - %-7d %5d event(s), %5d measured   %-28s %s%s", pc.m_Index,
+              pc.m_First, pc.m_Last, pc.m_Events, pc.m_Measured, name.c_str(),
+              Fmt("%.3f", pc.m_Sum).c_str(), unit.c_str()));
+    }
+  }
+  ArrayClose(false);    // top follows
+
+  ArrayOpen("top");
+  for(int i = 0; i < top; i++)
+  {
+    const PassCost &pc = costs[(size_t)order[(size_t)i]];
+    if(g_bJson)
+    {
+      ObjectOpen();
+      Field("pass", (long long)pc.m_Index);
+      Field("name", pc.m_Name);
+      Field("cost", Fmt("%.3f", pc.m_Sum), true);
+      ObjectClose();
+    }
+    else
+    {
+      const std::string name = pc.m_Name.empty() ? std::string("(no marker)") : pc.m_Name;
+      Row(Fmt("%2d. pass %-4d %-44s %s%s", i + 1, pc.m_Index, name.c_str(),
+              Fmt("%.3f", pc.m_Sum).c_str(), unit.c_str()));
+    }
+  }
+  ArrayClose(false);
+  Field("topCount", (long long)top, true);
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");
+
+  const std::string headline =
+      costs.empty()
+          ? std::string("no passes to fold: the frame's calls carry no marker to group them by")
+          : Fmt("%d pass(es) folded over %s; dearest: %s (eid %d-%d) at %.3f%s -- %d of %d "
+                "event(s) with a value",
+                (int)costs.size(), passesSource.c_str(),
+                costs[(size_t)order[0]].m_Name.empty() ? "(no marker)"
+                                                       : costs[(size_t)order[0]].m_Name.c_str(),
+                costs[(size_t)order[0]].m_First, costs[(size_t)order[0]].m_Last,
+                costs[(size_t)order[0]].m_Sum, unit.c_str(), costs[(size_t)order[0]].m_Measured,
+                costs[(size_t)order[0]].m_Events);
+  Log("counters: %s", headline.c_str());
   return 0;
 }
 

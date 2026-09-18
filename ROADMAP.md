@@ -55,7 +55,9 @@ SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads,
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (REFERENCE §4.10) and the root signatures (REFERENCE §3.4), inventories the
 DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
-rendered image, and the bundle the report generator reads (`dump` + `bundle-verify`). The offline tool has a
+rendered image, the cross-checks between a shader's reflection and the state it is given (`crosscheck`), the
+per-pass counter fold (`counters --per-pass`), and the bundle the report generator reads (`dump` +
+`bundle-verify`). The offline tool has a
 hermetic unittest suite (`python src\py\rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
 `build/` folder. `AGENTS.md` holds the coding rules, REFERENCE §4.6/§4.7 how to run both. That suite is the safety
@@ -121,10 +123,6 @@ say so explicitly, and should degrade gracefully when it is missing.
   per-step variables and the outputs of one invocation. Only works for shaders built with debug info
   (`-Zi -Od`), which most captures do not have — the item is to *say that clearly* rather than fail obscurely,
   and to document how to re-capture with it. (~2 d)
-* **Cross-checks between the reflections and the state** — cheap, deterministic, and they catch real bugs: VS
-  output signature vs PS input signature (same semantics/index/width), each stage's expected bindings vs what
-  the root signature and root parameters actually bind (kind, register, space), and the RT formats vs the PS
-  output signature. Output as a checklist with the eid it applies to, so the report can consume it directly. (~1 d)
 * **Overlays as images** — `TextureDisplay` renders one texture; the overlay enum (`DebugOverlay`: `Drawcall`,
   `Wireframe`, `Depth`, `Stencil`, `BackfaceCull`, `ViewportScissor`, and the triangle-size / quad-overdraw
   overlays) annotates the targets themselves. A `--overlay wireframe|quad` switch on `image` gives the classic
@@ -133,11 +131,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 3. P1/P2 — Replay driver: the frame's pictures, counters and geometry
 
-* **Per-pass counters** — `FetchCounters(counters)` returns results per event (`CounterResult.eventId`); there is
-  no event-range parameter, so per-pass means folding the per-event list client-side between a pass's first and
-  last eid. New command `counters --per-pass [--passes <path>]`, printing a table and the top-N cost passes, for
-  the summary's performance section. Availability is hardware and driver specific (and the API says which
-  counters exist), so the item is also to report "not available here" honestly rather than print zeros. (~1 d)
 * **Geometry beyond the vertex shader's output** — `mesh` currently reads `MeshDataStage::VSOut`. The enum also
   has `VSIn`, `GSOut`, `TaskOut`/`AmpOut` and `MeshOut` (there is no separate HS/DS output stage), so a mesh
   shader's or GS's actual output is reachable — plus `--obj <file>` to export the vertices and indices for an
@@ -320,15 +313,14 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — exploration and experiments**
-1. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
-2. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
+1. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
    detector could use from it has landed as the usage-chain rules).
 
 **Phase 2 — comparisons and the long tail**
-3. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
-4. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
+2. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
+3. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-5. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+4. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
    REFERENCE §8 bullet that is not replay's job.
-6. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
-7. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.
+5. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
+6. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.

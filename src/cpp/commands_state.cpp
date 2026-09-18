@@ -1175,3 +1175,520 @@ int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *pat
   }
   return 0;
 }
+
+// --------------------------------------------------------------------------- crosscheck
+//
+// Three checks, each comparing two things the capture *states* against each other rather than
+// inferring either of them:
+//
+//   vs-ps-link  the vertex shader's output signature against the pixel shader's input signature
+//   bindings    what a stage's reflection says it binds, against what the root signature declares
+//   rt-format   the bound render targets' formats, against what the pixel shader writes
+//
+// Deterministic by construction, which is the point (ROADMAP 2): every finding names an event and
+// quotes both sides, so `state <eid>` and `shaders <eid>` show the reader the same two things.
+//
+// All three need shader reflection, and a capture whose shaders were stripped has none -- on those
+// the three `...Checked` counts are 0 and an empty `findings` means *nothing was checked*, not
+// *nothing is wrong*. That is why the counts are in the document: a silent run has to say so.
+
+//: One line of the checklist. `check` says which of the three produced it, `detail` says what was
+//: found in the capture's own words, and `eid`/`marker` say where to look with `state`.
+struct CrossCheckFinding
+{
+  int m_Eid = 0;
+  std::string m_Marker;
+  std::string m_Check;
+  std::string m_Detail;
+};
+
+//: What a signature element is called, in the only form a link comparison can use: HLSL matches a
+//: semantic by name and index, and both are case-insensitive (`TEXCOORD0` and `texcoord0` are the
+//: same link). An empty name -- a stripped reflection has no semantics at all -- matches nothing.
+static std::string SemanticKey(const SigParameter &sig)
+{
+  return LowerAscii(sig.semanticName.c_str()) + Fmt("#%d", (int)sig.semanticIndex);
+}
+
+std::string SignatureLinkText(const SigParameter &written, const SigParameter &read)
+{
+  // Reading *fewer* components than the writer produced is the normal case (a `float4` output read
+  // as a `float2`), so only reading more is reported: those components were never written.
+  if(read.compCount > written.compCount)
+    return Fmt("written with %u component(s), read as %u", (unsigned)written.compCount,
+               (unsigned)read.compCount);
+
+  // Compared as component *families*, by the header's own `VarTypeCompType`: `float` and `half` are
+  // the same family, `float` and `uint` are not, and a `Typeless` side means the reflection does
+  // not say -- which is not a mismatch anyone can act on.
+  const CompType writtenType = ComponentClass(VarTypeCompType(written.varType));
+  const CompType readType = ComponentClass(VarTypeCompType(read.varType));
+  if(writtenType != readType && writtenType != CompType::Typeless && readType != CompType::Typeless)
+    return Fmt("written as %s, read as %s", CastText(writtenType), CastText(readType));
+
+  return std::string();
+}
+
+static bool StageVisibleTo(ShaderStageMask mask, ShaderStage stage)
+{
+  if(mask == ShaderStageMask::All)
+    return true;
+  return ((uint32_t)mask & (1u << (uint32_t)stage)) != 0;
+}
+
+//: Whether any root parameter visible to `stage` declares `category` at `space`/`reg`.
+static bool RootDeclares(const D3D12Pipe::RootSignature &root, DescriptorCategory category,
+                         uint32_t space, uint32_t reg, ShaderStage stage)
+{
+  for(int p = 0; p < (int)root.parameters.size(); p++)
+  {
+    const D3D12Pipe::RootParam &param = root.parameters[p];
+    if(!StageVisibleTo(param.visibility, stage))
+      continue;
+
+    if(!param.tableRanges.empty())
+    {
+      // A table declares itself by its ranges and by nothing else: `reg`/`space` on a *table*
+      // parameter are not the ranges' registers (they read 0 on every table measured), so matching
+      // them here would call every binding at b0 s0 covered by every table.
+      for(int r = 0; r < (int)param.tableRanges.size(); r++)
+      {
+        const D3D12Pipe::RootTableRange &range = param.tableRanges[r];
+        if(range.category != category || range.space != space)
+          continue;
+        // An unbounded range is written as 0 or as UINT32_MAX; both mean "everything from here on".
+        const bool bUnbounded = (range.count == 0 || range.count == ~0u);
+        if(reg >= range.baseRegister && (bUnbounded || reg < range.baseRegister + range.count))
+          return true;
+      }
+      continue;
+    }
+
+    // A root constant or a root descriptor: the register and the space are in the state, but which
+    // of the three categories the parameter is *for* is not -- so a match here covers the binding
+    // rather than proving the categories agree, and it is not turned into a finding either way.
+    // `state` prints the row this was decided from, which is the honest place to look.
+    if(param.space == space && param.reg == reg)
+      return true;
+  }
+  return false;
+}
+
+//: The span of registers the root signature declares for one register class -- `b`, `t` or `u` at
+//: one space -- or "it declares none at all".
+//:
+//: Which is the question that decides whether an uncovered binding can be reported. A shader that
+//: reads its resources bindlessly (SM 6.6 `ResourceDescriptorHeap`) lists bindings the root
+//: signature need not declare, and that is indistinguishable from a range somebody forgot: measured
+//: on the UE captures, where most compute passes are exactly that and a per-binding "not declared"
+//: line put 4373 rows on a frame with nothing wrong with it -- over the every-id sweep this command
+//: also replaced, so the same rule over the frame's 144 calls is nearer 500. So a class the
+//: signature never mentions is counted and left alone, and only a binding *outside* a class it does
+//: declare is reported -- the "the table is too small" shape, which is decidable.
+static bool DeclaredSpan(const D3D12Pipe::RootSignature &root, DescriptorCategory category,
+                         uint32_t space, ShaderStage stage, uint32_t &lo, uint32_t &hi)
+{
+  bool bAny = false;
+  lo = ~0u;
+  hi = 0;
+  for(int p = 0; p < (int)root.parameters.size(); p++)
+  {
+    const D3D12Pipe::RootParam &param = root.parameters[p];
+    if(!StageVisibleTo(param.visibility, stage))
+      continue;
+    for(int r = 0; r < (int)param.tableRanges.size(); r++)
+    {
+      const D3D12Pipe::RootTableRange &range = param.tableRanges[r];
+      if(range.category != category || range.space != space)
+        continue;
+      // An unbounded range is written as 0 or as UINT32_MAX; both mean "everything from here on",
+      // and then no binding can be outside it.
+      const uint32_t last =
+          (range.count == 0 || range.count == ~0u) ? ~0u : range.baseRegister + range.count - 1;
+      lo = std::min(lo, range.baseRegister);
+      hi = std::max(hi, last);
+      bAny = true;
+    }
+  }
+  return bAny;
+}
+
+//: One binding against the root signature. One line per binding and not per register: an array's
+//: uncovered tail says nothing the first uncovered register did not.
+static void CheckBindingList(int eid, const std::string &marker, ShaderStage stage,
+                             const D3D12Pipe::RootSignature &root, DescriptorCategory category,
+                             const char *name, uint32_t bindNumber, uint32_t space,
+                             uint32_t arraySize, std::vector<CrossCheckFinding> &out, int &checked,
+                             int &unmapped)
+{
+  checked++;
+
+  uint32_t lo = 0, hi = 0;
+  if(!DeclaredSpan(root, category, space, stage, lo, hi))
+  {
+    unmapped++;    // the signature says nothing about this register class: counted, not reported
+    return;
+  }
+
+  const uint32_t count = arraySize == 0 ? 1 : arraySize;
+  for(uint32_t i = 0; i < count; i++)
+  {
+    if(RootDeclares(root, category, space, bindNumber + i, stage))
+      continue;
+    out.push_back(
+        {eid, marker, "bindings",
+         Fmt("%s binds %s at %c%u s%u (%u register(s)) which no root parameter visible to "
+             "%s declares: the %c ranges it does declare at s%u cover %c%u-%c%u",
+             StageName(stage), name, RegisterLetter(category), bindNumber, space, count,
+             StageName(stage), RegisterLetter(category), space, RegisterLetter(category), lo,
+             RegisterLetter(category), hi)});
+    return;
+  }
+}
+
+static void CheckBindings(int eid, const std::string &marker, ShaderStage stage,
+                          const ShaderReflection *refl, const D3D12Pipe::RootSignature &root,
+                          std::vector<CrossCheckFinding> &out, int &checked, int &unmapped)
+{
+  if(refl == NULL)
+    return;
+
+  for(size_t i = 0; i < refl->constantBlocks.size(); i++)
+  {
+    const ConstantBlock &block = refl->constantBlocks[i];
+    CheckBindingList(eid, marker, stage, root, DescriptorCategory::ConstantBlock,
+                     block.name.empty() ? "(unnamed)" : block.name.c_str(), block.fixedBindNumber,
+                     block.fixedBindSetOrSpace, block.bindArraySize, out, checked, unmapped);
+  }
+  for(size_t i = 0; i < refl->readOnlyResources.size(); i++)
+  {
+    const ShaderResource &res = refl->readOnlyResources[i];
+    CheckBindingList(eid, marker, stage, root, DescriptorCategory::ReadOnlyResource,
+                     res.name.empty() ? "(unnamed)" : res.name.c_str(), res.fixedBindNumber,
+                     res.fixedBindSetOrSpace, res.bindArraySize, out, checked, unmapped);
+  }
+  for(size_t i = 0; i < refl->readWriteResources.size(); i++)
+  {
+    const ShaderResource &res = refl->readWriteResources[i];
+    CheckBindingList(eid, marker, stage, root, DescriptorCategory::ReadWriteResource,
+                     res.name.empty() ? "(unnamed)" : res.name.c_str(), res.fixedBindNumber,
+                     res.fixedBindSetOrSpace, res.bindArraySize, out, checked, unmapped);
+  }
+}
+
+static void CheckLink(int eid, const std::string &marker, const ShaderReflection *vs,
+                      const ShaderReflection *ps, std::vector<CrossCheckFinding> &out, int &checked)
+{
+  if(vs == NULL || ps == NULL)
+    return;
+
+  for(size_t i = 0; i < ps->inputSignature.size(); i++)
+  {
+    const SigParameter &read = ps->inputSignature[i];
+    // SV_Position and friends are the pipeline's, not a shader-to-shader link: the rasteriser fills
+    // them in and no stage has to write them.
+    if(read.systemValue != ShaderBuiltin::Undefined)
+      continue;
+    if(read.semanticName.empty())
+      continue;
+
+    const std::string key = SemanticKey(read);
+    const SigParameter *written = NULL;
+    for(size_t j = 0; j < vs->outputSignature.size(); j++)
+    {
+      if(SemanticKey(vs->outputSignature[j]) == key)
+      {
+        written = &vs->outputSignature[j];
+        break;
+      }
+    }
+
+    checked++;
+    if(written == NULL)
+    {
+      out.push_back({eid, marker, "vs-ps-link",
+                     Fmt("ps reads %s which vs does not write", SignatureText(read).c_str())});
+      continue;
+    }
+    const std::string why = SignatureLinkText(*written, read);
+    if(!why.empty())
+      out.push_back({eid, marker, "vs-ps-link",
+                     Fmt("ps reads %s: %s", SignatureText(read).c_str(), why.c_str())});
+  }
+}
+
+//: Whether a pixel-shader output is a colour target, and which slot it is. The compiler picks the
+//: spelling and both occur: `SV_Target` carries the slot in the semantic index, `SV_Target2` in the
+//: name. An output that is neither is not a colour target (SV_Depth, SV_Coverage, ...).
+static bool TargetSlot(const SigParameter &sig, int &slot)
+{
+  if(sig.systemValue == ShaderBuiltin::ColorOutput)
+  {
+    slot = (int)sig.semanticIndex;
+    return true;
+  }
+  const std::string name = LowerAscii(sig.semanticName.c_str());
+  if(name.compare(0, 9, "sv_target") != 0)
+    return false;
+  if(name == "sv_target")
+  {
+    slot = (int)sig.semanticIndex;
+    return true;
+  }
+  return ParseInt(name.c_str() + 9, slot) && slot >= 0;
+}
+
+static void CheckTargets(int eid, const std::string &marker, const D3D12Pipe::State *d3d12,
+                         const ShaderReflection *ps, std::vector<CrossCheckFinding> &out,
+                         int &checked)
+{
+  if(ps == NULL)
+    return;
+
+  const rdcarray<Descriptor> &targets = d3d12->outputMerger.renderTargets;
+  int bound = 0;
+  for(size_t i = 0; i < targets.size(); i++)
+    if(targets[i].resource != ResourceId::Null())
+      bound++;
+
+  std::map<int, const SigParameter *> outputs;
+  for(size_t i = 0; i < ps->outputSignature.size(); i++)
+  {
+    int slot = 0;
+    if(TargetSlot(ps->outputSignature[i], slot))
+      outputs[slot] = &ps->outputSignature[i];
+  }
+  const int declared = outputs.empty() ? 0 : (int)outputs.rbegin()->first + 1;
+
+  // A fact, not a verdict: the write to an unbound target is dropped, which is legal and is also
+  // what a pass that lost a colour target looks like. Both readings are the reader's to make.
+  if(declared > bound)
+    out.push_back({eid, marker, "rt-format",
+                   Fmt("ps writes %d colour target(s) (SV_Target0..%d) but %d render target(s) are "
+                       "bound",
+                       declared, declared - 1, bound)});
+
+  for(size_t i = 0; i < targets.size(); i++)
+  {
+    if(targets[i].resource == ResourceId::Null())
+      continue;
+    const std::map<int, const SigParameter *>::const_iterator it = outputs.find((int)i);
+    if(it == outputs.end())
+      continue;    // no ps output for this slot: nothing to compare the format against
+
+    checked++;
+    const CompType rtType = ComponentClass(targets[i].format.compType);
+    const CompType shaderType = ComponentClass(VarTypeCompType(it->second->varType));
+    // Typeless on either side is "the capture does not say", not a mismatch.
+    if(rtType == CompType::Typeless || shaderType == CompType::Typeless || rtType == shaderType)
+      continue;
+    out.push_back({eid, marker, "rt-format",
+                   Fmt("rt%u is %s but ps writes it as %s", (unsigned)i,
+                       FormatText(targets[i].format).c_str(), CastText(shaderType))});
+  }
+}
+
+static const ShaderReflection *ReflectionFor(IReplayController *ctrl, const D3D12Pipe::State *d3d12,
+                                             ShaderStage stage)
+{
+  const D3D12Pipe::Shader *shader = StageShader(d3d12, stage);
+  if(shader == NULL || shader->resourceId == ResourceId::Null())
+    return NULL;
+  // The pipe state carries the reflection when the engine already has it; `GetShader` is the same
+  // answer the long way round.
+  if(shader->reflection != NULL)
+    return shader->reflection;
+  return ctrl->GetShader(d3d12->pipelineResourceId, shader->resourceId,
+                         ShaderEntryPoint(rdcstr(), stage));
+}
+
+static bool AnyStageBound(const D3D12Pipe::State *d3d12)
+{
+  for(const ShaderStage stage : ReportedStages())
+  {
+    const D3D12Pipe::Shader *shader = StageShader(d3d12, stage);
+    if(shader != NULL && shader->resourceId != ResourceId::Null())
+      return true;
+  }
+  return false;
+}
+
+//: The three checks at one event. Returns false when the event has no shaders bound, which is a
+//: call with nothing to compare (a copy, a barrier, a clear) rather than a failure.
+static bool CheckEvent(IReplayController *ctrl, int eid, std::vector<CrossCheckFinding> &findings,
+                       int &linksChecked, int &bindingsChecked, int &bindingsUnmapped,
+                       int &targetsChecked, int &noRootParameters)
+{
+  const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
+  if(d3d12 == NULL || !AnyStageBound(d3d12))
+    return false;
+
+  const std::string marker = MarkerPathAt(ctrl, eid);
+  const ShaderReflection *vs = ReflectionFor(ctrl, d3d12, ShaderStage::Vertex);
+  const ShaderReflection *ps = ReflectionFor(ctrl, d3d12, ShaderStage::Pixel);
+
+  CheckLink(eid, marker, vs, ps, findings, linksChecked);
+  if(d3d12->rootSignature.parameters.empty())
+  {
+    // Counted, not reported: an empty root signature is `rootSignature 0` in the state, which on
+    // the UE captures is how a compute event comes back and is not a defect anyone can act on --
+    // and one row per event put a thousand rows of it on a frame. It is a fact about what could be
+    // checked, which is what `bindingsChecked` is for.
+    noRootParameters++;
+  }
+  else
+  {
+    for(const ShaderStage stage : ReportedStages())
+      CheckBindings(eid, marker, stage, ReflectionFor(ctrl, d3d12, stage), d3d12->rootSignature,
+                    findings, bindingsChecked, bindingsUnmapped);
+  }
+  CheckTargets(eid, marker, d3d12, ps, findings, targetsChecked);
+  return true;
+}
+
+int CmdCrosscheck(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int since,
+                  int until, int maxEvents, int maxRows)
+{
+  // The action tree is the authority for the last event id (`chunks` numbering is a different one,
+  // REFERENCE 9), and the sweep needs it whether or not an eid was given.
+  int calls = 0;
+  bool bTruncated = false;
+  const std::vector<ActionNode> rows = ActionTree(ctrl, calls, bTruncated);
+  int last = 0;
+  for(size_t i = 0; i < rows.size(); i++)
+    if(rows[i].m_Eid > last)
+      last = rows[i].m_Eid;
+
+  const int from = eid > 0 ? eid : (since > 0 ? since : 1);
+  const int to = eid > 0 ? eid : (until > 0 ? until : last);
+  if(from <= 0 || to < from)
+    return Fail(3,
+                "crosscheck: nothing to check: the range %d..%d is empty (the capture's last "
+                "event id is %d)",
+                from, to, last);
+
+  // The sweep walks the frame's *calls*, not every id. `dump` walks every id and stops after 256 in
+  // a row with no state, which is right for a scan that is looking for state changes; here it is
+  // wrong twice over -- an id that is not a call has no state of its own to check (`SetFrameEvent`
+  // answers at any id with whatever is still bound, so the same state comes back dozens of times),
+  // and a stop-after-256 rule on a capture where 119 of 1736 ids are calls ends the walk inside the
+  // first marker. Measured on the hobby capture: 1736 ids, 119 calls.
+  std::vector<int> ids;
+  if(eid > 0)
+  {
+    ids.push_back(eid);    // asked for by hand: checked whether or not the tree calls it a call
+  }
+  else
+  {
+    for(size_t i = 0; i < rows.size(); i++)
+      if(rows[i].m_bCall && rows[i].m_Eid >= from && rows[i].m_Eid <= to)
+        ids.push_back(rows[i].m_Eid);
+  }
+
+  std::vector<CrossCheckFinding> findings;
+  int linksChecked = 0, bindingsChecked = 0, bindingsUnmapped = 0, targetsChecked = 0;
+  int noRootParameters = 0;
+  int scanned = 0;
+  int visited = 0;    // ids the sweep positioned the replay on, which is not `scanned`
+  bool bStoppedEarly = false;
+
+  Progress progress;
+  progress.Begin("crosscheck", (int)ids.size());
+
+  for(size_t n = 0; n < ids.size(); n++)
+  {
+    visited++;
+    const int id = ids[(size_t)n];
+    const ULONGLONG sinceEvent = Millis();
+    // `force` so a repeated id is not skipped: the answer has to be the state at *this* id, not
+    // "already there".
+    ctrl->SetFrameEvent((uint32_t)id, true);
+    ProfileAdd(kProfileSetFrameEvent, sinceEvent);
+
+    const ULONGLONG sinceChecks = Millis();
+    const bool bHasState = CheckEvent(ctrl, id, findings, linksChecked, bindingsChecked,
+                                      bindingsUnmapped, targetsChecked, noRootParameters);
+    ProfileAdd(kProfileCrosscheck, sinceChecks);
+
+    if(!bHasState)
+      continue;    // a call with nothing bound: no reflection, so nothing to compare
+
+    scanned++;
+    progress.Tick((int)n + 1);
+
+    if(maxEvents > 0 && scanned >= maxEvents)
+    {
+      bStoppedEarly = true;
+      break;
+    }
+  }
+  // What was *visited*, not the size of the list: `--max-events` can end the sweep early, and a
+  // progress line reading `119/119 done` after five events have been checked is a false statement
+  // in the log, which is the one place a stopped run has to say so.
+  progress.Done(visited);
+
+  PrintCaptureHeader(file, path);
+  Field("eid", (long long)(eid > 0 ? eid : 0));
+  Field("from", (long long)from);
+  Field("to", (long long)to);
+  Field("scanned", (long long)scanned);
+  // How much was actually compared: an empty `findings` next to three zeros means the capture has
+  // no reflection to check, which is a different answer from "everything links".
+  Field("linksChecked", (long long)linksChecked);
+  Field("bindingsChecked", (long long)bindingsChecked);
+  Field("bindingsUnmapped", (long long)bindingsUnmapped);
+  Field("targetsChecked", (long long)targetsChecked);
+  Field("noRootParameters", (long long)noRootParameters);
+  Field("total", (long long)findings.size());
+
+  const int shown = maxRows > 0 ? std::min<int>(maxRows, (int)findings.size()) : (int)findings.size();
+  ArrayOpen("findings");
+  for(int i = 0; i < shown; i++)
+  {
+    const CrossCheckFinding &f = findings[i];
+    if(IsJson())
+    {
+      ObjectOpen();
+      Field("eid", (long long)f.m_Eid);
+      Field("marker", f.m_Marker);
+      Field("check", f.m_Check);
+      Field("detail", f.m_Detail, true);
+      ObjectClose();
+    }
+    else
+    {
+      const std::string where = f.m_Marker.empty() ? std::string() : "  [" + f.m_Marker + "]";
+      Row(Fmt("eid %-7d %-11s %s%s", f.m_Eid, f.m_Check.c_str(), f.m_Detail.c_str(), where.c_str()));
+    }
+  }
+  if(!IsJson() && shown < (int)findings.size())
+    printf("... %d more (--max %d)\n", (int)findings.size() - shown, maxRows);
+  ArrayClose(false);
+  Field("shown", (long long)shown);
+  Flag("stoppedEarly", bStoppedEarly, true);
+  g_Indent = 0;
+  if(IsJson())
+    printf("}\n");
+
+  const int all = (int)findings.size();
+  if(all == 0)
+  {
+    Log("crosscheck: %d finding(s) in %d event(s) with state (eid %d..%d); %d link(s), %d "
+        "binding(s) "
+        "(%d at a register class the root signature never declares) and %d target(s) checked; %d "
+        "event(s) with no root parameters",
+        all, scanned, from, to, linksChecked, bindingsChecked, bindingsUnmapped, targetsChecked,
+        noRootParameters);
+  }
+  else
+  {
+    Log("crosscheck: %d finding(s) in %d event(s) with state (eid %d..%d); %d link(s), %d "
+        "binding(s) "
+        "(%d at a register class the root signature never declares) and %d target(s) checked; %d "
+        "event(s) with no root parameters -- first: eid %d %s: %s",
+        all, scanned, from, to, linksChecked, bindingsChecked, bindingsUnmapped, targetsChecked,
+        noRootParameters, findings[0].m_Eid, findings[0].m_Check.c_str(),
+        findings[0].m_Detail.c_str());
+  }
+  return 0;
+}

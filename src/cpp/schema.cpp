@@ -296,6 +296,96 @@ const SchemaDoc kSchemas[] = {
   "additionalProperties": false
 })sc"},
 
+    {"counters-passes", "counters --per-pass", R"sc({
+  "title": "counters-passes",
+  "description": "One counter folded over each pass. `FetchCounters` answers per event and takes no range, so the per-event results are summed here between a pass's first and last event id; `measured` is how many of the pass's events the counter produced a value for, and `peak` is the largest single one. Which counter is the cost is the engine's choice (`EventGPUDuration` when this replay produced one) and it is named in `costCounter` with its `unit`, because a column headed `counter(7)` says nothing. A replay with no counter results carries `available` 0 and a `note` instead of a table of zeros: GPU counters are a driver feature and are not available everywhere.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "mode",
+               "costCounter", "unit", "passesFrom", "available", "passes", "top", "topCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "mode": {"const": "per-pass"},
+    "costCounter": {"type": "string", "description": "the counter the cost column folds, named by the engine when it offers a name"},
+    "unit": {"type": "string", "description": "the engine's own unit for that counter, empty when the value is absolute"},
+    "passesFrom": {"type": "string", "description": "where the pass list came from: `the frame's markers`, or the `--passes` file"},
+    "available": {"type": "integer", "description": "how many counter results this frame produced; 0 means nothing was measured"},
+    "passes": {"type": "array", "items": {
+      "type": "object",
+      "required": ["pass", "name", "firstEid", "lastEid", "events", "measured", "cost", "peak"],
+      "properties": {
+        "pass": {"type": "integer", "description": "1-based, matching the terminal's `pass 1`"},
+        "name": {"type": "string", "description": "the marker path the pass's calls share, empty outside every marker"},
+        "firstEid": {"type": "integer"},
+        "lastEid": {"type": "integer"},
+        "events": {"type": "integer", "description": "calls in the pass, from the action tree"},
+        "measured": {"type": "integer", "description": "of those, how many produced a counter value"},
+        "cost": {"type": "string", "description": "the counter summed over the pass, as text (the writer has no fractional field)"},
+        "peak": {"type": "string", "description": "the largest single value in the pass"}
+      },
+      "additionalProperties": false
+    }},
+    "top": {"type": "array", "items": {
+      "type": "object",
+      "required": ["pass", "name", "cost"],
+      "properties": {
+        "pass": {"type": "integer", "description": "the 1-based pass number, an index into `passes`"},
+        "name": {"type": "string"},
+        "cost": {"type": "string"}
+      },
+      "additionalProperties": false
+    }, "description": "the dearest passes, `topCount` of them, most expensive first"},
+    "topCount": {"type": "integer"},
+    "note": {"type": "string", "description": "why no cost could be folded, written when `available` is 0"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"crosscheck", "crosscheck", R"sc({
+  "title": "crosscheck",
+  "description": "What the reflections say a shader wants, against what the state says it was given: the vertex shader's outputs against the pixel shader's inputs, each stage's bindings against the root signature's declared ranges, and the bound render targets' formats against the pixel shader's outputs. Every row names the event it applies to and quotes both sides, so `state <eid>` and `shaders <eid>` show the same two things. The three `...Checked` counts say how much was actually compared: both sides need shader reflection, so a capture with stripped shaders checks nothing, and an empty `findings` next to three zeros means nothing was checked rather than that the frame is clean.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "from",
+               "to", "scanned", "linksChecked", "bindingsChecked", "bindingsUnmapped", "targetsChecked",
+               "noRootParameters", "total", "findings", "shown", "stoppedEarly"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer", "description": "the event when one was named on the command line, 0 for a range"},
+    "from": {"type": "integer", "description": "first event id checked, inclusive"},
+    "to": {"type": "integer", "description": "last event id checked, inclusive"},
+    "scanned": {"type": "integer", "description": "events in that range that had shaders bound"},
+    "linksChecked": {"type": "integer", "description": "ps inputs matched against the vs outputs"},
+    "bindingsChecked": {"type": "integer", "description": "shader bindings matched against the root signature"},
+    "bindingsUnmapped": {"type": "integer", "description": "of those, the ones at a register class the root signature declares nothing for. Counted and not reported: a shader reading its resources bindlessly (SM 6.6 `ResourceDescriptorHeap`), or one HLSL binds wider than the code it compiled to uses, lists bindings the root signature need not declare, and that is indistinguishable from a range somebody forgot. Measured on the Unreal captures, where most compute passes are exactly that and reporting them put 4373 rows on a frame with nothing wrong with it (over the every-id sweep this command also replaced; over the frame's 144 calls the same rule is nearer 500). Only a binding *outside* a class the signature does declare is reported -- the `the table is too small` shape, which is decidable."},
+    "targetsChecked": {"type": "integer", "description": "bound render targets whose format was compared with the ps output"},
+    "noRootParameters": {"type": "integer", "description": "scanned events whose state carries no root parameters at all. Counted and not reported: on the Unreal captures every compute event answers `rootSignature 0`, which is a fact about what the engine reports rather than a defect, and one row per event put a thousand rows of it on a frame."},
+    "total": {"type": "integer", "description": "findings, before --max"},
+    "findings": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "marker", "check", "detail"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "marker": {"type": "string", "description": "the engine's marker path at that event, empty outside every marker"},
+        "check": {"enum": ["vs-ps-link", "bindings", "rt-format"]},
+        "detail": {"type": "string", "description": "what was found, naming both sides"}
+      },
+      "additionalProperties": false
+    }},
+    "shown": {"type": "integer", "description": "rows written, capped by --max"},
+    "stoppedEarly": {"type": "boolean", "description": "true when --max-events ended the sweep before `to`"}
+  },
+  "additionalProperties": false
+})sc"},
+
     {"textures", "textures", R"sc({
   "title": "textures",
   "description": "Every texture the engine knows, with the format and dimensions from the resource description.",

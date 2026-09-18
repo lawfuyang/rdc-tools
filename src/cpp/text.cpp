@@ -306,6 +306,22 @@ std::string SignatureText(const SigParameter &sig)
              sig.compCount, VarTypeText(sig.varType));
 }
 
+std::string FormatText(const ResourceFormat &fmt)
+{
+  return Fmt("%s%d", CastText(fmt.compType), fmt.compCount);
+}
+
+CompType ComponentClass(CompType type)
+{
+  switch(type)
+  {
+    case CompType::UInt: return CompType::UInt;
+    case CompType::SInt: return CompType::SInt;
+    case CompType::Typeless: return CompType::Typeless;
+    default: return CompType::Float;
+  }
+}
+
 //: The shader reflection: constant blocks with their names and bind points, the resource bindings,
 //: the input/output signatures, and the disassembly. This is what names a root parameter, and what
 //: the offline tool's removed `sig`/`dxbc` harvest was trying to guess at.

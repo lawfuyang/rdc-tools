@@ -94,7 +94,15 @@ void Usage()
       "(--compare\n"
       "                                    renders before and after and writes both plus a diff "
       "map)\n"
-      "  counters <rdc>                    available GPU counters and their values\n"
+      "  counters <rdc> [--per-pass] [--passes <file>] [--top N]   GPU counters per event; "
+      "--per-pass\n"
+      "                                    folds one counter over each pass and lists the dearest\n"
+      "  crosscheck <rdc> [eid] [--since N] [--until N] [--max-events N] [--max N]\n"
+      "                                    what the reflections say a shader wants against what "
+      "the\n"
+      "                                    state says it was given: the vs->ps link, each stage's\n"
+      "                                    bindings against the root signature, and the render\n"
+      "                                    targets against the pixel shader's outputs\n"
       "  debug   <rdc>                     debug messages (validation layer, etc.)\n"
       "  usage   <rdc> <resId>             every event that touches a resource\n"
       "  probe   <rdc> [maxEid=2000]       which event ids actually have pipeline state\n"
@@ -153,6 +161,31 @@ void Usage()
       "commands: opening a capture and standing the replay engine up costs ~3 s on a small "
       "capture\n"
       "and ~10 s on a 1.4 GB one, and batch pays it once for the whole file.\n"
+      "\n"
+      "`counters --per-pass` folds one counter over each pass: `FetchCounters` answers per event "
+      "and\n"
+      "takes no range, so the per-event list is summed here between a pass's first and last event "
+      "id.\n"
+      "The passes come from the frame's markers (consecutive calls sharing a marker path are one\n"
+      "pass) or from `--passes <file>`, one `<first eid> <last eid> [<name>]` line per pass. "
+      "Which\n"
+      "counter is the cost is the engine's choice -- `EventGPUDuration` when this replay produced\n"
+      "one, the first it produced otherwise -- and it is named in the document; a replay with no\n"
+      "counter results says so rather than printing a table of zeros, because GPU counters are a\n"
+      "driver feature and are not available everywhere.\n"
+      "\n"
+      "`crosscheck` compares two things the capture *states* against each other, so every line is "
+      "a\n"
+      "fact with an event id on it: the vertex shader's outputs against the pixel shader's "
+      "inputs,\n"
+      "each stage's bindings against the root signature's declared ranges, and the render "
+      "targets'\n"
+      "formats against the pixel shader's outputs. Both sides need shader reflection, and a "
+      "capture\n"
+      "with stripped shaders has none -- so `linksChecked`, `bindingsChecked` and "
+      "`targetsChecked`\n"
+      "say how much was actually compared, and an empty findings list next to three zeros means\n"
+      "nothing was, not that the frame is clean.\n"
       "\n"
       "`dump` writes a bundle for the offline tool (ROADMAP §1): events.json for every id with "
       "bound\n"
@@ -379,6 +412,31 @@ int MinArgs(const char *cmd)
   return 1;
 }
 
+//: Whether a command's event id may be left out -- in which case the argument after the command is
+//: not necessarily one, because an option can sit in its place and a whole-frame sweep is the
+//: meaning of no id at all.
+//:
+//: Only `crosscheck`. Every other command in the `bTakesEid` list *needs* its id, and that is what
+//: lets their callers count arguments instead of looking at them.
+bool CommandIdIsOptional(const char *cmd)
+{
+  return strcmp(cmd, "crosscheck") == 0;
+}
+
+//: Whether an argument list already carries the command's positional event id -- the test that
+//: decides whether `--at-marker` is a duplicate of one.
+//:
+//: Counting is how this was decided, and it is right for a command whose id is *required*: a list
+//: long enough to hold one has one. Where the id is optional an option can sit in its slot
+//: (`crosscheck --at-marker X --max 5` is not a duplicate id), so there the answer is what
+//: `args[1]` *is* -- an event id, `last`, or a marker path, none of which begins with '-'.
+bool CommandHasPositionalId(const char *cmd, const std::vector<std::string> &args)
+{
+  if(CommandIdIsOptional(cmd))
+    return args.size() > 1 && args[1].compare(0, 1, "-") != 0;
+  return (int)args.size() >= MinArgs(cmd);
+}
+
 //: Runs one command against an already-open capture. Shared by `main`, `batch` and `--repl`, so a
 //: command name, its arguments and its options mean the same thing however they were spelled.
 int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
@@ -402,7 +460,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   const bool bTakesEid = !strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "cb") ||
                          !strcmp(cmd, "mesh") || !strcmp(cmd, "image") ||
                          !strcmp(cmd, "statediff") || !strcmp(cmd, "patch") ||
-                         !strcmp(cmd, "pixelhistory");
+                         !strcmp(cmd, "pixelhistory") || !strcmp(cmd, "crosscheck");
   if(!atMarkerText.empty())
   {
     std::string matched;
@@ -420,7 +478,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
       // the slot to make room instead -- which is what this did -- took the *next* positional with it
       // whenever the id had been left out (`image --at-marker X out.bmp` ran `image X`, which is
       // `unknown command`), because nothing here can tell a missing id from a resource name.
-      if((int)args.size() >= MinArgs(cmd))
+      if(CommandHasPositionalId(cmd, args))
         return Fail(2,
                     "%s already has its event id ('%s'): `--at-marker` supplies one *instead* of a "
                     "positional, not as well as one",
@@ -443,6 +501,14 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     for(size_t slot = 1; slot <= slots; slot++)
     {
       if(args.size() <= slot)
+        break;
+      // An option in the id's slot means no id was given -- but only where an id may be left out:
+      // `crosscheck --since 1` is a sweep, not a check of an event called `--since`. Anywhere else
+      // the slot holds an id, and letting an option stand there turned a typo'd option into eid 0:
+      // measured, `state --bogus` printed `eid 0` and exited 0 where it used to say `--bogus` is
+      // neither an id nor a marker path. A wrong id answering with an empty state is exactly what
+      // this tool must not do quietly.
+      if(CommandIdIsOptional(cmd) && args[slot].compare(0, 1, "-") == 0)
         break;
       int eid = 0;
       std::string resolved;
@@ -523,7 +589,15 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   if(!strcmp(cmd, "image") && args.size() > 2)
     return CmdImage(ctrl, file, path, ToInt(args[1], 0), args[2].c_str());
   if(!strcmp(cmd, "counters"))
-    return CmdCounters(ctrl, file, path);
+    return CmdCounters(ctrl, file, path, HasOpt(args, "--per-pass"),
+                       OptValue(args, "--passes", NULL), ToInt(OptValue(args, "--top", "5"), 5));
+  if(!strcmp(cmd, "crosscheck"))
+    // The id is optional, so `args[1]` is only one when it is not an option -- `crosscheck --since
+    // 1` would otherwise ask `ToInt` to read `--since` and warn about it.
+    return CmdCrosscheck(
+        ctrl, file, path, CommandHasPositionalId(cmd, args) ? ToInt(args[1], 0) : 0,
+        ToInt(OptValue(args, "--since", "0"), 0), ToInt(OptValue(args, "--until", "0"), 0),
+        ToInt(OptValue(args, "--max-events", "0"), 0), ToInt(OptValue(args, "--max", "200"), 200));
   if(!strcmp(cmd, "debug"))
     return CmdDebug(ctrl, file, path);
   if(!strcmp(cmd, "usage") && args.size() > 1)

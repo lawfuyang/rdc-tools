@@ -227,13 +227,13 @@ not exist yet, everything else runs today.
   `dump-chunk`, `dump-shaders`, `cache`, `selftest` (REFERENCE §4).
 * **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `pixelhistory`, `shaders`, `cb`,
   `textures`,
-  `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters`,
+  `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters` (`--per-pass`), `crosscheck`,
   `debug`, `usage`, `probe`, `batch`, `--repl`/`--stdin`, the bundle pair `dump` + `bundle-verify`, and the
   contract pair `schema` + `selftest` (REFERENCE §9). `find` and an event id argument both take a **marker
   path** as well as a number (and `last` for the frame's own last event), so a command can be pointed at a
   pass rather than at an id.
 * **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), shader debugging, overlays
-  (ROADMAP §2), per-pass counters, `mesh --stage/--obj`, texture subresources (ROADMAP §3), `deps`,
+  (ROADMAP §2), `mesh --stage/--obj`, texture subresources (ROADMAP §3), `deps`,
   memory/aliasing report, `--format`, structural `diff` (ROADMAP §4), `replaydiff` (ROADMAP §5), the capture
   corpus and the golden/fixture tests (ROADMAP §6).
 
@@ -268,7 +268,8 @@ offline tool, and it survives the process that produced it; stdout does not, and
 | render targets | `image <eid> <out.bmp>`, or `sheet <rdc> <dir>` for every pass at once; bundle `rt/` (REFERENCE §9) | what the pass produced — the fastest way to see "this pass drew nothing" |
 | one pixel's history | `pixelhistory <eid\|last> <resId> <x> <y>` (REFERENCE §9) | "why is this pixel this colour": every event up to the scope that tried to write it, the test that rejected each, and the value before, from and after it |
 | geometry | `mesh <eid>` today; other stages and `--obj` *(ROADMAP §3)* | what the VS/GS emitted, which is where vertex bugs show themselves |
-| GPU counters | `counters` today; per-pass fold *(ROADMAP §3)* | where the time went, where the driver supports it |
+| GPU counters | `counters`, and `counters --per-pass` for the fold over each pass | where the time went, where the driver supports it |
+| reflection vs state | `crosscheck` | the deterministic bugs: a ps reading what the vs never wrote, a binding outside the ranges the root signature declares, a target whose format is not what the shader writes |
 | debug messages | `debug` | the API's own complaints — the highest-value red flags there are |
 | usage chains | `usage <resId>`, or `resources.json` (REFERENCE §9) | who writes and who reads a resource: the evidence for "dead" and "uninitialised" |
 | resource identity | `resources <rdc>` (offline) | names and sizes for every id, so output speaks in names instead of `res342` |
@@ -391,7 +392,8 @@ a puzzle to keep grinding at.
 
 ```powershell
 .\bin\replay_dump.exe counters 'capture.rdc'                 # what the driver can measure
-.\bin\replay_dump.exe counters 'capture.rdc' --per-pass      # roadmap §3: folded per pass (fetch is per event)
+.\bin\replay_dump.exe counters 'capture.rdc' --per-pass      # folded per pass (fetch is per event)
+.\bin\replay_dump.exe crosscheck 'capture.rdc'               # reflection vs state, every pass
 .\bin\replay_dump.exe image 'capture.rdc' <eid> out.bmp      # what each pass produced (contact sheet, ROADMAP §3)
 ```
 

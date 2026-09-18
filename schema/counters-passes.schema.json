@@ -1,0 +1,48 @@
+{
+  "title": "counters-passes",
+  "description": "One counter folded over each pass. `FetchCounters` answers per event and takes no range, so the per-event results are summed here between a pass's first and last event id; `measured` is how many of the pass's events the counter produced a value for, and `peak` is the largest single one. Which counter is the cost is the engine's choice (`EventGPUDuration` when this replay produced one) and it is named in `costCounter` with its `unit`, because a column headed `counter(7)` says nothing. A replay with no counter results carries `available` 0 and a `note` instead of a table of zeros: GPU counters are a driver feature and are not available everywhere.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "mode",
+               "costCounter", "unit", "passesFrom", "available", "passes", "top", "topCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "mode": {"const": "per-pass"},
+    "costCounter": {"type": "string", "description": "the counter the cost column folds, named by the engine when it offers a name"},
+    "unit": {"type": "string", "description": "the engine's own unit for that counter, empty when the value is absolute"},
+    "passesFrom": {"type": "string", "description": "where the pass list came from: `the frame's markers`, or the `--passes` file"},
+    "available": {"type": "integer", "description": "how many counter results this frame produced; 0 means nothing was measured"},
+    "passes": {"type": "array", "items": {
+      "type": "object",
+      "required": ["pass", "name", "firstEid", "lastEid", "events", "measured", "cost", "peak"],
+      "properties": {
+        "pass": {"type": "integer", "description": "1-based, matching the terminal's `pass 1`"},
+        "name": {"type": "string", "description": "the marker path the pass's calls share, empty outside every marker"},
+        "firstEid": {"type": "integer"},
+        "lastEid": {"type": "integer"},
+        "events": {"type": "integer", "description": "calls in the pass, from the action tree"},
+        "measured": {"type": "integer", "description": "of those, how many produced a counter value"},
+        "cost": {"type": "string", "description": "the counter summed over the pass, as text (the writer has no fractional field)"},
+        "peak": {"type": "string", "description": "the largest single value in the pass"}
+      },
+      "additionalProperties": false
+    }},
+    "top": {"type": "array", "items": {
+      "type": "object",
+      "required": ["pass", "name", "cost"],
+      "properties": {
+        "pass": {"type": "integer", "description": "the 1-based pass number, an index into `passes`"},
+        "name": {"type": "string"},
+        "cost": {"type": "string"}
+      },
+      "additionalProperties": false
+    }, "description": "the dearest passes, `topCount` of them, most expensive first"},
+    "topCount": {"type": "integer"},
+    "note": {"type": "string", "description": "why no cost could be folded, written when `available` is 0"}
+  },
+  "additionalProperties": false
+}

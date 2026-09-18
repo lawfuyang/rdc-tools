@@ -93,6 +93,19 @@ const char *BlendMultiplierText(BlendMultiplier m);
 const char *BlendOperationText(BlendOperation op);
 const char *VarTypeText(VarType t);
 std::string SignatureText(const SigParameter &sig);
+//: A format as the type its components carry and how many: `unorm4`, `float2`.
+//: `ResourceFormat::Name()` is the engine's own word for the format, but it is a call into the DLL
+//: and it is the *named* format only -- a cast target, or a format the engine has no name for, is
+//: better described by what is in the struct.
+std::string FormatText(const ResourceFormat &fmt);
+//: Which family a component type belongs to: UInt, SInt, or Float.
+//:
+//: Everything that is not an integer -- unorm, snorm, the scaled types, sRGB, a depth format -- is
+//: Float, because that is what the shader sees and what a texture typed as one of them stores: a
+//: `float4` written to a `R8G8B8A8_UNORM` target is the normal case, and calling that a mismatch
+//: would be a false positive on nearly every pass in every capture. `Typeless` stays Typeless,
+//: which is how "the state does not say" is kept distinct from "the state says float".
+CompType ComponentClass(CompType type);
 std::string FormatValue(const ShaderVariable &v, int depth);
 std::string FormatValue(const ShaderVariable &v);
 void PrintVariables(const rdcarray<ShaderVariable> &vars, int depth);
@@ -232,6 +245,7 @@ enum ProfileSlot
   kProfileMessages,         // messages.json
   kProfileTextures,         // textures.json and texture decoding
   kProfileUsage,            // the usage lists the bundle carries
+  kProfileCrosscheck,       // the cross-check sweep: one SetFrameEvent per event, plus the checks
   kProfileCount
 };
 
@@ -340,6 +354,47 @@ std::string LowerAscii(std::string_view text);
 //: path that won, so a caller can print what it resolved to rather than what was typed. Full path
 //: first, then a component of one (`BasePass` answers for `Scene > BasePass`), then a substring.
 int ResolveMarkerPath(IReplayController *ctrl, const char *text, std::string &matched);
+
+//: One pass, as a range of event ids with the marker path its events sit inside.
+//:
+//: `FetchCounters` answers per event and there is no event-range parameter (ROADMAP 3), so folding
+//: a counter over a pass means folding it over `[first, last]` here. Two ways to get the ranges:
+//:
+//: * `PassesFromActions`: the engine's own action tree, grouped into maximal runs of consecutive
+//:   calls sharing a marker path. A path is `A > B`, so a nested marker is its own pass and a pass
+//:   ends where the next one's path begins.
+//: * `ReadPassRanges`: a file, one pass per line, `<first> <last> [<name>]`, `#` for a comment.
+//:   For a pass list that did not come from this frame's markers -- the offline tool's own
+//:   grouping, or a range someone is looking at -- which is why the name is optional and free text.
+//:
+//: `first`/`last` are inclusive event ids; a pass with no calls never appears.
+struct PassRange
+{
+  std::string m_Name;
+  int m_First = 0;
+  int m_Last = 0;
+};
+
+std::vector<PassRange> PassesFromActions(const std::vector<ActionNode> &rows);
+bool ReadPassRanges(const char *path, std::vector<PassRange> &ranges, std::string &why);
+
+//: One counter folded over one pass.
+struct PassCost
+{
+  int m_Index = 0;    // 1-based, matching the terminal's `pass 1`
+  std::string m_Name;
+  int m_First = 0;
+  int m_Last = 0;
+  int m_Events = 0;      // calls in the pass, from the action tree
+  int m_Measured = 0;    // of those, how many the counter produced a value for
+  double m_Sum = 0.0;
+  double m_Max = 0.0;
+};
+
+std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUCounter cost,
+                                    CompType resultType, const std::vector<PassRange> &passes,
+                                    const std::vector<ActionNode> &rows);
+
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
 std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 
@@ -387,7 +442,16 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
             int maxRows);
 int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
              const char *outPath);
-int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path);
+int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPerPass,
+                const char *passesPath, int topN);
+//: The cross-checks (ROADMAP 2): what the reflections say a shader wants against what the state says
+//: it was given. Deterministic, because both sides are in the capture -- no heuristic and no guess.
+//:
+//: `SignatureLinkText` is declared here because the device-free selftest checks it directly: an
+//: empty return meaning "this links" is the one thing a reader cannot see from the call site.
+std::string SignatureLinkText(const SigParameter &written, const SigParameter &read);
+int CmdCrosscheck(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int since,
+                  int until, int maxEvents, int maxRows);
 int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path);
 int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what);
 int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid);

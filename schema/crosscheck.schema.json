@@ -1,0 +1,40 @@
+{
+  "title": "crosscheck",
+  "description": "What the reflections say a shader wants, against what the state says it was given: the vertex shader's outputs against the pixel shader's inputs, each stage's bindings against the root signature's declared ranges, and the bound render targets' formats against the pixel shader's outputs. Every row names the event it applies to and quotes both sides, so `state <eid>` and `shaders <eid>` show the same two things. The three `...Checked` counts say how much was actually compared: both sides need shader reflection, so a capture with stripped shaders checks nothing, and an empty `findings` next to three zeros means nothing was checked rather than that the frame is clean.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "from",
+               "to", "scanned", "linksChecked", "bindingsChecked", "bindingsUnmapped", "targetsChecked",
+               "noRootParameters", "total", "findings", "shown", "stoppedEarly"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer", "description": "the event when one was named on the command line, 0 for a range"},
+    "from": {"type": "integer", "description": "first event id checked, inclusive"},
+    "to": {"type": "integer", "description": "last event id checked, inclusive"},
+    "scanned": {"type": "integer", "description": "events in that range that had shaders bound"},
+    "linksChecked": {"type": "integer", "description": "ps inputs matched against the vs outputs"},
+    "bindingsChecked": {"type": "integer", "description": "shader bindings matched against the root signature"},
+    "bindingsUnmapped": {"type": "integer", "description": "of those, the ones at a register class the root signature declares nothing for. Counted and not reported: a shader reading its resources bindlessly (SM 6.6 `ResourceDescriptorHeap`), or one HLSL binds wider than the code it compiled to uses, lists bindings the root signature need not declare, and that is indistinguishable from a range somebody forgot. Measured on the Unreal captures, where most compute passes are exactly that and reporting them put 4373 rows on a frame with nothing wrong with it (over the every-id sweep this command also replaced; over the frame's 144 calls the same rule is nearer 500). Only a binding *outside* a class the signature does declare is reported -- the `the table is too small` shape, which is decidable."},
+    "targetsChecked": {"type": "integer", "description": "bound render targets whose format was compared with the ps output"},
+    "noRootParameters": {"type": "integer", "description": "scanned events whose state carries no root parameters at all. Counted and not reported: on the Unreal captures every compute event answers `rootSignature 0`, which is a fact about what the engine reports rather than a defect, and one row per event put a thousand rows of it on a frame."},
+    "total": {"type": "integer", "description": "findings, before --max"},
+    "findings": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "marker", "check", "detail"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "marker": {"type": "string", "description": "the engine's marker path at that event, empty outside every marker"},
+        "check": {"enum": ["vs-ps-link", "bindings", "rt-format"]},
+        "detail": {"type": "string", "description": "what was found, naming both sides"}
+      },
+      "additionalProperties": false
+    }},
+    "shown": {"type": "integer", "description": "rows written, capped by --max"},
+    "stoppedEarly": {"type": "boolean", "description": "true when --max-events ended the sweep before `to`"}
+  },
+  "additionalProperties": false
+}

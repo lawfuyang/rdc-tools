@@ -5,6 +5,7 @@ from __future__ import annotations
 from rdc_types import *  # noqa: F401,F403
 from rdc_chunkmap import *  # noqa: F401,F403
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_profile
 
 import re
 import struct
@@ -53,6 +54,7 @@ def u64(b: Buffer, o: int) -> int:
     """Read a little-endian unsigned 64-bit value at offset `o`."""
     return struct.unpack_from('<Q', b, o)[0]
 
+@rdc_profile.timed('container parse')
 def parse_container(path: str) -> CaptureInfo:
     """Parse the `.rdc` container header, metadata, thumbnail and section table.
 
@@ -175,6 +177,9 @@ def decompress_lz4(blob: bytes, expect: int) -> Tuple[bytes, int]:
     out = bytearray()
     o = 0
     blocks = 0
+    bar = rdc_profile.progress('lz4 decode (%d bytes of blocks)' % len(blob), expect or len(blob),
+                               'bytes')
+    bar.begin()
     while o + 4 <= len(blob) and (expect == 0 or len(out) < expect):
         clen = u32(blob, o)
         o += 4
@@ -183,6 +188,8 @@ def decompress_lz4(blob: bytes, expect: int) -> Tuple[bytes, int]:
         lz4_block(blob[o:o + clen], out)
         o += clen
         blocks += 1
+        bar.tick(len(out))
+    bar.done(len(out))
     return bytes(out), blocks
 
 def decompress_zstd(blob: bytes) -> bytes:
@@ -287,21 +294,38 @@ def iter_chunks(stream: bytes, limit: int = 0, strict: bool = False) -> Iterator
             return
 
 def chunk_strings(stream: bytes, ch: ChunkInfo, minlen: int = 4, limit: int = 6) -> List[str]:
-    """Strings inside a payload (ASCII **and** UTF-16LE), de-duplicated and capped at `limit`."""
+    """Strings inside a payload (ASCII **and** UTF-16LE), de-duplicated and capped at `limit`.
+
+    The cap is applied *while* collecting, and the wide half is skipped once `limit` ASCII strings are
+    in -- which is the same answer the old order produced (ASCII first, then UTF-16LE, then the cap),
+    for a fraction of the work. It used to collect every run, then de-duplicate with `not in`, then
+    cap: a stream holds 8.4 M runs of four printable bytes or more (measured on the hobby capture), so
+    that was quadratic per payload and, with the UTF-16 decode it did not need, 13 ms per chunk across
+    its 29,212 chunks -- six and a half minutes for `chunks <rdc> 0`, none of it in the decode.
+    """
+    if limit <= 0:
+        return []
     blob = chunk_payload(stream, ch)
-    found = [s for _, s in string_runs(blob, minlen)]
-    wide = blob.decode('utf-16-le', 'ignore')
-    found += [m.group() for m in _wide_pattern(minlen).finditer(wide)]
     out: List[str] = []
-    for s in found:
+    for _, s in string_runs(blob, minlen):
         if s not in out:
             out.append(s)
-    return out[:limit]
+            if len(out) >= limit:
+                return out
+    wide = blob.decode('utf-16-le', 'ignore')
+    for m in _wide_pattern(minlen).finditer(wide):
+        s = m.group()
+        if s not in out:
+            out.append(s)
+            if len(out) >= limit:
+                break
+    return out
 
 def chunk_payload(stream: bytes, ch: ChunkInfo) -> bytes:
     """The payload bytes of a chunk (use this, never `off + 8`)."""
     return stream[ch['payload_offset']:ch['payload_offset'] + ch['length']]
 
+@rdc_profile.timed('verify: walk')
 def check_stream(stream: bytes, names: Optional[Dict[int, str]] = None,
                  note_samples: int = 5) -> Tuple[List[str], List[str]]:
     """Walk `stream` and return `(problems, notes)`; used by `verify`.

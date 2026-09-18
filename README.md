@@ -28,6 +28,7 @@ rdc-tools/
   src/py/             the offline tool, one module per layer (REFERENCE §3, §4)
     rdc_analysis.py     the CLI: the command table and the dispatch (run this)
     rdc_types.py        the shapes of what the tool reads, and the constants they are framed with
+    rdc_profile.py      phase timing and live progress ($RDC_PROFILE / $RDC_PROGRESS, §4.13)
     rdc_chunkmap.py     chunk id -> name, from the RenderDoc source tree's enums
     rdc_renderdoc_src.py  where that tree is, and fetching it when it is not there (§1.1)
     rdc_stream.py       the container and the frame stream (sections, framing, LZ4/Zstd)
@@ -36,6 +37,7 @@ rdc-tools/
     rdc_resources.py    formats, the resource table, descriptor heaps, root signatures, `RDEF`
     rdc_payloads.py     the chunk payload decoders (draw state, pipeline, CBVs, vertex buffers)
     rdc_commands.py     the commands themselves (draws, resources, descriptors, verify, ...)
+    rdc_scan.py         the whole-stream string scan, split across processes (§4.13)
     rdc_report.py       the frame report: a bundle in, deterministic Markdown/JSON out (§4.11)
     rdc_bundle.py       the bundle's types and loader
     rdc_passes.py       pass reconstruction and the frame-at-a-glance roll-ups
@@ -487,6 +489,14 @@ silence.
 * **Formats and features are conditional.** Not every texture format can be decoded, shader debugging needs
   debug info that captures usually lack, counters need driver support, and pixel history needs the capture to
   support it. Report the gap; do not synthesise around it.
+* **A long scan is split across processes, and only when the stream is cached.** `strings` and `names` scan
+  the whole stream in slices, each in its own process, each mapping the *cached* stream rather than being
+  handed the bytes — so `$RDC_NO_CACHE`, or a capture whose stream has never been stored, runs the same scan
+  in one process, several times slower. `$RDC_PROFILE=1` prints which path was taken and what it cost
+  (REFERENCE §4.13).
+* **Whatever starts a pool must be importable without side effects.** On Windows a worker re-imports
+  `__main__`, so a script or test module that decompresses at module level does it once per worker. The tool
+  itself guards `main()`; a throwaway harness has to do the same.
 
 ### What "best analysis" means here
 

@@ -7,6 +7,7 @@ from rdc_chunkmap import *  # noqa: F401,F403
 from rdc_stream import *  # noqa: F401,F403
 from rdc_dxbc import *  # noqa: F401,F403
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_profile
 
 import os
 
@@ -60,6 +61,7 @@ def _parse_acceleration_structure(blob: bytes) -> Optional[Tuple[int, ResourceIn
     return u64(blob, 28), ResourceInfo(kind=kind, name='', size=u64(blob, 20), width=0, height=0,
                                        depth=0, mips=0, format=0, gpuAddress=0)
 
+@rdc_profile.timed('resource table')
 def parse_resource_table(stream: bytes,
                          names: Optional[Dict[int, str]] = None) -> Dict[int, ResourceInfo]:
     """Build the resource table (id -> description) from the creation chunks and `SetName`.
@@ -109,6 +111,7 @@ def _portable_handle(blob: bytes, offset: int) -> Optional[Tuple[int, int]]:
         return None
     return u64(blob, offset), u32(blob, offset + 8)
 
+@rdc_profile.timed('descriptor heaps')
 def parse_descriptor_heaps(stream: bytes, names: Optional[Dict[int, str]] = None
                            ) -> Dict[int, Dict[int, DescriptorInfo]]:
     """Build `heapId -> {index: DescriptorInfo}` from the descriptor writes and copies.
@@ -264,6 +267,7 @@ def _parse_root_signature(data: bytes) -> Optional[RootSignature]:
     return RootSignature(id=0, version=ROOT_VERSIONS[version], flags=u32(data, 20), dwords=dwords,
                          params=params, samplers=num_samplers)
 
+@rdc_profile.timed('root signatures')
 def parse_root_signatures(stream: bytes,
                           names: Optional[Dict[int, str]] = None) -> Dict[int, RootSignature]:
     """Every root signature the capture creates, by the resource id that binds it.

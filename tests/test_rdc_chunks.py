@@ -342,6 +342,20 @@ class TestChunkPayloadAndStrings(unittest.TestCase):
         data, ch = self.make(b'\x00oneone\x00twotwo\x00threethree\x00fourfour\x00')
         self.assertEqual(R.chunk_strings(data, ch, limit=2), ['oneone', 'twotwo'])
 
+    def test_strings_wide_pass_is_skipped_once_the_cap_is_full(self):
+        # ASCII first, then UTF-16LE, then the cap -- so a payload with `limit` ASCII strings never
+        # needs the decode, which is the expensive half of the preview (REFERENCE 4.13). The answer is
+        # the one the old order gave; only the work changed. The wide text starts at an even offset:
+        # UTF-16LE decoded from an odd one is shifted by a byte and reads as something else entirely.
+        wide = 'WideMarker'.encode('utf-16-le')
+        data, ch = self.make(b'\x00oneone\x00twotwo\x00\x00' + wide + b'\x00')
+        self.assertEqual(R.chunk_strings(data, ch, limit=2), ['oneone', 'twotwo'])
+        self.assertIn('WideMarker', R.chunk_strings(data, ch, limit=3))
+
+    def test_strings_limit_zero_is_empty(self):
+        data, ch = self.make(b'\x00oneone\x00twotwo\x00')
+        self.assertEqual(R.chunk_strings(data, ch, limit=0), [])
+
     def test_strings_utf16le(self):
         wide = 'WideMarker'.encode('utf-16-le')
         data, ch = self.make(b'\x01\x02' + wide + b'\x01\x02')

@@ -539,6 +539,77 @@ are *state-derived*, not named — a run of events that agree on call kind and r
 shaders for a dispatch — and the report says so in its own words rather than describing a pass as something it
 has not established.
 
+### 4.13 Speed: what a long command costs, and the scan that splits
+
+Every command above is dominated by one of three things, and `$RDC_PROFILE=1` prints which: the container
+parse, the stream (a cache hit, or decompression), and the one pass over the bytes the command actually asks
+for. It ends the run with a table on **stderr** -- stdout is the contract and nothing here touches it:
+
+    profile: where the time went (this run has $RDC_PROFILE set)
+    profile:   string scan (parallel)     3.67s in      1 call(s)
+    profile:   stream: cache read         0.84s in      1 call(s)
+    profile:   container parse            0.33s in      1 call(s)
+
+`$RDC_PROGRESS=1` adds the live lines without the table (`$RDC_PROFILE` implies both): a line every ten
+seconds with the rate and what is left.
+
+    progress: string scan: 16 slice(s): 1.4 GB
+    progress: string scan: 3/16 slice(s) (18%), 0.7 s each, ~9 s left
+    progress: string scan: 1.4 GB done in 5.4s (260.4 MB/s)
+
+The slots are `container parse`, `stream: cache read`, `stream: decompress`, `stream: cache write`,
+`resource table`, `descriptor heaps`, `root signatures`, `chunk payload decode`, `verify: walk`,
+`report: bundle read`, `report: detectors`, `string scan (serial)` and `string scan (parallel)`; each is the
+`rdc_profile.timed(...)` decorator on the layer that does the work, so a command that calls a layer twice
+adds two calls to one slot rather than inventing a slot per command.
+
+**Read the numbers as ratios.** The same serial scan of the same stream measured 14.5 s and 25.2 s an hour
+apart on this machine (64 cores, other processes running); what stayed stable is the parallel path being
+6-13x faster *within one session*. Measured that way, on `HobbyRenderer FlyingWorld.rdc` (601 MB container,
+1.47 GB stream, 29,212 chunks):
+
+| command | before | after | what it was |
+|---|---|---|---|
+| `chunks <rdc> 0` (all 29,212, a preview each) | >300 s (killed) | 12-19 s | collecting every run at `minlen=4` (8.4 M of them), de-duplicating with `not in`, then capping at 6 |
+| `names` (minlen 10, 427,823 unique) | 17.7 s | 3.9-6.5 s | one `re` pass over 1.47 GB |
+| `strings` (minlen 6, 1.16 M unique) | 17.6 s | 7.9-10.2 s | the same pass, with counting |
+| `report` (either bundle) | 2.9 s / 1.7 s | 2.5 s | unchanged: bundle read 0.36 s + detectors 1.4 s |
+| the rest (`sections`, `summary`, `chunks N`, `resources`, `descriptors`, `draws`, `markers`, `verify`, `rootsig`, `dxbc`, `validate`) | -- | 0.8-2.6 s | container + stream + one table |
+
+**Why threads and async cannot help.** The scan is one `re` call over a 1.47 GB buffer: it holds the GIL for
+the whole call, so threads take turns and buy nothing, and there is no I/O to overlap for async. Processes are
+the only lever, and `rdc_scan` pulls it:
+
+* the stream is cut into slices at boundaries **no match can cross** -- a cut is only allowed where the byte
+  is non-printable, because a run cannot contain such a byte, so the concatenated per-slice results are
+  exactly the whole-stream ones. The search for a boundary is bounded; when it finds none the range is simply
+  not cut, which costs parallelism and never correctness;
+* each slice is scanned in its own process and the results are merged in offset order -- counts add, the
+  lowest first offset wins, which is what dict insertion order gave before;
+* the children **map the stream cache's file** and are never sent the bytes, so a 1.47 GB scan costs no
+  copies and no IPC beyond the per-slice dictionaries;
+* every way that could go wrong falls back to the serial loop: no cache file (`$RDC_NO_CACHE`, a section that
+  was never stored, a failed write), a file whose first or last 64 bytes are not this stream, a pool that will
+  not start, or a stream under `MIN_BYTES` (64 MB -- below that the spawn costs more than it saves). `procs=`
+  on `scan_runs` forces the count, and `procs=1` always means the serial path;
+* `MAX_SLICES` is 32, and never more than the cores there are. The sweep that picked it, in one session:
+  serial 31.1 s, 8 slices 7.3 s, 16 slices 5.3 s, 32 slices 4.0 s at `minlen=6`; 26.6 / 4.9 / 2.7 / 2.1 s at
+  `minlen=10`.
+
+**A worker is a fresh interpreter**, so whatever starts a pool must be importable without side effects:
+`rdc_analysis.py` guards its `main()` and is fine; a script or test module that decompresses at module level
+does it again once per worker (that is what one "stuck" measurement turned out to be). The suite never reaches
+for a pool by accident -- its fixtures are far under `MIN_BYTES`, and the tests that exercise the pool pass
+`procs=` explicitly.
+
+**Caching is the other half, and it is already there.** A cold command pays 12-35 s of pure-Python LZ4 for
+the 1.47 GB stream; a warm one pays 0.4-0.9 s to read it from disk (§4.8). Nothing *derived* is cached: a
+string index would be tens of MB per capture to save a scan that is now seconds. The one derived thing worth
+computing differently was per-chunk: `chunk_strings` stops as soon as it holds `limit` strings and skips the
+UTF-16 pass entirely when the ASCII half already filled the cap -- the answer the old order produced (ASCII
+first, then wide, then the cap), so `chunks <rdc> 0` went from over five minutes to under twenty seconds with
+identical output, and none of the saving was in the decode.
+
 ---
 
 ## 5. Worked examples

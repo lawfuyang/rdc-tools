@@ -12,6 +12,7 @@ from rdc_payloads import *  # noqa: F401,F403
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_cache  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_resources  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_scan  # noqa: F401  (the whole-stream scans, which it may run in slices)
 
 import os
 import re
@@ -139,30 +140,33 @@ def cmd_resources(path: str, limit: int = 200, name_filter: Optional[str] = None
     print('total resources: %d (shown %d)' % (len(table), shown))
 
 def cmd_strings(path: str, minlen: int = 6, maxlines: int = 200) -> None:
-    """Print the unique ASCII strings >= `minlen`, ranked by occurrence then first offset."""
-    _info, stream, how = load_stream(path)
+    """Print the unique ASCII strings >= `minlen`, ranked by occurrence then first offset.
+
+    The scan itself is `rdc_scan.scan_runs`, which splits it across processes when it is worth it (see
+    REFERENCE 4.13); the ranking below is unchanged, and so is its output.
+    """
+    info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
-    counts: Dict[str, int] = {}
-    order: Dict[str, int] = {}
-    for off, s in string_runs(stream, minlen):
-        counts[s] = counts.get(s, 0) + 1
-        order.setdefault(s, off)
+    counts, order = rdc_scan.scan_runs(stream, minlen, rdc_cache.stream_source(path, info))
     print('unique ascii strings >= %d: %d' % (minlen, len(counts)))
     ranked = sorted(counts, key=lambda s: (-counts[s], order[s]))
     for s in ranked[:maxlines]:
         print('%6d  @0x%-9x %s' % (counts[s], order[s], s[:150]))
 
+#: What makes a string look like an object, a shader or a pass name. Compiled once: this is applied to
+#: every unique string the scan found (427,823 of them on the hobby capture).
+_NAME_LIKE = re.compile(
+    r'(Shader|shader|BasePass|Lightmap|LightMap|Volumetric|IndirectLighting|HISM|Instanced|'
+    r'StaticMesh|Sphere|Mobile|CachedPoint|NoLightMap|Policy|Permutation|FScreenPass|SceneColor|'
+    r'Primitive|View|FShader|VertexFactory)')
+
 def cmd_names(path: str, minlen: int = 10) -> None:
     """Strings that look like UE/RenderDoc object or shader names."""
-    _info, stream, how = load_stream(path)
+    info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
-    seen: Dict[str, int] = {}
-    for off, s in string_runs(stream, minlen):
-        seen.setdefault(s, off)
-    interesting = [s for s in seen if re.search(
-        r'(Shader|shader|BasePass|Lightmap|LightMap|Volumetric|IndirectLighting|HISM|Instanced|'
-        r'StaticMesh|Sphere|Mobile|CachedPoint|NoLightMap|Policy|Permutation|FScreenPass|SceneColor|'
-        r'Primitive|View|FShader|VertexFactory)', s)]
+    _counts, seen = rdc_scan.scan_runs(stream, minlen, rdc_cache.stream_source(path, info),
+                                       counts=False)
+    interesting = [s for s in seen if _NAME_LIKE.search(s)]
     print('interesting name-like strings: %d' % len(interesting))
     for s in sorted(interesting, key=lambda x: seen[x])[:400]:
         print('  @0x%-9x %s' % (seen[s], s[:160]))

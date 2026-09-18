@@ -19,7 +19,8 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
   table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report, notables,
   recommendations, detectors), `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
-  (schemas), or all of them with `python -m unittest discover -s tests -t tests`.
+  (schemas), `test_rdc_scan.py` (the slice scan and the phase/progress instrumentation), or all of them with
+  `python -m unittest discover -s tests -t tests`.
 - **The suite never reaches the network.** The source-tree fetch is the one place the tool downloads anything,
   and it writes into exactly one folder — `renderdoc-src` at the root, the one `rdc_renderdoc_src.target_dir()`
   names — so a test that hands a command its own tree gets a check and a fallback, never a download. That is why
@@ -145,8 +146,9 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `bin\replay_dump.exe <cmd> "<capture>" --json | python -m json.tool`. Text-mode output is the contract for
   the offline tool's users: it must stay byte-identical unless the change is deliberate and recorded.
 - Layout, so new code has an obvious home. Python: `src/py/rdc_types.py` the shapes and their constants,
-  `rdc_chunkmap.py` the chunk-name enums, `rdc_stream.py` the container and the frame stream, `rdc_cache.py` the
-  stream cache and the loaders, `rdc_dxbc.py` the shader containers, `rdc_resources.py` the resource table and
+  `rdc_profile.py` the phase timer and the progress lines (bottom of the layering, because every layer calls
+  it), `rdc_chunkmap.py` the chunk-name enums, `rdc_stream.py` the container and the frame stream, `rdc_cache.py` the
+  stream cache and the loaders, `rdc_scan.py` the slice scan over a whole stream, `rdc_dxbc.py` the shader containers, `rdc_resources.py` the resource table and
   everything read out of it (formats, heaps, root signatures, `RDEF`), `rdc_payloads.py` the chunk payload
   decoders, `rdc_commands.py` the commands, `rdc_report.py`/`rdc_bundle.py`/`rdc_passes.py`/`rdc_detect_*.py`/
   `rdc_report_render.py` the report, `rdc_engine_schema.py` the engine-name interpretation (`engine-schemas/`),
@@ -236,6 +238,22 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   load-bearing** (a forward step gives an incomplete state; only a backwards one makes the engine replay the
   frame from its start), which is why `REFERENCE §9` carries the hashes of the bundles that proved it. Change
   it only with a byte-identical-bundle check against a cold run.
+- **The same rule on the offline side**: `$RDC_PROFILE=1` prints a phase table and `$RDC_PROGRESS=1` the live
+  progress lines, both to **stderr** (stdout is the contract, and a command's stderr stays empty otherwise).
+  The phase names are the `rdc_profile.timed(...)` decorators on the layers — one name per call site, so a
+  command that calls a layer twice shows two calls in one slot — and a long loop ticks a `Progress`, which is
+  time-based on purpose (a count-based line once stayed silent for a whole 164 s sweep).
+- **A whole-stream scan is split across processes, because nothing else can help it**: `re` holds the GIL for
+  the length of the call, so threads take turns, and there is no I/O for async to overlap. Three rules come
+  with `rdc_scan`: a slice boundary is only legal where no match can cross it (a non-printable byte); the
+  **serial path must stay exactly as fast as the loop it replaced** (the first version allocated a tuple per
+  match and made it twice as slow — the parallel path hid it, which is why the numbers are checked with
+  `procs=1` too); and anything that starts a pool must be importable without module-level side effects,
+  because a worker re-imports `__main__` (see REFERENCE §4.13).
+- **A measured number is quoted as a ratio within one session.** The same scan of the same stream measured
+  14.5 s and 25.2 s an hour apart on this machine. An absolute number in a doc, a comment or a commit message
+  is a liability unless it says what it was measured against; the pairwise tables in REFERENCE §4.13 and §9
+  say so.
 
 # Naming
 

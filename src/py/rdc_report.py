@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 
 from rdc_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_passes import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+import rdc_profile
 from rdc_notable import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_engine_schema import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_common import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -36,6 +37,7 @@ from rdc_report_render import *  # noqa: F401,F403  (re-exported for the CLI and
 # Byte-stable for a fixed bundle: no timestamps, no absolute paths, every table sorted, and nothing
 # iterated out of a set. That is what lets two runs be diffed against each other and the output be
 
+@rdc_profile.timed('report: detectors')
 def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List[RedFlag], List[DetectorRun]]:
     """Every finding, and what each detector did -- listed, so "clean" cannot be confused with "unchecked"."""
     flags: List[RedFlag] = []

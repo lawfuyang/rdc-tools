@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rdc_types import *  # noqa: F401,F403
 from rdc_stream import *  # noqa: F401,F403
+import rdc_profile
 
 import hashlib
 import os
@@ -110,6 +111,7 @@ def _cache_entry(path: str, info: CaptureInfo, section_index: int) -> Optional[C
         return None
     return entry
 
+@rdc_profile.timed('stream: cache read')
 def cache_lookup(path: str, info: CaptureInfo,
                  section_index: int = 0) -> Optional[Tuple[bytes, str]]:
     """The cached stream and its label for this capture/section, or None on a miss."""
@@ -135,6 +137,17 @@ def cache_stats(path: str, info: CaptureInfo,
         return None
     return entry['streamLen'], _method_label(entry['method'], entry['blocks'], cached=True)
 
+def stream_source(path: str, info: CaptureInfo, section_index: int = 0) -> Optional[CacheEntry]:
+    """The cache file a stream of this capture/section is stored in, or None when there is none.
+
+    A hit means the file holds exactly the stream `load_stream` returns, which is what lets a worker
+    process read the bytes by mapping the file instead of being handed a copy of them (see
+    `rdc_scan.scan_runs`). Callers must still treat the stream they already have as the truth: this is
+    an optimisation and nothing about the answer depends on it.
+    """
+    return _cache_entry(path, info, section_index)
+
+@rdc_profile.timed('stream: cache write')
 def cache_store(path: str, info: CaptureInfo, section_index: int, stream: bytes, method: int,
                 blocks: int) -> Optional[str]:
     """Write a decompressed stream to the cache; returns the file written, or None.
@@ -239,6 +252,7 @@ def _method_label(method: int, blocks: int, cached: bool = False) -> str:
     name = 'zstd' if method == METHOD_ZSTD else 'raw'
     return name + (', cached' if cached else '')
 
+@rdc_profile.timed('stream: decompress')
 def _decompress_section(info: CaptureInfo, section_index: int = 0) -> Tuple[bytes, int, int]:
     """Decompress one section body; returns `(stream, method code, block count)`."""
     sec = info['sections'][section_index]
@@ -315,5 +329,6 @@ __all__ = [
     'cache_store',
     'get_stream',
     'load_stream',
+    'stream_source',
     'stream_stats',
 ]

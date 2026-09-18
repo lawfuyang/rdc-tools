@@ -37,6 +37,12 @@ Usage:
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
   python rdc_analysis.py bootstrap [tag]                   # fetch the RenderDoc source the chunk names come from
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
+
+Speed (REFERENCE 4.13): `$RDC_PROFILE=1` prints a per-phase table on stderr when the run ends, and
+`$RDC_PROGRESS=1` adds the live progress lines (neither ever touches stdout). The whole-stream scans
+(`strings`, `names`) split the stream across processes, each mapping the cached stream -- so a capture whose
+stream is not cached (`$RDC_NO_CACHE`) runs the same scan in one process, several times slower. `chunks` and
+`chunk` stop scanning a payload as soon as they have enough strings for the preview.
 """
 from __future__ import annotations
 
@@ -94,6 +100,8 @@ from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and test
 from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_profile import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 
 def _filter_suite(suite: unittest.TestSuite, patterns: Sequence[str]) -> unittest.TestSuite:
     """Keep only the tests whose id contains one of `patterns` (like `unittest -k`)."""

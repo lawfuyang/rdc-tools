@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+
+import rdc_profile
+
 from typing import Any, Dict, List, TypedDict, Union
 
 BUNDLE_VERSION = 1
@@ -314,6 +317,7 @@ def _bundle_file(bundle_dir: str, name: str, required: bool = True) -> Any:
         raise BundleError('%s is not valid JSON (%s): the bundle is damaged, write it again'
                           % (name, exc)) from exc
 
+@rdc_profile.timed('report: bundle read')
 def load_bundle(bundle_dir: str) -> BundleData:
     """Read a bundle: the files `replay_dump dump` writes (REFERENCE §9).
 

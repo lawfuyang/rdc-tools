@@ -7,9 +7,11 @@ from rdc_chunkmap import *  # noqa: F401,F403
 from rdc_stream import *  # noqa: F401,F403
 from rdc_resources import *  # noqa: F401,F403
 import rdc_resources  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_profile
 
 from typing import Dict, List, Optional, Tuple
 
+@rdc_profile.timed('chunk payload decode')
 def decode_chunk(name: Optional[str], blob: bytes) -> List[str]:
     """Decode the known D3D12 chunk payload layouts (each element is raw, ResourceId = u64)."""
     out: List[str] = []

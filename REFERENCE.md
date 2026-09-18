@@ -150,7 +150,7 @@ parts (`fourcc, offset, length`). Part meanings:
 | `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 | `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the numeric-id fallback. Needs no capture file |
-| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare** — no binary or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison itself and says so in its log (§9). The same command also writes `bin/rdc_lz4.dll` (§3.2); `--check` speaks for the exe only, because a stale library decodes the same bytes at a different speed, where a stale exe answers from code it was not built with |
+| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare for an artefact** — no binary, no library or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison for its own binary and says so in its log (§9) — that warning does not cover the library, which it never loads. **Both artefacts `cmake --build` writes are compared, each in its own block**, because they can disagree and the difference matters: a stale exe answers with the previous revision's behaviour, while `bin/rdc_lz4.dll` *is* the offline tool's decoder (§3.2), so a stale one decodes every capture with code its source no longer says. The two are independent — a new `lz4.c` does not make the exe stale, and a new `replay_dump.cpp` does not make the library stale |
 
 ### 4.2 Stream text mining
 
@@ -955,7 +955,10 @@ level rather than this project's `/W4 /WX`). It is what the offline tool decodes
 tree that has not built it cannot read a capture's stream: `blocks` and `info` never needed it and still
 answer, `sections` prints its table and then says so (it reports the decompressed size, which is a cache miss
 away from a decode), and every command that walks the stream reports the same one-line `error:` and exits 1
-rather than a traceback.
+rather than a traceback. Being *behind its source* stopped being cosmetic at the same time, so
+`build [--check]` compares it too (§4.1): a `bin/rdc_lz4.dll` older than `src/cpp/third_party/lz4` means every
+capture is decoded by the previous decoder, and nothing else in the tool would notice — the exe is current,
+the answers look like answers, and only the source says what the library should have been built from.
 
 | Command | Gives |
 |---|---|

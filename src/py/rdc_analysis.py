@@ -36,8 +36,9 @@ Usage:
   python rdc_analysis.py validate <file|bundleDir> <schemaDir> [kind]  # documents vs the schemas
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
   python rdc_analysis.py bootstrap [tag]                   # fetch the RenderDoc source the chunk names come from
-  python rdc_analysis.py build    [--check]                # is bin/replay_dump.exe older than src/cpp,
-                                                          #   and build it (`--check` only reports)
+  python rdc_analysis.py build    [--check]                # are the built artefacts (bin/replay_dump.exe,
+                                                          #   bin/rdc_lz4.dll) older than their sources,
+                                                          #   and build them (`--check` only reports)
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 
 Speed (REFERENCE 4.13): the one decode a capture needs is 0.5 s, through `bin/rdc_lz4.dll` -- the same

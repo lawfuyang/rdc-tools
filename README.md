@@ -142,6 +142,11 @@ and `CMakeLists.txt` at startup and says so in its log when it is behind (never 
 build on purpose is how a bundle from the previous revision gets reproduced), and the tool reports and
 rebuilds it, which is the only place that can: a running image cannot be overwritten on Windows.
 
+The same `cmake --build` writes `bin\rdc_lz4.dll`, and that one is the offline tool's decoder (§1), so
+`python src\py\rdc_analysis.py build [--check]` compares **both** artefacts against their own sources — each in
+its own block, and independently, because a new `lz4.c` does not make the exe stale. The driver's own warning
+stays about the exe: it never loads the library.
+
 ```powershell
 & $py src\py\rdc_analysis.py build --check       # is bin\replay_dump.exe older than src\cpp? (exit 1 = yes)
 & $py src\py\rdc_analysis.py build               # build it, if so

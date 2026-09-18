@@ -124,7 +124,11 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `capture.cpp`): a replay host answers from the code it was compiled with, so a stale exe is
   indistinguishable from a current one from the outside — its answer looks exactly like an answer — and that
   has already cost this repository a whole verification pass. The other half is
-  `python src\py\rdc_analysis.py build [--check]` (`rdc_driver.py`), because a running image cannot be
+  `python src\py\rdc_analysis.py build [--check]` (`rdc_driver.py`), which compares **both** artefacts the
+  build writes — the exe against `src/cpp/*.cpp|h` and `bin\rdc_lz4.dll` against `src/cpp/third_party/lz4` —
+  because the library *is* the offline tool's decoder, so a stale one decodes every capture with the code its
+  source no longer says. The two verdicts are independent (neither tree is the other's input) and the driver's
+  own warning stays about the exe, which is all it loads. Because a running image cannot be
   overwritten on Windows: the link that would replace `bin\replay_dump.exe` fails with `LNK1104` while that
   same exe is what is running. Do not turn the warning into an error — running an old build on purpose is how
   a bundle from the previous revision gets reproduced — and do not make the check a *test*: whether a binary

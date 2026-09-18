@@ -16,6 +16,9 @@ int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path)
   Field("remoteReplay", (long long)props.remoteReplay);
   Field("vendor", (long long)props.vendor);
   Field("shaderDebugging", (long long)props.shaderDebugging);
+  // The one API property a command is *gated* on, and the gate says so in its own message: a capture
+  // whose driver cannot answer pixel history is refused rather than answered with an empty list.
+  Field("pixelHistory", (long long)props.pixelHistory);
   Field("chunks", (long long)sd.chunks.size());
   Field("resources", (long long)ctrl->GetResources().size());
   Field("textures", (long long)ctrl->GetTextures().size());

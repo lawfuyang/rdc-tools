@@ -1,4 +1,5 @@
-// z.commands_state — the per-event and per-resource commands (state, shaders, cb, usage)
+// z.commands_state — the per-event and per-resource commands (state, statediff, buffer, shaders,
+// cb, pixelhistory)
 //
 // Part of replay_dump; the internal API is declared in common.h.
 
@@ -787,5 +788,390 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");
+  return 0;
+}
+
+// --------------------------------------------------------------------------- pixel history
+
+//: The `--cast` vocabulary: the component type a name means, and its name. `typeless` is "no cast",
+//: which is the engine reading the texture as its own format says. One spelling per type and an
+//: unknown one is refused by the caller rather than defaulted -- a typo here asks the engine a
+//: different question (a colour read as unsigned integers) and the answer would still look like one.
+bool CastFromName(std::string_view name, CompType &type)
+{
+  static const struct
+  {
+    const char *name;
+    CompType type;
+  } kCasts[] = {
+      {"typeless", CompType::Typeless}, {"float", CompType::Float},     {"unorm", CompType::UNorm},
+      {"snorm", CompType::SNorm},       {"uint", CompType::UInt},       {"sint", CompType::SInt},
+      {"uscaled", CompType::UScaled},   {"sscaled", CompType::SScaled}, {"depth", CompType::Depth},
+      {"srgb", CompType::UNormSRGB},
+  };
+  for(const auto &cast : kCasts)
+  {
+    if(name == cast.name)
+    {
+      type = cast.type;
+      return true;
+    }
+  }
+  return false;
+}
+
+const char *CastText(CompType type)
+{
+  switch(type)
+  {
+    case CompType::Typeless: return "typeless";
+    case CompType::Float: return "float";
+    case CompType::UNorm: return "unorm";
+    case CompType::SNorm: return "snorm";
+    case CompType::UInt: return "uint";
+    case CompType::SInt: return "sint";
+    case CompType::UScaled: return "uscaled";
+    case CompType::SScaled: return "sscaled";
+    case CompType::Depth: return "depth";
+    case CompType::UNormSRGB: return "srgb";
+  }
+  return "typeless";
+}
+
+//: One pixel value, read the way its component type says to read it. `PixelValue` is a union of the
+//: same four 32-bit words seen three ways, so which member is meaningful is the *format's*
+//: business: a float format read as `uintValue` prints `1065353216` where `1.0` belongs, and
+//: nothing about the number says it is the wrong reading. `Typeless` prints the raw words, because
+//: a typeless format is the capture saying it does not know either.
+std::string PixelValueText(const PixelValue &value, CompType type)
+{
+  if(type == CompType::UInt || type == CompType::Typeless)
+    return Fmt("%u,%u,%u,%u", value.uintValue[0], value.uintValue[1], value.uintValue[2],
+               value.uintValue[3]);
+  if(type == CompType::SInt)
+    return Fmt("%d,%d,%d,%d", value.intValue[0], value.intValue[1], value.intValue[2],
+               value.intValue[3]);
+  return Fmt("%.6f,%.6f,%.6f,%.6f", value.floatValue[0], value.floatValue[1], value.floatValue[2],
+             value.floatValue[3]);
+}
+
+//: The three parts of a modification value, each `-` when the engine marked the value invalid. One
+//: decision, used by the terminal line *and* by the JSON writer, because a sentinel that leaks is a
+//: fabricated colour in both: an invalid value's union holds `0xdeadbeef`/`0xdeadf00d`
+//: (`ModificationValue::SetInvalid`) and printing that is a plausible-looking number that never
+//: existed. The depth and stencil sentinels are the API's own (-1 "not in use or unknown", -2 "in
+//: use, but the pixel history used stencil for itself"), so they are printed as they came back --
+//: `-` there would hide which of the two it is.
+std::string ModificationColorText(const ModificationValue &value, CompType type)
+{
+  return value.IsValid() ? PixelValueText(value.col, type) : std::string("-");
+}
+
+std::string ModificationDepthText(const ModificationValue &value)
+{
+  return value.IsValid() ? Fmt("%.6f", value.depth) : std::string("-");
+}
+
+std::string ModificationStencilText(const ModificationValue &value)
+{
+  return value.IsValid() ? Fmt("%d", value.stencil) : std::string("-");
+}
+
+//: A whole value as the one line the terminal shows, built from those three.
+std::string ModificationValueText(const ModificationValue &value, CompType type)
+{
+  if(!value.IsValid())
+    return std::string("-");
+  return Fmt("col(%s) depth(%s) stencil(%s)", ModificationColorText(value, type).c_str(),
+             ModificationDepthText(value).c_str(), ModificationStencilText(value).c_str());
+}
+
+//: Why a fragment did not write the pixel, in words, in the order `PixelModification::Passed` reads
+//: the flags -- so the reasons and the verdict cannot disagree and an empty answer means every test
+//: passed. The API's prose about pixel history names eight reasons; `Passed` counts ten, including
+//: `depthClipped` and `predicationSkipped`, and a fragment that fails one of those did not write
+//: the pixel whatever the prose calls it.
+std::string RejectionText(const PixelModification &mod)
+{
+  const struct
+  {
+    bool bFailed;
+    const char *name;
+  } kTests[] = {
+      {mod.sampleMasked, "sample masked"},
+      {mod.backfaceCulled, "backface culled"},
+      {mod.depthClipped, "depth clipped"},
+      {mod.depthBoundsFailed, "depth bounds failed"},
+      {mod.viewClipped, "view clipped"},
+      {mod.scissorClipped, "scissor clipped"},
+      {mod.shaderDiscarded, "shader discarded"},
+      {mod.depthTestFailed, "depth test failed"},
+      {mod.stencilTestFailed, "stencil test failed"},
+      {mod.predicationSkipped, "predication skipped"},
+  };
+  std::string reasons;
+  for(const auto &test : kTests)
+  {
+    if(!test.bFailed)
+      continue;
+    if(!reasons.empty())
+      reasons += ", ";
+    reasons += test.name;
+  }
+  return reasons;
+}
+
+//: One of the three values of a modification as a JSON object. Every member is a string, the
+//: numbers included: this writer has no fractional field (see `Field` in common.h), and `-` for an
+//: invalid value has to be expressible -- so a reader gets `valid` to check, and the same text the
+//: terminal shows. Only called in JSON mode: it opens an object, which the text writer does not.
+static void WriteModificationValue(const char *key, const ModificationValue &value, CompType type,
+                                   bool bLast)
+{
+  ObjectOpenKey(key);
+  Flag("valid", value.IsValid());
+  Field("color", ModificationColorText(value, type));
+  Field("depth", ModificationDepthText(value));
+  Field("stencil", ModificationStencilText(value), true);
+  ObjectClose(bLast);
+}
+
+//: `pixelhistory <rdc> <eid> <resId|name> <x> <y> [--mip N] [--slice N] [--sample N] [--cast <type>]
+//: [--max N]`: why this pixel is this colour -- every event that tried to write it, the test that
+//: rejected each attempt, and the value before, from and after it.
+//:
+//: The scope is the *event*: the engine's pixel history covers every write up to the one the replay
+//: is positioned at (`ReplayController::PixelHistory` filters the usage list by it), so `last` is the
+//: whole frame's answer and a pass's last eid is the answer at the end of that pass.
+//:
+//: Two things this command refuses to fake, both because an empty answer reads as a fact:
+//: the driver must say it supports pixel history at all (`APIProperties.pixelHistory`), and the pixel
+//: must be inside the texture -- the engine answers an out-of-range pixel with an *empty* list, which
+//: is exactly what "nothing wrote it" looks like. An empty list that is a real answer is reported
+//: with the counts that make it one, and an empty list the engine's own source explains (a texture
+//: whose format it does not know: `D3D12Replay::PixelHistory` returns before doing anything) is an
+//: error rather than an answer.
+int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+                    const char *what, unsigned x, unsigned y, const Subresource &sub,
+                    CompType typeCast, int maxRows)
+{
+  const APIProperties props = ctrl->GetAPIProperties();
+  if(!props.pixelHistory)
+    return Fail(1,
+                "this capture's driver does not support pixel history (`info` prints the API "
+                "properties): the engine can say what was bound at an event, but not why a pixel "
+                "is the colour it is");
+
+  std::string name, why;
+  const ResourceId id = ResolveResourceArg(ctrl, what, name, why);
+  if(id == ResourceId::Null())
+    return Fail(1, "%s", why.c_str());
+
+  // A texture, and the engine's own description of it: every number below is read out of this rather
+  // than assumed, and a buffer is refused with what it is (`buffer` is the command that reads one).
+  const rdcarray<TextureDescription> &textures = ctrl->GetTextures();
+  const TextureDescription *tex = NULL;
+  for(size_t i = 0; i < textures.size(); i++)
+  {
+    if(textures[i].resourceId == id)
+    {
+      tex = &textures[i];
+      break;
+    }
+  }
+  if(tex == NULL)
+    return Fail(1,
+                "res%s (%s) is not a texture: pixel history is about a pixel of a colour or depth "
+                "target (`buffer %s` reads a buffer's bytes)",
+                IdText(id).c_str(), name.c_str(), what);
+
+  // The slice count of the *subresource* asked about, the way RenderDoc's own texture viewer works
+  // it out: a 3D texture has `depth >> mip` slices at mip N, and everything else has one per array
+  // element -- which for a cubemap is one per *face* (`arraysize` counts faces, and the viewer
+  // labels them `[cube] face`).
+  const uint32_t slices = tex->dimension == 3 ? (tex->depth >> sub.mip) : tex->arraysize;
+  if(x >= tex->width || y >= tex->height)
+    return Fail(1,
+                "(%u,%u) is outside res%s (%s, %ux%u): the engine answers an out-of-range pixel "
+                "with an empty history, so it is refused here instead",
+                x, y, IdText(id).c_str(), tex->format.Name().c_str(), tex->width, tex->height);
+  if(sub.mip >= tex->mips)
+    return Fail(1, "res%s has %u mip level(s), so --mip %u is outside it", IdText(id).c_str(),
+                tex->mips, sub.mip);
+  if(sub.slice >= slices)
+    return Fail(1, "res%s has %u slice(s) at mip %u, so --slice %u is outside it",
+                IdText(id).c_str(), slices, sub.mip, sub.slice);
+  if(sub.sample >= tex->msSamp)
+    return Fail(1,
+                "res%s has %u sample(s), so --sample %u is outside it (a non-multisampled texture "
+                "has one sample, index 0)",
+                IdText(id).c_str(), tex->msSamp, sub.sample);
+
+  // What the numbers are read as: `--cast` when it was given, the texture's own format otherwise --
+  // and a component type of `Typeless` means nothing in the capture says how to read them.
+  const CompType readAs = typeCast == CompType::Typeless ? tex->format.compType : typeCast;
+  const std::string formatName(tex->format.Name().c_str());
+  const bool bFormatKnown = LowerAscii(formatName).find("unknown") == std::string::npos;
+
+  // The replay is positioned at the scope event before the engine is asked: the history covers
+  // every write *up to* the event the replay is on, so this is what makes the answer the frame's
+  // (eid = the last event) rather than wherever the replay happened to be.
+  ctrl->SetFrameEvent((uint32_t)eid, true);
+
+  // One engine call, and not a cheap one: the driver re-runs the frame's draws with instrumented
+  // shaders to catch this pixel's fragments, which is seconds rather than milliseconds.
+  Log("pixelhistory: asking the engine for pixel (%u,%u) on res%s as of eid %d -- it re-runs the "
+      "frame's draws with instrumented shaders",
+      x, y, IdText(id).c_str(), eid);
+  const ULONGLONG started = Millis();
+  const rdcarray<PixelModification> history = ctrl->PixelHistory(id, x, y, sub, typeCast);
+  ProfileAdd(kProfilePixelHistory, started);
+
+  // How many events up to the scope touch this texture at all, from the engine's own usage list (the
+  // one `usage` prints). It is the number that turns an empty answer into evidence: "no modification"
+  // with 300 events that touch the target and "no modification" with none are different statements.
+  int usagesUpTo = 0;
+  const rdcarray<EventUsage> usage = ctrl->GetUsage(id);
+  for(size_t i = 0; i < usage.size(); i++)
+  {
+    if((int)usage[i].eventId <= eid)
+      usagesUpTo++;
+  }
+
+  if(history.empty() && !bFormatKnown)
+    return Fail(1,
+                "the engine cannot run pixel history on res%s: its format (%s) is one it does not "
+                "know, and it declines rather than guessing",
+                IdText(id).c_str(), formatName.c_str());
+
+  int passed = 0;
+  bool bAnyMasked = false;
+  for(size_t i = 0; i < history.size(); i++)
+  {
+    if(history[i].Passed())
+      passed++;
+    bAnyMasked = bAnyMasked || history[i].sampleMasked;
+  }
+
+  // The one verdict here that is not a fact on its own. On D3D12 the sample-mask test is an
+  // instrumented re-draw of the event -- RenderDoc's own source carries `TODO: figure out if we
+  // always need to check this` over the flag that enables it -- and measured on the hobby capture's
+  // 1-sample targets every base-pass fragment comes back flagged while one of them carries a
+  // *changed* `postMod` value in the same row. So the rows print the values next to the verdict,
+  // and this says which two to compare rather than letting `sample masked` read as a closed case.
+  const std::string note =
+      bAnyMasked
+          ? std::string(
+                "at least one fragment is flagged `sample masked`: on D3D12 that test is an "
+                "instrumented re-draw of the event (RenderDoc's source marks it a TODO), so a "
+                "flagged fragment can still carry a changed post value -- read `pre` against "
+                "`post` here rather than the verdict alone")
+          : std::string();
+  const int shown = maxRows > 0 && (int)history.size() > maxRows ? maxRows : (int)history.size();
+
+  PrintCaptureHeader(file, path);
+  Field("eid", (long long)eid);
+  Field("marker", MarkerPathAt(ctrl, eid));
+  Field("texture", Fmt("res%s", IdText(id).c_str()));
+  Field("name", name);
+  Field("x", (long long)x);
+  Field("y", (long long)y);
+  Field("mip", (long long)sub.mip);
+  Field("slice", (long long)sub.slice);
+  Field("sample", (long long)sub.sample);
+  Field("format", formatName);
+  Field("dimension", (long long)tex->dimension);
+  Field("textureWidth", (long long)tex->width);
+  Field("textureHeight", (long long)tex->height);
+  Field("mips", (long long)tex->mips);
+  Field("slices", (long long)slices);
+  Field("samples", (long long)tex->msSamp);
+  Field("cast", std::string(CastText(typeCast)));
+  Field("readAs", readAs == CompType::Typeless ? std::string("raw 32-bit words")
+                                               : std::string(CastText(readAs)));
+  Field("usagesUpTo", (long long)usagesUpTo);
+  Field("note", note);
+
+  if(IsJson())
+  {
+    ArrayOpen("modifications");
+    for(int i = 0; i < shown; i++)
+    {
+      const PixelModification &mod = history[(size_t)i];
+      ObjectOpen();
+      Field("eid", (long long)mod.eventId);
+      Field("marker", MarkerPathAt(ctrl, (int)mod.eventId));
+      Field("fragIndex", (long long)mod.fragIndex);
+      Field("primitiveID", (long long)mod.primitiveID);
+      Flag("passed", mod.Passed());
+      Field("reasons", RejectionText(mod));
+      Flag("directShaderWrite", mod.directShaderWrite);
+      Flag("unboundPS", mod.unboundPS);
+      WriteModificationValue("preMod", mod.preMod, readAs, false);
+      WriteModificationValue("shaderOut", mod.shaderOut, readAs, false);
+      WriteModificationValue("postMod", mod.postMod, readAs, true);
+      ObjectClose(true);
+    }
+    ArrayClose(false);    // the counting fields follow
+    g_Indent = 1;
+  }
+  else
+  {
+    for(int i = 0; i < shown; i++)
+    {
+      const PixelModification &mod = history[(size_t)i];
+      const std::string where = MarkerPathAt(ctrl, (int)mod.eventId);
+      printf("#%-3d eid %-7u frag %-3u prim %-7u %s\n", i + 1, mod.eventId, mod.fragIndex,
+             mod.primitiveID, where.empty() ? "-" : where.c_str());
+      if(mod.Passed())
+        printf("      passed     every test: this fragment wrote the pixel\n");
+      else
+        printf("      rejected   %s\n", RejectionText(mod).c_str());
+      if(mod.directShaderWrite)
+        printf(
+            "      note       an arbitrary shader write (a UAV or a copy), not this draw's "
+            "fragment\n");
+      if(mod.unboundPS)
+        printf(
+            "      note       no pixel shader was bound: on D3D this may also mean one is bound "
+            "that declares no output for this target\n");
+      printf("      pre        %s\n", ModificationValueText(mod.preMod, readAs).c_str());
+      printf("      ps         %s\n", ModificationValueText(mod.shaderOut, readAs).c_str());
+      printf("      post       %s\n", ModificationValueText(mod.postMod, readAs).c_str());
+    }
+    if(shown < (int)history.size())
+      printf("... %d more (--max %d)\n", (int)history.size() - shown, maxRows);
+  }
+
+  Field("total", (long long)history.size());
+  Field("passed", (long long)passed);
+  Field("rejected", (long long)(history.size() - (size_t)passed));
+  Field("shown", (long long)shown, true);
+  g_Indent = 0;
+  if(IsJson())
+    printf("}\n");
+
+  // The one-line verdict, in both formats: what the table says, said once, so a batch run's log
+  // reads as answers rather than as rows.
+  if(history.empty())
+  {
+    const std::string whyEmpty =
+        usagesUpTo == 0
+            ? std::string(
+                  "not one event up to it touches the texture at all (`usage` shows where it "
+                  "is written, and a later eid widens the scope)")
+            : Fmt("%d event(s) up to it touch the texture, but none modified this pixel", usagesUpTo);
+    Log("pixelhistory: the engine reports no modification of pixel (%u,%u) on res%s up to eid %d: "
+        "%s",
+        x, y, IdText(id).c_str(), eid, whyEmpty.c_str());
+  }
+  else
+  {
+    Log("pixelhistory: %d modification(s) up to eid %d -- %d passed every test, %d rejected; "
+        "values "
+        "read as %s",
+        (int)history.size(), eid, passed, (int)history.size() - passed,
+        readAs == CompType::Typeless ? "raw 32-bit words" : CastText(readAs));
+  }
   return 0;
 }

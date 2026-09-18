@@ -64,6 +64,15 @@ void Usage()
       "  buffer  <rdc> <resId|name> [offset] [len] [--as u32|f32|hex|ascii]   a buffer's "
       "contents,\n"
       "                                    read through the engine at the current event\n"
+      "  pixelhistory <rdc> <eid|last> <resId|name> <x> <y> [--mip N] [--slice N] [--sample N]\n"
+      "          [--cast typeless|float|unorm|snorm|uint|sint|uscaled|sscaled|depth|srgb] "
+      "[--max N]\n"
+      "                                    why this pixel is this colour: every event up to <eid> "
+      "that\n"
+      "                                    tried to write it, the test that rejected each, and "
+      "the\n"
+      "                                    value before, from and after it (`last` is the whole "
+      "frame)\n"
       "  shaders <rdc> <eid> [--disasm]    reflection: cbuffers, bindings, signatures, "
       "disassembly\n"
       "  cb      <rdc> <eid> <stage> <slot> named values of one constant buffer\n"
@@ -105,8 +114,14 @@ void Usage()
       "`state \"Scene > BasePass\"` both work, matching the name inside the path first, then a\n"
       "component of it, then a substring -- the same rule `--at-marker <path>` uses, which "
       "supplies\n"
-      "the event id for a command that takes one (and sets the current event for a command that\n"
-      "reads at it, like `buffer`). A marker path survives a re-capture where an id does not.\n"
+      "the event id for a command that takes one *instead* of a positional id (naming both is an\n"
+      "error, not a silent preference; `cb --at-marker X ps 0` is how the stage and slot are "
+      "given)\n"
+      "(and sets the current event for a command that\n"
+      "reads at it, like `buffer`). A marker path survives a re-capture where an id does not. The\n"
+      "word `last` is the frame's own last event, so `pixelhistory last ...` is the whole frame "
+      "and\n"
+      "`statediff 100 last` compares an event against the end of it -- no `probe` needed first.\n"
       "Where the path resolved to is written to the log, so an answer taken from a path can be\n"
       "checked: `find <substring>` lists the paths and their ids.\n"
       "\n"
@@ -243,15 +258,30 @@ void WarnIfRenderdocSrcMissing()
       root.c_str());
 }
 
-//: The event id an argument names: a number, or a marker path (`BasePass`, `Scene > BasePass`),
-//: which `ResolveMarkerPath` turns into the first call inside it. `how` receives the path that won,
-//: so the caller can log what the argument resolved to rather than what was typed.
+//: The event id an argument names: a number, a marker path (`BasePass`, `Scene > BasePass`), which
+//: `ResolveMarkerPath` turns into the first call inside it, or `last`. `how` receives what the
+//: argument resolved to, so the caller can log the path that won rather than what was typed.
 bool ParseEidArg(IReplayController *ctrl, const std::string &text, int &eid, std::string &how)
 {
   int parsed = 0;
   if(ParseInt(text.c_str(), parsed))
   {
     eid = parsed;
+    return true;
+  }
+  if(text == "last")
+  {
+    // The frame's own last event, from the engine's action list (cached per process, and the same
+    // tree `draws` prints). Not a guess at a chunk count: ids past the frame's end *clamp* to the
+    // last event rather than coming back empty, so an over-large number would answer the same
+    // question -- with a number that looks like it exists.
+    int calls = 0;
+    bool bTruncated = false;
+    const std::vector<ActionNode> rows = ActionTree(ctrl, calls, bTruncated);
+    if(rows.empty())
+      return false;
+    eid = rows[rows.size() - 1].m_Eid;
+    how = "the frame's last event";
     return true;
   }
   const int resolved = ResolveMarkerPath(ctrl, text.c_str(), how);
@@ -314,6 +344,41 @@ bool HasOpt(const std::vector<std::string> &args, const char *name)
   return false;
 }
 
+//: A `pixelhistory` subresource option: a position, so a negative one is a typo rather than a clamp
+//: (`ToInt` would turn it into a huge unsigned index and the command's own bounds check would
+//: report it as a slice that does not exist).
+bool ParseIndexOpt(const std::vector<std::string> &args, const char *name, uint32_t &value)
+{
+  const char *text = OptValue(args, name, "0");
+  int parsed = 0;
+  if(!ParseInt(text, parsed) || parsed < 0)
+    return false;
+  value = (uint32_t)parsed;
+  return true;
+}
+
+//: How many arguments a command needs before it can run, the command itself counted: the same
+//: numbers the dispatch table below enforces (`args.size() > 4` for `pixelhistory` is 5 here). They
+//: are listed once, for the one question that has to be answered *before* dispatch -- whether a
+//: positional event id was given alongside `--at-marker` -- because every command in the
+//: `bTakesEid` list below has its event id as its first positional.
+int MinArgs(const char *cmd)
+{
+  if(!strcmp(cmd, "pixelhistory"))
+    return 5;    // <eid> <resId|name> <x> <y>
+  if(!strcmp(cmd, "cb"))
+    return 4;    // <eid> <stage> <slot>
+  if(!strcmp(cmd, "image"))
+    return 3;    // <eid> <out.bmp>
+  if(!strcmp(cmd, "patch"))
+    return 3;    // <eid> <stage>
+  if(!strcmp(cmd, "statediff"))
+    return 3;    // <eidA> <eidB>
+  if(!strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "mesh"))
+    return 2;    // <eid>: `mesh`'s instance and cap are optional, and its id is what comes first
+  return 1;
+}
+
 //: Runs one command against an already-open capture. Shared by `main`, `batch` and `--repl`, so a
 //: command name, its arguments and its options mean the same thing however they were spelled.
 int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
@@ -336,7 +401,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   // finds a number in it. A path that matches nothing is an error rather than a silent event 0.
   const bool bTakesEid = !strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "cb") ||
                          !strcmp(cmd, "mesh") || !strcmp(cmd, "image") ||
-                         !strcmp(cmd, "statediff") || !strcmp(cmd, "patch");
+                         !strcmp(cmd, "statediff") || !strcmp(cmd, "patch") ||
+                         !strcmp(cmd, "pixelhistory");
   if(!atMarkerText.empty())
   {
     std::string matched;
@@ -347,8 +413,18 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     Log("--at-marker %s -> eid %d [%s]", atMarkerText.c_str(), eid, matched.c_str());
     if(bTakesEid)
     {
-      if(args.size() > 1)
-        args.erase(args.begin() + 1);
+      // The option *supplies* the id, so a positional one as well is the argument given twice -- and
+      // quietly dropping it is how `statediff 100 --at-marker X` would silently compare X against 100
+      // instead of 100 against the end of the frame. Counting decides it: a command's first positional
+      // is its event id, so an argument list long enough to hold one is a list that has one. Erasing
+      // the slot to make room instead -- which is what this did -- took the *next* positional with it
+      // whenever the id had been left out (`image --at-marker X out.bmp` ran `image X`, which is
+      // `unknown command`), because nothing here can tell a missing id from a resource name.
+      if((int)args.size() >= MinArgs(cmd))
+        return Fail(2,
+                    "%s already has its event id ('%s'): `--at-marker` supplies one *instead* of a "
+                    "positional, not as well as one",
+                    cmd, args[1].c_str());
       args.insert(args.begin() + 1, Fmt("%d", eid));
     }
     else
@@ -400,6 +476,27 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     return CmdBuffer(ctrl, file, path, args[1].c_str(), args.size() > 2 ? ParseSize(args[2]) : 0,
                      args.size() > 3 ? ParseSize(args[3]) : 0,
                      asMode.empty() ? NULL : asMode.c_str());
+  if(!strcmp(cmd, "pixelhistory") && args.size() > 4)
+  {
+    int x = 0, y = 0;
+    if(!ParseInt(args[3].c_str(), x) || !ParseInt(args[4].c_str(), y) || x < 0 || y < 0)
+      return Fail(2, "pixelhistory needs a pixel: '%s %s' is not a pair of co-ordinates",
+                  args[3].c_str(), args[4].c_str());
+    CompType cast = CompType::Typeless;
+    const char *castName = OptValue(args, "--cast", "typeless");
+    if(!CastFromName(castName, cast))
+      return Fail(2,
+                  "'%s' is not a component type (typeless, float, unorm, snorm, uint, sint, "
+                  "uscaled, sscaled, depth, srgb)",
+                  castName);
+    uint32_t mip = 0, slice = 0, sample = 0;
+    if(!ParseIndexOpt(args, "--mip", mip) || !ParseIndexOpt(args, "--slice", slice) ||
+       !ParseIndexOpt(args, "--sample", sample))
+      return Fail(2, "--mip, --slice and --sample are positions: they take a number from 0 up");
+    const Subresource sub(mip, slice, sample);
+    return CmdPixelHistory(ctrl, file, path, ToInt(args[1], 0), args[2].c_str(), (unsigned)x,
+                           (unsigned)y, sub, cast, ToInt(OptValue(args, "--max", "200"), 200));
+  }
   if(!strcmp(cmd, "sheet"))
     return CmdSheet(ctrl, file, path, args.size() > 1 ? args[1].c_str() : NULL,
                     ToInt(OptValue(args, "--every", "1"), 1),

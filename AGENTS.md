@@ -133,6 +133,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `state`/`shaders`/`cb` as a `marker` field and by `dump` into `events.json`, and a bundle older than that
   member simply has none (read it with a default, never by index). Matching is by the *name inside* a path
   (`A > B` answers for `B`), because paths carry dynamic text no table could list.
+- **`--at-marker` supplies the event id *instead of* the positional one, and it is an error to give both.**
+  `DispatchCommand` counts arguments against `MinArgs` to decide that, because the dispatcher cannot tell a
+  missing id from a command's next positional: the version that erased the slot to make room took that
+  positional with it (`image --at-marker X out.bmp` ran `image X` for a while, `cb --at-marker X ps 0` and
+  `statediff --at-marker X 900` likewise). A new command whose id comes first needs a `MinArgs` line, and
+  `pixelhistory` is the case that makes the point: a marker path resolves to a pass's *first* call, so
+  `--at-marker <pass>` answers up to the start of it -- the pass's last eid is what asks about its end.
 - The driver must not specialise RenderDoc's function templates (`DoStringise<...>`). RenderDoc defines them in
   its own `stringise.cpp`, unreachable from our translation unit
   (`[ifndr:temp.expl.spec.unreachable.declaration]`, `[basic.def.odr]`); use local, distinctly-named helpers
@@ -155,9 +162,10 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `rdc_schemas.py` the JSON contract, `rdc_analysis.py` the CLI that re-exports
   them all. C++: `src/cpp/replay_dump.cpp` the entry point, `common.h` the modules' shared declarations,
   `text.cpp`/`output.cpp` the printing, `capture.cpp` the engine session, `actions.cpp` the action tree,
-  `commands_frame.cpp`/`commands_state.cpp` the commands by area, `bundle.cpp` the bundle producer,
-  `selftest.cpp`, and `schema.cpp`/`schema.h` for the schema table — *data only*, because the printing, writing
-  and checking need the tool's `Fail`/log plumbing.
+  `commands_frame.cpp`/`commands_state.cpp` the commands by area, `commands_image.cpp`/`commands_patch.cpp`
+  the frame's pictures and the shader substitution, `image.cpp` the BMP/difference/hash maths, `bundle.cpp`
+  the bundle producer, `selftest.cpp`, and `schema.cpp`/`schema.h` for the schema table — *data only*, because
+  the printing, writing and checking need the tool's `Fail`/log plumbing.
 - **Split by what never changes together, not by size.** The Python split was done by cutting the original file
   at its own layer boundaries (and in dependency order: types → chunk-map → stream → cache/DXBC → resources →
   payloads → commands → CLI); the C++ split moved whole families out (`text`, `output`, `capture`, `actions`,
@@ -266,6 +274,22 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   difference hash -- and are tested device-free in `selftest.cpp`, because a contact sheet is a picture nobody
   can check by reading the code. `WriteBMP` is the writer the bundle's `rt/` images go through, so its bytes are
   a contract there too: the bundle gate covers it, and a reader must round-trip what it writes.
+- **`pixelhistory` answers with the engine's verdicts *and* their evidence, and says when a verdict is not a
+  fact.** It refuses three things rather than faking them: a capture whose driver does not support pixel history
+  (`APIProperties.pixelHistory`, printed by `info`); a pixel outside the texture (the engine answers an
+  out-of-range pixel with an *empty* list, which is what "nothing wrote it" looks like); and an empty list the
+  engine's own source explains -- a texture whose format it cannot read (`D3D12Replay::PixelHistory` returns
+  before doing anything). An empty answer that *is* an answer carries its evidence: `usagesUpTo`, the events up
+  to the scope that touch the texture at all. Every row prints the value before, from and after the fragment,
+  because one verdict is not a closed case on D3D12: the `sample masked` test is an instrumented re-draw
+  (RenderDoc marks the flag `TODO: figure out if we always need to check this`), and measured on the hobby
+  capture's 1-sample targets every base-pass fragment is flagged while one of them carries a changed `postMod`
+  in the same row -- so the document's `note` (printed as one of the header's key/value lines, in both formats)
+  says which two members to compare.
+  The vocabulary those rows are phrased in (`CastFromName`/`CastText`, `PixelValueText`, the
+  `Modification*Text` family, `RejectionText`) is in `commands_state.cpp` and pinned device-free in
+  `selftest.cpp`: a reason missing from the list a verdict is built from, or a value printed from the
+  `0xdeadbeef` "invalid" sentinel, is a wrong answer that reading the code does not reveal.
 - **The same rule on the offline side**: `$RDC_PROFILE=1` prints a phase table and `$RDC_PROGRESS=1` the live
   progress lines, both to **stderr** (stdout is the contract, and a command's stderr stays empty otherwise).
   The phase names are the `rdc_profile.timed(...)` decorators on the layers — one name per call site, so a

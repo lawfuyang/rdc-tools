@@ -1,0 +1,81 @@
+{
+  "title": "pixelhistory",
+  "description": "Why one pixel is the colour it is: every event up to the scope event that tried to write it, the test that rejected each attempt, and the value before, from and after it. `readAs` says how the numbers in `color` were read -- the texture's own format, or --cast, or raw 32-bit words when the capture says neither.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid",
+               "marker", "texture", "name", "x", "y", "mip", "slice", "sample", "format", "dimension",
+               "textureWidth", "textureHeight", "mips", "slices", "samples", "cast", "readAs",
+               "usagesUpTo", "note", "modifications", "total", "passed", "rejected", "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer", "description": "the scope: every write up to and including this event"},
+    "marker": {"type": "string", "description": "the marker path of the scope event, empty outside every marker"},
+    "texture": {"type": "string", "description": "e.g. res1234"},
+    "name": {"type": "string", "description": "the capture's own name for the texture, or its id"},
+    "x": {"type": "integer"},
+    "y": {"type": "integer"},
+    "mip": {"type": "integer"},
+    "slice": {"type": "integer", "description": "the array slice, the cube face, or the 3D slice at this mip"},
+    "sample": {"type": "integer"},
+    "format": {"type": "string"},
+    "dimension": {"type": "integer", "description": "1, 2 or 3: the texture's base dimension"},
+    "textureWidth": {"type": "integer"},
+    "textureHeight": {"type": "integer"},
+    "mips": {"type": "integer"},
+    "slices": {"type": "integer", "description": "how many slices this subresource has"},
+    "samples": {"type": "integer"},
+    "cast": {"type": "string", "enum": ["typeless", "float", "unorm", "snorm", "uint", "sint",
+                                        "uscaled", "sscaled", "depth", "srgb"],
+             "description": "what --cast asked for, `typeless` when it was not given"},
+    "readAs": {"type": "string", "description": "how `color` is to be read: a component type, or `raw 32-bit words` when nothing in the capture says"},
+    "usagesUpTo": {"type": "integer", "description": "how many events at or before the scope touch this texture, from the engine's own usage list: the evidence an empty `modifications` is read against"},
+    "note": {"type": "string", "description": "empty, or why a verdict in this document is not a closed case by itself: on D3D12 the `sample masked` test is an instrumented re-draw, so a flagged fragment can still carry a changed post value"},
+    "modifications": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "marker", "fragIndex", "primitiveID", "passed", "reasons",
+                   "directShaderWrite", "unboundPS", "preMod", "shaderOut", "postMod"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "marker": {"type": "string", "description": "the marker path that event sits inside, empty outside every marker"},
+        "fragIndex": {"type": "integer", "description": "which fragment of that event this was"},
+        "primitiveID": {"type": "integer"},
+        "passed": {"type": "boolean", "description": "every test passed: this fragment wrote the pixel"},
+        "reasons": {"type": "string", "description": "the tests that rejected it, in the order `passed` reads them; empty when it passed"},
+        "directShaderWrite": {"type": "boolean", "description": "an arbitrary shader write (a UAV or a copy), not a draw's fragment"},
+        "unboundPS": {"type": "boolean", "description": "no usable pixel shader was bound at the event"},
+        "preMod": {"type": "object", "required": ["valid", "color", "depth", "stencil"],
+                   "properties": {
+                     "valid": {"type": "boolean", "description": "false when the engine marked the value invalid: the other three are then `-`"},
+                     "color": {"type": "string", "description": "four components, comma separated, read as `readAs`"},
+                     "depth": {"type": "string"},
+                     "stencil": {"type": "string", "description": "-1 not in use or unknown, -2 in use but unreadable"}
+                   }, "additionalProperties": false},
+        "shaderOut": {"type": "object", "required": ["valid", "color", "depth", "stencil"],
+                      "properties": {
+                        "valid": {"type": "boolean"},
+                        "color": {"type": "string"},
+                        "depth": {"type": "string"},
+                        "stencil": {"type": "string"}
+                      }, "additionalProperties": false},
+        "postMod": {"type": "object", "required": ["valid", "color", "depth", "stencil"],
+                    "properties": {
+                      "valid": {"type": "boolean"},
+                      "color": {"type": "string"},
+                      "depth": {"type": "string"},
+                      "stencil": {"type": "string"}
+                    }, "additionalProperties": false}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer", "description": "modifications the engine reported"},
+    "passed": {"type": "integer", "description": "how many of them wrote the pixel"},
+    "rejected": {"type": "integer"},
+    "shown": {"type": "integer", "description": "rows in `modifications`: total, or --max when there were more"}
+  },
+  "additionalProperties": false
+}

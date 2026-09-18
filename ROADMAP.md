@@ -115,12 +115,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 2. P1 — Replay driver: experiments on the frame (the "what if" tools)
 
-* **Pixel history** — `PixelHistory(texture, x, y, subresource, typeCast)` returns one `PixelModification` per
-  event that touched that pixel, with the reasons it was rejected (`depthTestFailed`, `stencilTestFailed`,
-  `scissorClipped`, `viewClipped`, `shaderDiscarded`, `backfaceCulled`, `depthBoundsFailed`, `sampleMasked`) and
-  the values before and after (`preMod`, `shaderOut`, `postMod`). "Why is this pixel this colour / why is it not
-  drawn" stops being a guess. Gate it on `APIProperties.pixelHistory` and say plainly when the capture does not
-  support it. (~1–2 d)
 * **Shader debugging** — `DebugPixel(x, y, inputs)`, `DebugVertex(vertid, instid, idx, view)`,
   `DebugThread(group, thread)` and `DebugMeshThread(...)` return a `ShaderDebugTrace`; `ContinueDebug(debugger)`
   steps it and returns `ShaderDebugState`s; `FreeTrace` releases it. With a trace, print the inputs, the
@@ -326,16 +320,15 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — exploration and experiments**
-1. **Pixel history (§2)** — "why is this pixel this colour", gated on the capture supporting it.
-2. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
-3. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
+1. **Cross-checks + per-pass counters (§2, §3)** — the deterministic bugs and the cost column.
+2. **Dependency graph, memory/aliasing report (§4)** — the evidence behind §4's own rows (the bulk of what a
    detector could use from it has landed as the usage-chain rules).
 
 **Phase 2 — comparisons and the long tail**
-4. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
-5. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
+3. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
+4. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
    be trusted rather than hoped for.
-6. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+5. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
    REFERENCE §8 bullet that is not replay's job.
-7. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
-8. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.
+6. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
+7. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.

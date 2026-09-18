@@ -899,7 +899,7 @@ cmake -S . -B build -A x64 && cmake --build build --config Release   # MSVC + th
 
 | Command | Gives |
 |---|---|
-| `info <rdc>` | RenderDoc version, driver, API properties, resource/texture/buffer/chunk counts |
+| `info <rdc>` | RenderDoc version, driver, API properties (`pixelHistory` among them: the flag `pixelhistory` is gated on), resource/texture/buffer/chunk counts |
 | `draws <rdc> [max] [filter]` | the engine's action list (`GetRootActions`) in frame order: markers and calls, each with the engine's **event id**, its depth in the marker nest, and the marker path it sits inside. The filter matches a call's name *or* a marker path, so a marker is a handle for the events under it |
 | `state <rdc> <eid>` | bound shaders per stage, render targets, depth target, root signature and every root parameter with its register, space and what is bound |
 | `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, and the disassembly on request |
@@ -907,6 +907,7 @@ cmake -S . -B build -A x64 && cmake --build build --config Release   # MSVC + th
 | `textures <rdc> [filter] [--save <dir>]` | the texture list; `--save` decodes each one to PNG through `SaveTexture` |
 | `mesh <rdc> <eid> [instance] [max]` | post-VS geometry: what the vertex shader actually emitted |
 | `image <rdc> <eid> <out.bmp>` | the texture display at that event, written as a BMP (no PNG encoder needed) |
+| `pixelhistory <rdc> <eid\|last> <resId\|name> <x> <y>` | every event up to `<eid>` that tried to write that pixel: the test that rejected each attempt and the value before, from and after it (below) |
 | `counters <rdc>` / `debug <rdc>` | GPU counters / debug messages |
 | `usage <rdc> <resId or name>` | every event that touches a resource |
 | `probe <rdc> [maxEid]` | which event ids the engine actually has — see below |
@@ -1070,6 +1071,51 @@ session continues -- `Fail` returns a code rather than exiting, which is also wh
 and carry on. One thing to know when driving it: a script piped in by PowerShell arrives with a UTF-8 BOM, and
 the first token is then `\xEF\xBB\xBFstate`; the driver strips it (and `--stdin < script.txt` avoids the
 question entirely, which is the tested path).
+
+**Why one pixel is that colour (`pixelhistory`).** `pixelhistory <rdc> <eid|last> <resId|name> <x> <y>
+[--mip/--slice/--sample N] [--cast <type>] [--max N]` asks the engine for one pixel's history: every event up
+to `<eid>` that tried to write it, the test that rejected each attempt (`depth test failed`, `stencil test
+failed`, `scissor clipped`, `view clipped`, `shader discarded`, `backface culled`, `sample masked`, ...), and the
+value before, from and after it. That is the answer no other command gives. Measured on `PC Renderer.rdc`, pixel
+(960,540) of `SceneColor` is four rows and a story: the `GBufferClear` at eid 599, the lit cube of `BasePass` at
+eid 692 — whose `ps` value `0.9535,0.2053,0.3410` is the colour that landed — the reflection pass at 881, and
+`SkyAtmosphere` at eid 901 **rejected, `depth test failed`**: the sky is behind the cube. On the scoped form
+(`pixelhistory 1035 res61330 500 300`) the single row shows the format's precision too: `ps`
+`0.727051,0.328613,...` written into an `R11G11B10_FLOAT` target lands as `post` `0.726562,0.328125,...`.
+
+The scope is the *event*: the engine's history covers every write up to the one the replay is positioned at
+(`ReplayController::PixelHistory` filters the usage list by it), so `last` (the frame's own last event, from the
+same action list `draws` prints) is the whole frame and a pass's last eid is the answer at the end of that pass.
+`--at-marker <path>` supplies the scope instead of a positional id — `pixelhistory --at-marker BasePassParallel
+res60857 960 540` on `PC Renderer.rdc` returns one row, the `GBufferClear` at eid 599, because the BasePass
+write at 692 is *after* the scope the marker resolves to, which is the semantics rather than a bug: a marker
+path resolves to its first call, so a pass's *last* eid is what asks about the end of it.
+Two things it refuses to fake, both because an empty answer reads as a fact: the capture's driver must support
+pixel history at all (`APIProperties.pixelHistory`, which `info` prints), and the pixel must be inside the
+texture — the engine answers an out-of-range pixel with an *empty* list, which is exactly what "nothing wrote
+it" looks like. An empty answer that is real is reported with its evidence (`usagesUpTo`: how many events up to
+the scope touch the texture at all, "not one event up to it touches the texture" when that is zero); an empty
+answer the engine's own source explains — a texture whose format it does not know
+(`D3D12Replay::PixelHistory` returns before doing anything) — is an error rather than an answer.
+`--mip/--slice/--sample` pick the subresource and are checked against the engine's own description of the
+texture (the slice count is the texture viewer's rule: `depth >> mip` for a 3D texture, one per array element
+otherwise, which for a cubemap is one per face); `--cast` overrides how the four components are read, the
+texture's own format deciding otherwise and a typeless format printing raw 32-bit words. Values print as
+`pre`/`ps`/`post` with `-` where the engine marked a value invalid: an invalid value's union holds
+`0xdeadbeef`, and printing that is a plausible-looking colour that never existed. It is not a file read — the
+D3D12 implementation re-runs the frame's draws with instrumented shaders to catch this pixel's fragments —
+so it belongs in a batch with the other questions: measured on the 1.4 GB hobby capture, the first call in a
+process costs ~4 s (it builds the instrumented pipelines) and each further one ~1 s, while two calls on
+`PC Renderer.rdc` cost ~2 s together.
+
+**The one verdict in it that is not a closed case.** On D3D12 the `sample masked` test is an instrumented
+re-draw of the event, and RenderDoc's own source carries `TODO: figure out if we always need to check this` over
+the flag that enables it. Measured on the hobby capture's 1-sample targets: every base-pass fragment comes back
+flagged, and one of them carries a *changed* `postMod` value in the same row. So the rows always print the
+values next to the verdict, and the document's `note` member (a key/value line in the header, in both formats)
+says which two to compare rather than letting the flag read as a closed case; a capture where nothing is flagged
+— `PC Renderer.rdc` — has an empty `note`, and the same pixel asked of the two captures is what shows which case
+a capture is.
 
 **The frame's pictures, and the one experiment (`sheet`, `imgdiff`, `patch`).** `sheet <rdc> [outDir]` renders
 one image per pass -- taken at the pass's last call that has a bound target, not at its last call, because a

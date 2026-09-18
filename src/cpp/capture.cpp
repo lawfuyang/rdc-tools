@@ -78,6 +78,7 @@ ProfileBucket g_Profile[kProfileCount] = {
     {"shaders document", 0, 0}, {"cbuffer documents", 0, 0},     {"event row", 0, 0},
     {"images", 0, 0},           {"action tree", 0, 0},           {"resources.json", 0, 0},
     {"messages.json", 0, 0},    {"textures.json", 0, 0},         {"usage lists", 0, 0},
+    {"pixel history", 0, 0},
 };
 
 bool ProfileOn()

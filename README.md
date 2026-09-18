@@ -225,12 +225,14 @@ not exist yet, everything else runs today.
 * **Offline today** — `sections`, `blocks`, `resources`, `descriptors`, `verify`, `summary`, `markers`,
   `chunks`, `chunk`, `draws`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`, `dxbc`,
   `dump-chunk`, `dump-shaders`, `cache`, `selftest` (REFERENCE §4).
-* **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `shaders`, `cb`, `textures`,
-  `mesh`, `image`, `counters`,
+* **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `pixelhistory`, `shaders`, `cb`,
+  `textures`,
+  `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters`,
   `debug`, `usage`, `probe`, `batch`, `--repl`/`--stdin`, the bundle pair `dump` + `bundle-verify`, and the
   contract pair `schema` + `selftest` (REFERENCE §9). `find` and an event id argument both take a **marker
-  path** as well as a number, so a command can be pointed at a pass rather than an id.
-* **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), pixel history, shader debugging, overlays
+  path** as well as a number (and `last` for the frame's own last event), so a command can be pointed at a
+  pass rather than at an id.
+* **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), shader debugging, overlays
   (ROADMAP §2), per-pass counters, `mesh --stage/--obj`, texture subresources (ROADMAP §3), `deps`,
   memory/aliasing report, `--format`, structural `diff` (ROADMAP §4), `replaydiff` (ROADMAP §5), the capture
   corpus and the golden/fixture tests (ROADMAP §6).
@@ -264,6 +266,7 @@ offline tool, and it survives the process that produced it; stdout does not, and
 | buffer contents | `buffer <resId> [offset] [len] [--as u32\|f32\|hex\|ascii]` (REFERENCE §9) | what is really in a buffer that reflection cannot describe (index data, structured buffers) |
 | textures | `textures --save <dir>` today; subresources and raw/HDR options *(ROADMAP §3)* | decoded pixels to look at, plus the format/dimension facts for the audit |
 | render targets | `image <eid> <out.bmp>`, or `sheet <rdc> <dir>` for every pass at once; bundle `rt/` (REFERENCE §9) | what the pass produced — the fastest way to see "this pass drew nothing" |
+| one pixel's history | `pixelhistory <eid\|last> <resId> <x> <y>` (REFERENCE §9) | "why is this pixel this colour": every event up to the scope that tried to write it, the test that rejected each, and the value before, from and after it |
 | geometry | `mesh <eid>` today; other stages and `--obj` *(ROADMAP §3)* | what the VS/GS emitted, which is where vertex bugs show themselves |
 | GPU counters | `counters` today; per-pass fold *(ROADMAP §3)* | where the time went, where the driver supports it |
 | debug messages | `debug` | the API's own complaints — the highest-value red flags there are |
@@ -319,13 +322,14 @@ turns off the source fetch (§1.1), and `$RDC_PROFILE=1` prints where the time w
 .\bin\replay_dump.exe state 'capture.rdc' <eid>              # was it even drawn? RTs, shaders, root params
 .\bin\replay_dump.exe shaders 'capture.rdc' <eid>            # names + bind points: what the shader reads
 .\bin\replay_dump.exe cb 'capture.rdc' <eid> ps 3            # ... and the values it read
+.\bin\replay_dump.exe pixelhistory 'capture.rdc' last res1234 640 360   # every write to that pixel, and why not
 ```
 
-If the draw is there and the values look right, the pixel history *(ROADMAP §2)* is the next step and usually the
-answer: it lists every event that touched that pixel **and the reason each was rejected** — `depthTestFailed`,
-`stencilTestFailed`, `scissorClipped`, `viewClipped`, `shaderDiscarded`, `backfaceCulled`, `sampleMasked` —
-with the values before and after. "Nothing drew it" then becomes "the scissor was 0×0 at eid 812". If the pixel
-history says the shader itself is responsible, patch it *(ROADMAP §2)* — force the return value, disable the branch —
+If the draw is there and the values look right, `pixelhistory` *(REFERENCE §9)* is the next step and usually the
+answer: it lists every event that touched that pixel **and the reason each was rejected** — `depth test failed`,
+`stencil test failed`, `scissor clipped`, `view clipped`, `shader discarded`, `backface culled`, `sample masked` —
+with the value before, from and after each one. "Nothing drew it" then becomes "the scissor was 0×0 at eid 812". If the pixel
+history says the shader itself is responsible, patch it *(REFERENCE §9)* — force the return value, disable the branch —
 and re-render the draw to see what changes. That experiment is often faster than reasoning about the
 disassembly.
 

@@ -3,10 +3,12 @@
 // replay_dump is one program split into modules by what a reader is looking for: the text of the
 // engine's names (text.cpp), the writer every command prints through (output.cpp), the replay
 // session itself (capture.cpp), the capture's action tree (actions.cpp), the commands by area
-// (commands_frame.cpp, commands_state.cpp), the bundle producer (bundle.cpp), the self-check
-// (selftest.cpp) and the entry point (replay_dump.cpp). This header is what they share: the few
-// globals, the shared types, and every function one module calls in another. A function that no
-// other module calls stays `static` in its own file and is deliberately not listed here.
+// (commands_frame.cpp, commands_state.cpp), the frame's pictures and the one experiment
+// (commands_image.cpp, commands_patch.cpp), the images behind them (image.cpp), the bundle producer
+// (bundle.cpp), the self-check (selftest.cpp) and the entry point (replay_dump.cpp). This header is
+// what they share: the few globals, the shared types, and every function one module calls in
+// another. A function that no other module calls stays `static` in its own file and is deliberately
+// not listed here.
 //
 // The three things a replay host *must* do — REPLAY_PROGRAM_MARKER() at file scope,
 // RENDERDOC_InitialiseReplay() before opening anything, RENDERDOC_ShutdownReplay() on the way out —
@@ -225,6 +227,7 @@ enum ProfileSlot
   kProfileEventRow,         // the per-event row: key, hash, marker, targets, JSON
   kProfileImages,           // SaveTexture at a state change
   kProfileActions,          // walking the engine's action tree (draws, kinds, markers)
+  kProfilePixelHistory,     // the engine's pixel history: it re-runs the frame's draws
   kProfileResources,        // resources.json
   kProfileMessages,         // messages.json
   kProfileTextures,         // textures.json and texture decoding
@@ -359,6 +362,21 @@ int CmdImgDiff(ICaptureFile *file, const char *path, const char *aPath, const ch
                const char *outPath);
 int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
              const std::vector<std::string> &args);
+//: `pixelhistory` and the vocabulary its answers are phrased in. The text helpers are declared here
+//: because the device-free selftest checks them directly: a value printed from the engine's
+//: "invalid" sentinel, or a rejection reason missing from the list a verdict is built from, is a
+//: wrong answer that reading the code does not reveal.
+bool CastFromName(std::string_view name, CompType &type);
+const char *CastText(CompType type);
+std::string PixelValueText(const PixelValue &value, CompType type);
+std::string ModificationColorText(const ModificationValue &value, CompType type);
+std::string ModificationDepthText(const ModificationValue &value);
+std::string ModificationStencilText(const ModificationValue &value);
+std::string ModificationValueText(const ModificationValue &value, CompType type);
+std::string RejectionText(const PixelModification &mod);
+int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+                    const char *what, unsigned x, unsigned y, const Subresource &sub,
+                    CompType typeCast, int maxRows);
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                bool bWantDisasm);
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,

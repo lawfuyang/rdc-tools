@@ -483,6 +483,114 @@ int CmdSelftest()
     remove(notBmp.c_str());
   }
 
+  // ------------------------------------------------------------------ the pixel-history vocabulary
+  //
+  // `pixelhistory`'s answers are phrased in these helpers, and two of them can be wrong in a way that
+  // reads as a fact: a rejection list that misses a flag the engine set (the fragment did not write
+  // the pixel, and nothing says why), and a value read as the wrong component type or printed from the
+  // engine's "invalid" sentinel. Both are checked with hand-built structures: no device, no capture.
+  {
+    CompType cast = CompType::Typeless;
+    t.Check(CastFromName("float", cast) && cast == CompType::Float, "pixelhistory-cast-name",
+            "`float` is not read as the float component type");
+    t.Check(CastFromName("srgb", cast) && cast == CompType::UNormSRGB, "pixelhistory-cast-srgb",
+            "`srgb` is not read as UNormSRGB");
+    // `f32` is `buffer --as`'s word for printing bytes, not a texture component type: accepting it
+    // here would be one vocabulary pretending to be the other.
+    t.Check(!CastFromName("f32", cast) && !CastFromName("", cast), "pixelhistory-cast-unknown",
+            "a name that is not a component type was accepted");
+
+    // The printed name has to read back as the type it came from: `readAs` is printed that way, and
+    // the next command line takes the name as `--cast`.
+    bool bRoundTrip = true;
+    const CompType kAllCasts[] = {CompType::Typeless, CompType::Float,   CompType::UNorm,
+                                  CompType::SNorm,    CompType::UInt,    CompType::SInt,
+                                  CompType::UScaled,  CompType::SScaled, CompType::Depth,
+                                  CompType::UNormSRGB};
+    for(const CompType type : kAllCasts)
+    {
+      CompType back = CompType::Typeless;
+      if(!CastFromName(CastText(type), back) || back != type)
+        bRoundTrip = false;
+    }
+    t.Check(bRoundTrip, "pixelhistory-cast-round-trip",
+            "a cast name does not read back as the type it was printed from");
+
+    // The same four words, three readings: which member of the union is meaningful is the component
+    // type's business, and a float format read as unsigned prints 1065353216 where 1.0 belongs. Two
+    // words whose three readings are all exact, so the check pins the reading and not the formatter.
+    PixelValue value = {};
+    value.floatValue[0] = 1.0f;     // 0x3f800000
+    value.floatValue[1] = -2.0f;    // 0xc0000000
+    t.Equal(PixelValueText(value, CompType::Float), "1.000000,-2.000000,0.000000,0.000000",
+            "pixelhistory-value-float");
+    t.Equal(PixelValueText(value, CompType::UInt), "1065353216,3221225472,0,0",
+            "pixelhistory-value-uint");
+    t.Equal(PixelValueText(value, CompType::SInt), "1065353216,-1073741824,0,0",
+            "pixelhistory-value-sint");
+    t.Equal(PixelValueText(value, CompType::Float), PixelValueText(value, CompType::UNormSRGB),
+            "pixelhistory-value-scaledtypes-read-as-float");
+
+    ModificationValue mod = {};
+    mod.col.uintValue[0] = 1065353216u;
+    mod.depth = 0.5f;
+    mod.stencil = 3;
+    t.Equal(ModificationValueText(mod, CompType::Float),
+            "col(1.000000,0.000000,0.000000,0.000000) depth(0.500000) stencil(3)",
+            "pixelhistory-value-line");
+    // The sentinel: an invalid value's colour is `0xdeadbeef`, and printing it is a colour that
+    // never existed -- the one mistake here that a reader cannot see.
+    ModificationValue invalid = {};
+    invalid.SetInvalid();
+    t.Check(!invalid.IsValid(), "pixelhistory-invalid-sentinel",
+            "SetInvalid did not mark the value invalid (the check below proves nothing then)");
+    t.Equal(ModificationColorText(invalid, CompType::Float), "-", "pixelhistory-invalid-color");
+    t.Equal(ModificationDepthText(invalid), "-", "pixelhistory-invalid-depth");
+    t.Equal(ModificationStencilText(invalid), "-", "pixelhistory-invalid-stencil");
+    t.Equal(ModificationValueText(invalid, CompType::Float), "-", "pixelhistory-invalid-line");
+
+    // Every flag `PixelModification::Passed` reads, one at a time: the verdict and the reasons are
+    // two answers to one question, so a flag that makes a fragment fail must also name itself. The
+    // count is asserted, because a flag added to the struct (RenderDoc's, not ours) would otherwise
+    // be missing from the list silently -- which is exactly the failure this checks for.
+    const struct
+    {
+      bool PixelModification::*flag;
+      const char *name;
+    } kFlags[] = {
+        {&PixelModification::sampleMasked, "sample masked"},
+        {&PixelModification::backfaceCulled, "backface culled"},
+        {&PixelModification::depthClipped, "depth clipped"},
+        {&PixelModification::depthBoundsFailed, "depth bounds failed"},
+        {&PixelModification::viewClipped, "view clipped"},
+        {&PixelModification::scissorClipped, "scissor clipped"},
+        {&PixelModification::shaderDiscarded, "shader discarded"},
+        {&PixelModification::depthTestFailed, "depth test failed"},
+        {&PixelModification::stencilTestFailed, "stencil test failed"},
+        {&PixelModification::predicationSkipped, "predication skipped"},
+    };
+    PixelModification none = {};
+    t.Check(none.Passed() && RejectionText(none).empty(), "pixelhistory-passed-is-silent",
+            "a fragment with no failing flag is not passed, or is given a reason");
+    int checked = 0, named = 0;
+    for(const auto &flag : kFlags)
+    {
+      PixelModification one = {};
+      one.*(flag.flag) = true;
+      checked++;
+      if(!one.Passed() && RejectionText(one) == std::string(flag.name))
+        named++;
+    }
+    t.Check(checked == 10, "pixelhistory-every-flag-is-checked",
+            "the flag list no longer covers every flag `Passed` reads");
+    t.Check(named == checked, "pixelhistory-every-flag-is-named",
+            "a flag that stops a fragment from writing the pixel has no reason in the list");
+    PixelModification both = {};
+    both.scissorClipped = true;
+    both.depthTestFailed = true;
+    t.Equal(RejectionText(both), "scissor clipped, depth test failed", "pixelhistory-reason-order");
+  }
+
   // ------------------------------------------------------------------ the help text and the DLL
   {
     std::string usage;
@@ -503,6 +611,8 @@ int CmdSelftest()
             "the usage text omits selftest");
     t.Check(usage.find("dump") != std::string::npos, "usage-lists-dump",
             "the usage text omits dump");
+    t.Check(usage.find("pixelhistory") != std::string::npos, "usage-lists-pixelhistory",
+            "the usage text omits pixelhistory");
 
     HMODULE dll = LoadReplayDLL();
     if(dll == NULL)

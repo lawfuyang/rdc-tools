@@ -260,8 +260,87 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 
 ## 8. Suggested order
 
-Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
+Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
+item of §1–§7 appears exactly once, so this is the whole list in one place rather than a selection of it; each
+item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
+item *is*.
 
-**Phase 1 — the long tail**
-1. **Remote replay (§6)** — the honest fix for the desktop-GPU caveat, when a device is available.
-2. **The D3D12 harness (§6.5)** — only when a shader must be run with inputs the capture does not contain.
+**Phase 0 — the cheap instruments (~2 days, nothing blocked).** Five items of hours rather than days that
+make everything after them measurable, debuggable or shareable. Each is worth more before the work it guards
+than after it:
+
+1. **Driver version guard (§5, ~4 h)** — first, because a mismatch today surfaces as whatever the engine does
+   next, which would quietly invalidate the measurements the rest of this list rests on.
+2. **`debug --group [--fail-on <severity>]` (§1, ~3 h)** — the driver-side sanity gate, and the instrument
+   that makes the phases below debuggable instead of guessed at.
+3. **Schemas for the tool's own documents (§5, ~2 h)** — `replaydiff.json` carries a `schemaVersion` and no
+   checked shape; landing the schema now means every document written later (a sweep index, a harness
+   result) is checkable in the same style for almost nothing.
+4. **CSV and Markdown tables (§4, ~2 h)** — cheap, and it is what makes any later finding pasteable into an
+   issue or a spreadsheet.
+5. **The driver's own golden text (§5, ~half a day)** — the net under phases 2–3, modelled on the offline
+   `goldens` that already landed. It needs a GPU to regenerate, which is why its shape is a checked-in
+   expectation per capture plus a `batch`-based script that rediffs it.
+
+**Phase 1 — the offline questions this project was started for (~3½ days; no GPU, no capture).** The corpus's
+pair (`mobile-1` against `desktop-1`) is kept for one question — what changed between the same scene on two
+platforms — and these four answer it from the file, where answers are cheap, diffable and testable:
+
+1. **Structural capture diff (§4, ~1 d)** — `diff <a.rdc> <b.rdc>` over descriptor writes and command
+   payloads. `passdiff`/`replaydiff` read the marker trees and the engine's answers; this reads what the
+   stream itself recorded, which is the half they cannot see.
+2. **Root-signature vs chunk-stream cross-check (§4, ~1 d)** — two independent paths to the same fact is what
+   this project uses instead of trust, applied to pipeline state rather than to findings.
+3. **The captures' known-bug lists (§5, ~1 d, ongoing)** — what turns the detectors from observations into
+   verdicts, and what clears the report's `unproven` flags. Following a finding to its cause can need the
+   engine's answer, so part of this may spill into phase 2.
+4. **VRAM budget and what-if (§4, half a day)** — the ledger behind `memory` already holds what the totals
+   need; "at half resolution" and "with this MRT dropped" are arithmetic on top of it.
+
+**Phase 2 — the driver, once per frame instead of once per process (~4 days).** The bundle landed (`dump` +
+`bundle-verify`, REFERENCE §4), which is the precondition the library was waiting on:
+
+1. **The driver as a library (§1, ~2–3 d)** — a thin C ABI called through `ctypes`, so every driver item
+   after this is a query rather than a subprocess protocol, and the 28-process baseline pass goes away.
+2. **`watch <name>` (§1, ~4–6 h)** — a uniform that is right at one draw and wrong at the next as one
+   command instead of forty `cb` calls. It composes `cb` as it stands, so it can land before the library if
+   it is wanted sooner; it gets cheaper after it.
+3. **`sweep <dir> [--out <root>]` (§1, ~4 h)** — one bundle per capture with a combined index: the half of
+   the corpus (REFERENCE §4.17) that needs a GPU to rebuild in bulk.
+
+**Phase 3 — the pictures, and what was skipped (~4 days).** Everything a person needs to look at, plus the two
+audits that keep a summary honest about its own gaps:
+
+1. **Format coverage audit (§3, half a day)** and **Format coverage in the offline view (§7, ~2 h)** — the
+   same question on the engine's side and on the file's: what was decoded, what was skipped, and why. A
+   summary that silently skips a texture is worse than one that says "12 textures use ASTC, not decoded".
+2. **Texture subresources and formats (§3, ~1–2 d)** — one subresource at a time (mip, slice, sample, raw
+   bytes), tonemapping for float/HDR formats, and a cubemap's six faces, which is what makes an environment
+   map reviewable at all.
+3. **Overlays as images (§2, half a day)** — wireframe for topology, quad overdraw for a fragment-cost hunch,
+   once the display path is shared (which it nearly is).
+4. **Geometry beyond the vertex shader's output (§3, ~1–2 d)** — `mesh` reads `VSOut` today; a mesh shader's
+   or a GS's actual output, plus `--obj` to export it, is what makes a mesh-heavy capture inspectable.
+
+**Phase 4 — robustness, when a capture asks for it (~half a day each).** Small, independent, and none of them
+blocks anything above:
+
+1. **Zstd without the dependency (§7, ~4 h)** — vendor a decoder or refuse with a clear message, instead of
+   needing `pip install zstandard`.
+2. **Memory-mapped stream access (§7, ~4 h)** — the largest capture is ~1.5 GB held in RAM today.
+3. **Non-D3D12 driver names (§7, ~1 h)** — the loader already takes `driver=`; the CLI does not expose it.
+
+**Phase 5 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
+list — a device, a debug-info capture, evidence, or a decision:
+
+1. **Remote replay (§6, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
+   honest fix for the desktop-GPU caveat every report carries.
+2. **Shader debugging (§2, ~2 d)** — only for shaders built with debug info (`-Zi -Od`), which most captures
+   do not have: the first half of the item is to say that clearly and document how to re-capture.
+3. **D3D12 harness (§6.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
+   settling whether a patched shader changes a render (REFERENCE §9 has the measurement), not by writing the
+   program.
+4. **A capture-side annotation layer (§6, ~2–3 d)** — needs an installed DLL, and a scenario where our own
+   markers beat the engine's names.
+5. **Other APIs' names (§6, ~1 d + evidence)** — needs a capture from another API in hand.
+6. **Upstream (§6)** — not a work item and not a phase: a standing intention to file what gets confirmed.

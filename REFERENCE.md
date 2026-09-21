@@ -1299,7 +1299,9 @@ its 2,132 collected ids were one state repeated past the last event; on `desktop
 1736 would have been 94% of a default dump. The chunk count is the fallback bound when no action list comes
 back, and `--until` can narrow the range but no longer extend it past the frame's end. All of the gaps are
 written into the bundle's own `notInThisBundle` list, so a reader does not conclude that the frame had no
-copies. Deriving the engine's ids from the file is the open item in `ROADMAP.md` §3.
+copies. Nothing offline derives one numbering from the other: the mismatch between event ids and chunk indices is
+one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §6), and no item anywhere in that file
+proposes to close it here.
 
 **The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
 that change the answer -- including the scan bound, which is why every cache written before the bound existed
@@ -1329,7 +1331,8 @@ left in the reported state by earlier replay passes, real rows in every bundle t
 on any per-event reading of a state that sits between command lists -- and the two things that would
 make a parallel sweep honest are both out of reach: reproducing the serial history per worker costs
 the whole prefix (the last worker would pay the entire range), and splitting at command-list
-boundaries needs the event-id-to-chunk mapping that is ROADMAP §3's open item. The attempt also left
+boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §6, `Upstream`).
+The attempt also left
 two Windows findings behind: a spawned child must be given a stdin it can use (an inherited slot it
 cannot takes its whole stdio down -- three "successful" workers once left three empty logs), and
 simultaneous replay-device creations can leave one hung at zero CPU with no error, so any such design

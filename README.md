@@ -23,67 +23,6 @@ device. REFERENCE §8 lists the sharp edges that follow from that.
 > validate anything you plan to rely on against the capture you are actually debugging, and read REFERENCE §8
 > for the known sharp edges.
 
-```
-rdc-tools/
-  src/py/             the offline tool, one module per layer (REFERENCE §3, §4)
-    rdc_analysis.py     the CLI: the command table and the dispatch (run this)
-    rdc_types.py        the shapes of what the tool reads, and the constants they are framed with
-    rdc_profile.py      phase timing and live progress ($RDC_PROFILE / $RDC_PROGRESS, §4.13)
-    rdc_chunkmap.py     chunk id -> name: the RenderDoc source tree's enums over the bundled table
-    rdc_chunknames.py   the bundled table itself: generated data, not written by hand (§1.1)
-    rdc_renderdoc_src.py  where that tree is, and fetching it when it is not there (§1.1)
-    rdc_stream.py       the container and the frame stream (sections, framing, LZ4/Zstd)
-    rdc_cache.py        the decompressed-stream cache, and `load_stream`
-    rdc_dxbc.py         the DXBC/DXIL containers the capture carries
-    rdc_resources.py    formats, the resource table, descriptor heaps, root signatures, `RDEF`
-    rdc_payloads.py     the chunk payload decoders (draw state, pipeline, CBVs, vertex buffers)
-    rdc_commands.py     the commands themselves (draws, resources, descriptors, verify, ...)
-    rdc_scan.py         the whole-stream string scan, split across processes (§4.13)
-    rdc_report.py       the frame report: a bundle in, deterministic Markdown/JSON out (§4.11)
-    rdc_ab.py           the A/B of two bundles: alignment, state/values/shaders/renders (§4.16)
-    rdc_ab_render.py    the A/B's Markdown writer
-    rdc_passdiff.py     the two files' marker trees side by side, offline (§4.16)
-    rdc_image.py        PNG in and out, the pixel difference and the perceptual hash
-    rdc_bundle.py       the bundle's types and loader
-    rdc_passes.py       pass reconstruction and the frame-at-a-glance roll-ups
-    rdc_notable.py      which passes and resources are worth looking at first, and the rules that say so
-    rdc_recommend.py    what to look at first, ranked, each row with the command that shows it
-    rdc_detect_*.py     the detectors by family: bundle, usage, pipeline state, binding, chunk stream
-    rdc_report_render.py  the Markdown writer and the report's own caveats
-    rdc_schemas.py      the JSON contract — the validator behind `validate` (§4.12)
-  src/cpp/            the replay driver, same idea (REFERENCE §9)
-    src/cpp/replay_dump.cpp     the entry point: options, dispatch, help
-    common.h            the modules' shared declarations — globals, types, one section per module
-    text.cpp            the engine's names and values as text
-    output.cpp          the JSON/text writer every command prints through
-    capture.cpp         the replay session: the DLL, logging, the RAII guards, argument helpers
-    actions.cpp         the capture's action tree, and which events are dispatches
-    commands_*.cpp      the commands by area (frame inspection; per-event state)
-    bundle.cpp          the bundle producer and verifier the report reads
-    selftest.cpp        the driver checking itself + publishing its schemas
-    src/cpp/schema.cpp src/cpp/schema.h the schema table — data; the tool prints, writes and checks it
-    src/cpp/third_party/lz4/  the vendored LZ4 decoder (§1), built into bin/rdc_lz4.dll for the offline tool
-  CMakeLists.txt      builds the driver against the installed renderdoc.dll (output in .\bin\)
-  .clang-format       RenderDoc's own C++ style, copied (the driver is a RenderDoc client)
-  tools/              deploy_dlls.cmake — copies the engine's DLLs next to the exe
-  schema/             the driver's schemas, checked in (`schema --check` fails when they drift, §4.12)
-  goldens/            the capture corpus: the index, the labels, and one transcript per command (§4.17) — generic
-                      (a capture is a key and a digest); captures.local.json in it holds this machine's paths and
-                      is gitignored
-  engine-schemas/     a known engine's names and what each one means (REFERENCE §4.11; `$RDC_ENGINE_SCHEMAS`)
-  bin/                the built driver, the DLLs it loads, and rdc_lz4.dll (§1) (gitignored)
-  build/              the CMake build tree (gitignored)
-  README.md           this file — setup, quick start, and the playbook for an AI agent
-  REFERENCE.md        the detail behind it: internals (3), commands (4), examples (5), payload facts (6),
-                      extending (7), pitfalls (8), the driver (9)
-  ROADMAP.md          unimplemented features and planned work
-  tests/              self-contained unittest suite, one file per area (run: src/py/rdc_analysis.py selftest);
-                      rdc_testcase.py holds the cases and fixtures they share
-  pyrightconfig.json  type-checker config: typeCheckingMode "standard", target Python 3.8
-  typings/            stub for the optional zstandard dependency
-  .github/workflows/  CI: the hermetic offline gate on every push, the driver as a manual job (§4.17)
-```
-
 ---
 
 ## 1. Requirements and setup
@@ -597,9 +536,10 @@ built on.
   reference, §5 worked examples, §6 verified payload facts, §7 how to add a command, §8 pitfalls and known
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
 * **`ROADMAP.md`** — what is not implemented yet, in priority order: the driver's navigation and experiment
-  commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4), the
-  the driver version guard (§6), the work beyond the local desktop (§7),
-  robustness and scope (§8), the REFERENCE §8 items being closed (§9), and the suggested order (§10).
+  commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4),
+  verification, regression and the bug atlas (§5), the work beyond the local desktop (§6, with the standalone
+  D3D12 harness as §6.5), robustness and scope (§7), and the suggested order (§8), which places every item of
+  §1–§7 in one phased list.
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.
 * **`renderdoc-src/`** — fetched into the root folder on first use (§1.1), and also where this project keeps

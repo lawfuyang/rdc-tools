@@ -10,6 +10,10 @@
 // another. A function that no other module calls stays `static` in its own file and is deliberately
 // not listed here.
 //
+// A definition longer than a line is not here either: this file is a list of what may be called, so
+// the bodies of the types declared below are in common.cpp, and only a one-line body (`Ok()`, a
+// guard's constructor) is written out in place.
+//
 // The three things a replay host *must* do — REPLAY_PROGRAM_MARKER() at file scope,
 // RENDERDOC_InitialiseReplay() before opening anything, RENDERDOC_ShutdownReplay() on the way out —
 // are in capture.cpp and replay_dump.cpp; without the first two the engine runs with uninitialised
@@ -160,36 +164,8 @@ const size_t kDocBuffer = 1 << 20;
 class CaptureStdout
 {
 public:
-  explicit CaptureStdout(const char *path)
-  {
-    const int fd = _fileno(stdout);
-    m_Saved = _dup(fd);
-    m_File = fopen(path, "wb");
-    if(m_File != NULL && m_Saved >= 0)
-    {
-      _dup2(_fileno(m_File), fd);
-      // Buffered only when the caller has said that every engine call is behind it. Buffering a
-      // document written *between* engine calls makes the host faster and changes the bundle --
-      // measured both ways, see REFERENCE 9.
-      if(DocumentBuffering())
-      {
-        setvbuf(stdout, NULL, _IOFBF, kDocBuffer);
-        m_bBuffered = true;
-      }
-    }
-  }
-  ~CaptureStdout()
-  {
-    fflush(stdout);
-    if(m_Saved >= 0)
-      _dup2(m_Saved, _fileno(stdout));
-    if(m_bBuffered)
-      setvbuf(stdout, NULL, _IONBF, 0);    // the console, and the next command, go back to unbuffered
-    if(m_File != NULL)
-      fclose(m_File);
-    if(m_Saved >= 0)
-      _close(m_Saved);
-  }
+  explicit CaptureStdout(const char *path);
+  ~CaptureStdout();
   CaptureStdout(const CaptureStdout &) = delete;
   CaptureStdout &operator=(const CaptureStdout &) = delete;
   bool Ok() const { return m_File != NULL && m_Saved >= 0; }
@@ -504,25 +480,7 @@ struct SweepRules
   //: One id's answer folded into the running state. A with-state id is recorded *before* the caps
   //: are tested, so the id that trips a cap is collected and is the last one -- the serial loop did
   //: the same, and `lastEid`/`scanned` are compared against it.
-  Step Feed(bool bHasState, int eid)
-  {
-    if(!bHasState)
-    {
-      // Only after something was found: a capture whose first event is id 841 must be walked to it,
-      // not declared empty at id 256.
-      if(m_LastEid > 0 && ++m_EmptyRun >= kEmptyRunStop)
-        return StopEmptyRun;
-      return Continue;
-    }
-    m_EmptyRun = 0;
-    m_LastEid = eid;
-    m_Count++;
-    if(m_MaxEvents > 0 && m_Count >= (size_t)m_MaxEvents)
-      return StopMaxEvents;
-    if(m_Count >= m_IdBudget)
-      return StopIdBudget;
-    return Continue;
-  }
+  Step Feed(bool bHasState, int eid);
 };
 
 int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
@@ -548,20 +506,11 @@ struct ImageData
   int m_Height = 0;
   bytebuf m_Rgba;
 
-  bool Valid() const
-  {
-    return m_Width > 0 && m_Height > 0 && m_Rgba.size() == (size_t)m_Width * (size_t)m_Height * 4u;
-  }
+  bool Valid() const;
 
   //: Exactly `count` pixels, every byte `value`. `rdcarray` (which `bytebuf` is) has neither
   //: `assign` nor a two-argument `resize`: clear, size, then fill.
-  void Reset(size_t count, uint8_t value = 255)
-  {
-    m_Rgba.clear();
-    m_Rgba.resize(count);
-    for(size_t i = 0; i < m_Rgba.size(); i++)
-      m_Rgba[i] = (byte)value;
-  }
+  void Reset(size_t count, uint8_t value = 255);
 };
 
 //: A 24-bit BMP: the writer behind `image`, the bundle's `rt/` images, the contact sheet and the

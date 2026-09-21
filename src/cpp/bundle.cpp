@@ -239,6 +239,11 @@ struct DumpOptions
   int m_Since = 1;
   int m_Until = 0;
   int m_MaxEvents = 0;
+  //: The id the sweep stops at, derived (not parsed): the frame's last event id from the action
+  //: list, or the file's chunk count when no action list came back. Recorded in the sweep cache's
+  //: key and header because it changes the answer as much as the range does: a sweep that stopped
+  //: at the chunk count collected a clamped tail a sweep bounded by the last event does not.
+  int m_Bound = 0;
   bool m_bWithImages = false;
   bool m_bWithCounters = false;
   bool m_bWithTextures = false;
@@ -306,9 +311,9 @@ std::string SweepCacheKey(const DumpOptions &opts, const std::string &absolute)
     written = ((unsigned long long)info.ftLastWriteTime.dwHighDateTime << 32) |
               info.ftLastWriteTime.dwLowDateTime;
   }
-  const std::string material = Fmt("%s|%llu|%llu|%s|%d|%d|%d", identity.c_str(), bytes, written,
+  const std::string material = Fmt("%s|%llu|%llu|%s|%d|%d|%d|%d", identity.c_str(), bytes, written,
                                    g_GetVersionString != NULL ? g_GetVersionString() : "?",
-                                   opts.m_Since, opts.m_Until, opts.m_MaxEvents);
+                                   opts.m_Since, opts.m_Until, opts.m_MaxEvents, opts.m_Bound);
   unsigned long long hash = 1469598103934665603ULL;
   for(size_t i = 0; i < material.size(); i++)
   {
@@ -339,8 +344,8 @@ bool ReadSweepCache(const std::string &cachePath, const char *path, const DumpOp
     return false;
   char line[1024];
   const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).c_str());
-  const std::string wantRange =
-      Fmt("# range: since %d until %d maxEvents %d", opts.m_Since, opts.m_Until, opts.m_MaxEvents);
+  const std::string wantRange = Fmt("# range: since %d until %d maxEvents %d bound %d",
+                                    opts.m_Since, opts.m_Until, opts.m_MaxEvents, opts.m_Bound);
   const std::string wantEngine =
       Fmt("# engine: %s", g_GetVersionString != NULL ? g_GetVersionString() : "?");
   bool bCapture = false, bRange = false, bEngine = false, bScanned = false;
@@ -408,8 +413,8 @@ void WriteSweepCache(const std::string &cachePath, const char *path, const DumpO
   fprintf(f, "# rdc-tools sweep cache v1\n");
   fprintf(f, "# capture: %s\n", AbsolutePath(path).c_str());
   fprintf(f, "# engine: %s\n", g_GetVersionString != NULL ? g_GetVersionString() : "?");
-  fprintf(f, "# range: since %d until %d maxEvents %d\n", opts.m_Since, opts.m_Until,
-          opts.m_MaxEvents);
+  fprintf(f, "# range: since %d until %d maxEvents %d bound %d\n", opts.m_Since, opts.m_Until,
+          opts.m_MaxEvents, opts.m_Bound);
   fprintf(f, "# scanned: %d stopped: %s\n", scanned, stopped);
   for(size_t i = 0; i < ids.size(); i++)
     fprintf(f, "%d\n", ids[i]);
@@ -451,8 +456,7 @@ void ParseEventList(const std::string &text, std::vector<int> &out)
 void SweepForEvents(IReplayController *ctrl, const DumpOptions &opts, int until, size_t idBudget,
                     std::vector<int> &ids, int &scanned, int &lastEid, std::string &stopped)
 {
-  const int kEmptyRun = 256;    // consecutive ids with nothing bound that end a sweep
-  int emptyRun = 0;
+  SweepRules rules(opts.m_MaxEvents, idBudget);
   Progress sweep;
   // The bound a reader can act on: the scan range, or the file's chunk count when that is smaller. With
   // `--max-events` the id count is not knowable up front, and a percentage against the hard cap said
@@ -472,31 +476,73 @@ void SweepForEvents(IReplayController *ctrl, const DumpOptions &opts, int until,
     // body, so a tick at the end of the loop reports nothing at all on a capture whose first event
     // is id 841 -- the exact silence this line exists to break.
     sweep.Tick(scanned);
-    if(!HasBoundState(st))
-    {
-      if(lastEid > 0 && ++emptyRun >= kEmptyRun)
-      {
-        stopped = "a run of ids with nothing bound";
-        break;
-      }
+    const bool bHasState = HasBoundState(st);
+    if(bHasState)
+      ids.push_back(eid);    // collected before the caps are tested: the id that trips one is kept
+    const SweepRules::Step step = rules.Feed(bHasState, eid);
+    if(step == SweepRules::Continue)
       continue;
-    }
-    emptyRun = 0;
-    lastEid = eid;
-    ids.push_back(eid);
-    if(opts.m_MaxEvents > 0 && (int)ids.size() >= opts.m_MaxEvents)
-    {
+    // The id that trips a rule was collected first (`SweepRules::Feed`), so `scanned`/`lastEid`
+    // include it -- the merge must land on exactly the same numbers, and the selftest checks that.
+    if(step == SweepRules::StopEmptyRun)
+      stopped = "a run of ids with nothing bound";
+    else if(step == SweepRules::StopMaxEvents)
       stopped = "--max-events";
-      break;
-    }
-    if(ids.size() >= idBudget)
-    {
-      stopped = "the id budget (the file's chunk count)";
-      break;
-    }
+    else
+      stopped = "the id budget (the scan bound)";
+    break;
   }
+  lastEid = rules.m_LastEid;
   sweep.Done(scanned);
 }
+
+//: The sweep's bounds, in one place because a worker must compute exactly what its parent computed
+//: or the slices it reports against are not the slices the parent split. Sets `opts.m_Bound` (the
+//: sweep cache's key and header depend on it) as well as returning the range.
+void ComputeSweepBounds(IReplayController *ctrl, DumpOptions &opts, int &until, size_t &idBudget,
+                        int &lastEvent)
+{
+  const int kHardCap = 200000;
+  lastEvent = LastEventId(ctrl);
+  idBudget = lastEvent > 0 ? (size_t)lastEvent : ctrl->GetStructuredFile().chunks.size();
+  until = opts.m_Until > 0 ? opts.m_Until : kHardCap;
+  if((int)idBudget < until)
+    until = (int)idBudget;
+  opts.m_Bound = (int)idBudget;
+}
+
+// --------------------------------------------------------------------------- why the sweep is not parallel
+//
+// The sweep looks embarrassingly parallel -- one `SetFrameEvent` per id, each independent -- and a
+// parallel version of it was built and measured before being removed: four worker processes, each
+// opening its own replay and sweeping a slice of the range, their answers merged under the same
+// stop rules (`SweepRules`). Mechanically it worked and it was fast: 68.4 s against 209.4 s for
+// the same dump on the same afternoon (3.1x wall), the sweep phase itself 20.6 s against 71.8 s.
+//
+// It was removed because its answer is not the serial sweep's answer, and cannot be made so. The
+// engine's pipeline state at an id is a function of *how replay reached that id* -- the same
+// reason the writing pass below re-reads every id after a backwards first move: a forward walk
+// leaves bindings in the reported state that a fresh replay to the same id does not report, and a
+// worker process starts fresh, at its slice's head. Measured on `PC Renderer.rdc`: the serial
+// sweep collects 1186 ids, the parallel one 1169, and the 17 it loses are exactly the first ids
+// of the last slice (979..995) -- a region where the serial walk still reports the previous
+// command list's bindings (`vs=60993 ps=60994`, a row in every serial bundle to date) while both
+// a cold-starting worker *and* the `state` command's own backwards double-jump report nothing
+// bound at 979 and the next bindings only from 996. The serial answer and the fresh-engine answer
+// disagree there, and the bundle's contract is the serial one: it is what every verified bundle
+// contains, and re-defining the sweep to the fresh-engine answer is a change to what a bundle
+// *is*, not a speed optimisation.
+//
+// The two things that would make a parallel sweep possible are both out of reach here.
+// Reproducing the serial history per worker costs the whole prefix -- the reported state is a
+// function of every replay pass before it, so the last worker would pay the entire range. And
+// splitting at command-list boundaries, where a cold jump lands on a list's own first bindings,
+// needs a mapping from the engine's event ids to the file's chunk stream, which is ROADMAP §3's
+// open item. Two incidental findings from the attempt are in REFERENCE §9: a spawned child must
+// be given a stdin it can use (an inherited slot it cannot takes its whole stdio down -- three
+// "successful" workers once left three empty logs), and simultaneous replay-device creations can
+// leave one hung at zero CPU with no error, which is why any such design needs a deadline and a
+// serial fallback rather than an unbounded wait.
 
 //: The bundle producer (ROADMAP §1): one replay session, everything the engine alone can answer
 //: written to disk, so the offline half can analyse a frame without a device. It is also the reason
@@ -557,23 +603,31 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   std::vector<std::pair<std::string, std::string>> skipped;    // what was not written, and why
 
   // ------------------------------------------------------------------ the id sweep (first, always)
-  //
   // Which ids are events is asked *before* anything else touches the engine, because it is the one
   // question whose answer stops being true afterwards: `SetFrameEvent(n, true)` on an id that is
   // not an event leaves the last replayed event's state in place, so once anything has replayed a
   // real event every forced non-event looks like it has state -- the sweep then never sees an empty
   // run and never ends. (Measured on this capture: `probe 120` alone finds 25-32 ids, and the same
   // `probe 120` after other commands finds ~120. `CmdProbe` carries the same warning.) The sweep
-  // cannot *find* the end of a frame: `SetFrameEvent(n, true)` past the last event clamps to it, so
-  // every id beyond the frame reports the last event's state and a "no state any more" test never
-  // fires. Measured on this capture: ids 1..120 hold 25-32 events, while `probe 4500` reports 4405
-  // ids with state -- and the structured file has 723 chunks, so those extra ids are clamped, not
-  // real.
+  // cannot *find* the end of a frame by asking: `SetFrameEvent(n, true)` past the last event clamps
+  // to it, so every id beyond the frame reports the last event's state and a "no state any more"
+  // test never fires. Measured on this capture: ids 1..120 hold 25-32 events, while `probe 4500`
+  // reports 4405 ids with state -- and the structured file has 723 chunks, so those extra ids are
+  // clamped, not real.
   //
-  // What bounds the sweep instead is the file: every event is a chunk, so the chunk count is an
-  // upper bound on how many events the frame has. The empty-run test still ends a sweep early on a
-  // sparse capture, and `--until` says it exactly. (Deriving the engine's ids from the file is
-  // ROADMAP §2.)
+  // What bounds the sweep is the action list: every driver ends a capture's action list with an
+  // "End of Capture" action, so the largest event id in the tree is the frame's *last* event
+  // (`LastEventId`), and no id past it is an event at all. Asking the tree is a read of what the
+  // engine built while loading (no replay), so it is safe before anything else touches the engine.
+  // This replaced the file's chunk count as the bound, which was only ever an upper limit and a
+  // generous one: the sweep collected the whole clamped tail past the last event as if it were
+  // events -- on `PC Renderer.rdc`, ids 1306..2251 of a 2251-id scan (42% of it, one state repeated
+  // with empty marker paths, 946 `SetFrameEvent` calls at ~18 ms each in the sweep and as many
+  // again in the writing pass); on the hobby capture the tail past its last event (1736) would be
+  // 94% of a default dump, ~27,000 calls at ~47 ms. An action list that came back empty leaves
+  // nothing to derive a bound from, and the chunk count is the fallback again. The empty-run test
+  // still ends a sweep early on a sparse capture, and `--until` narrows the range further -- it can
+  // no longer extend it past the frame's end, which was never a range anyone meant to ask for.
   //
   // **Why the pass below reads the state again instead of keeping what the sweep saw.** Because the
   // sweep's own refreshes leave an *incomplete* state, and that is measured, not assumed. Building
@@ -588,9 +642,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // how it was caught -- so the second read is not a redundant refresh to be optimised away: it is
   // what makes the state complete. (Both bundles were hashed against the reference to prove it; the
   // numbers are in REFERENCE §9.)
-  const int kHardCap = 200000;
-  const size_t idBudget = ctrl->GetStructuredFile().chunks.size();
-  const int until = opts.m_Until > 0 ? opts.m_Until : kHardCap;
+  int until = 0;
+  size_t idBudget = 0;
+  int lastEvent = 0;
+  ComputeSweepBounds(ctrl, opts, until, idBudget, lastEvent);
   int scanned = 0, lastEid = 0;
   std::string stopped = "the end of the scan range";
   std::vector<int> ids;
@@ -622,8 +677,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   }
   else
   {
-    Log("bundle: sweeping ids %d..%d for bound state, at most %d id(s) (the file's chunk count)",
-        opts.m_Since, until, (int)idBudget);
+    Log("bundle: sweeping ids %d..%d for bound state, at most %d id(s) (%s)", opts.m_Since, until,
+        (int)idBudget,
+        lastEvent > 0 ? "the frame's last event id, from the action list"
+                      : "the file's chunk count: the action list came back empty");
     SweepForEvents(ctrl, opts, until, idBudget, ids, scanned, lastEid, stopped);
     WriteSweepCache(sweepCache, path, opts, ids, scanned, stopped.c_str());
   }

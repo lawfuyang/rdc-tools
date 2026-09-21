@@ -31,9 +31,11 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
   their setup and found nothing.
 - A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
-  `renderdoc-src\PC Renderer.rdc` must still print `2132 events / 47 passes / 493 resources / 63 findings from
+  `renderdoc-src\PC Renderer.rdc` must still print `1186 events / 47 passes / 493 resources / 63 findings from
   20 detectors` and `engine   : Unreal Engine (31 concept(s) by name, 1 question(s))`, and the driver's text
-  output must stay byte-identical.
+  output must stay byte-identical. (1,186 is every id with bound state up to the frame's last event; the
+  sweep that produced 2,132 also collected the clamped tail past it, which is gone since REFERENCE §9's
+  sweep bound.)
 - New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix.
 - Never weaken, skip or delete an assertion to make a run pass. Tests pinning behaviour that looks wrong
   are marked `CHARACTERIZATION` — change code and test together, and say so.
@@ -112,7 +114,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - The driver's `psoKind` is the *call kind*, and everything downstream groups by it: it comes from the
   capture's action tree (a `Dispatch*` chunk or not; an event that is not a call takes the kind of the call it
   follows), **never** from the bound shaders. Measured: `PC Renderer.rdc` has a compute shader bound at every
-  one of its 2132 events, so the shader-based guess called the whole frame compute and the report grouped a
+  one of its 1,186 events, so the shader-based guess called the whole frame compute and the report grouped a
   frame of draws into compute passes. A wrong value here is wrong everywhere downstream.
 - The replay driver (`src/cpp/replay_dump.cpp`, REFERENCE §9) keeps the same rule: it prints what the engine returns and
   nothing else. It must keep doing the three things a replay host has to do — `REPLAY_PROGRAM_MARKER()` at file

@@ -405,6 +405,14 @@ std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUC
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
 std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 
+//: The largest event id in the action tree -- which is the frame's *last* event, not merely its
+//: largest action: every driver ends a capture's action list with an "End of Capture" action
+//: (`AddEvent()` then `AddAction()`, one such block per driver -- d3d12_commands.cpp has D3D12's),
+//: so nothing the engine numbers comes after it and `SetFrameEvent` on any id past it clamps to it.
+//: 0 when the action list is empty, which the caller must treat as "no bound is derivable" rather
+//: than "the frame has no events" -- the caller falls back to a coarser bound.
+int LastEventId(IReplayController *ctrl);
+
 // --------------------------------------------------------------------------- the commands
 
 int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path);
@@ -467,6 +475,55 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
                      std::string &written, int32_t &width, int32_t &height);
 
 // --------------------------------------------------------------------------- the bundle (bundle.cpp)
+
+//: The sweep's stop rules, on their own so they can be pinned without a capture: the serial sweep
+//: applies them as it walks (bundle.cpp `SweepForEvents`), and the selftest feeds them shapes that
+//: trip each rule. They were shared with a parallel sweep once -- see bundle.cpp's "why the sweep
+//: is not parallel" for how that turned out -- and what remains is the rules themselves, which are
+//: the sweep's contract in one place.
+struct SweepRules
+{
+  enum Step
+  {
+    Continue,
+    StopEmptyRun,
+    StopMaxEvents,
+    StopIdBudget
+  };
+
+  static const int kEmptyRunStop = 256;    // consecutive ids with nothing bound that end a sweep
+
+  int m_EmptyRun = 0;
+  int m_LastEid = 0;
+  size_t m_Count = 0;
+  int m_MaxEvents = 0;      // `--max-events`, 0 = no cap
+  size_t m_IdBudget = 0;    // the scan bound: the frame's last event id, or the chunk count
+
+  SweepRules(int maxEvents, size_t idBudget) : m_MaxEvents(maxEvents), m_IdBudget(idBudget) {}
+
+  //: One id's answer folded into the running state. A with-state id is recorded *before* the caps
+  //: are tested, so the id that trips a cap is collected and is the last one -- the serial loop did
+  //: the same, and `lastEid`/`scanned` are compared against it.
+  Step Feed(bool bHasState, int eid)
+  {
+    if(!bHasState)
+    {
+      // Only after something was found: a capture whose first event is id 841 must be walked to it,
+      // not declared empty at id 256.
+      if(m_LastEid > 0 && ++m_EmptyRun >= kEmptyRunStop)
+        return StopEmptyRun;
+      return Continue;
+    }
+    m_EmptyRun = 0;
+    m_LastEid = eid;
+    m_Count++;
+    if(m_MaxEvents > 0 && m_Count >= (size_t)m_MaxEvents)
+      return StopMaxEvents;
+    if(m_Count >= m_IdBudget)
+      return StopIdBudget;
+    return Continue;
+  }
+};
 
 int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
             const std::vector<std::string> &args, bool bWantDisasm);

@@ -156,6 +156,32 @@ std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls)
   return kinds;
 }
 
+//: Recursive half of `LastEventId`: the maximum `ActionDescription::eventId` in the tree. Events
+//: are numbered in the order the capture recorded them, so the maximum is the last one -- and the
+//: last one is always the "End of Capture" action every driver appends while loading (an
+//: `AddEvent()` and `AddAction()` pair per driver; d3d12_commands.cpp has D3D12's), which is what
+//: makes a *maximum over actions* the frame's event boundary rather than a guess that non-action
+//: events could sit past.
+void CollectLastEventId(const rdcarray<ActionDescription> &actions, int &last)
+{
+  for(size_t i = 0; i < actions.size(); i++)
+  {
+    if((int)actions[i].eventId > last)
+      last = (int)actions[i].eventId;
+    CollectLastEventId(actions[i].children, last);
+  }
+}
+
+int LastEventId(IReplayController *ctrl)
+{
+  // `GetRootActions` is a read of the list built while the capture was loaded (replay_controller.cpp
+  // returns `m_FrameRecord.actionList`), so asking this before anything has replayed is free and
+  // leaves the engine exactly as it was -- the property the id sweep depends on.
+  int last = 0;
+  CollectLastEventId(ctrl->GetRootActions(), last);
+  return last;
+}
+
 //: `text` with its ASCII letters lowercased, for the case-insensitive halves of a search. A local
 //: helper rather than a locale call: what is being matched is the engine's names, which are ASCII.
 std::string LowerAscii(std::string_view text)

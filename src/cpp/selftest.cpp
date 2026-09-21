@@ -905,6 +905,49 @@ int CmdSelftest()
     }
   }
 
+  // ------------------------------------------------------------------ the sweep's rules
+  //
+  // No device, no capture: the sweep's stop rules are its contract -- when it stops, what it
+  // collected up to the stopping id, and which cap did it -- and they are pure logic, so they are
+  // pinned here on shapes made to trip each rule. (A parallel sweep was built on these rules once
+  // and removed: bundle.cpp's "why the sweep is not parallel" has the measurements.)
+  {
+    // The rules, on a shape made to trip each of them: a stateless prefix that must NOT stop the
+    // sweep (nothing found yet), a stateful id, then the empty run that does.
+    {
+      SweepRules rules(0, 100000);
+      SweepRules::Step step = SweepRules::Continue;
+      for(int i = 0; i < 400; i++)
+        step = rules.Feed(false, i + 1);
+      t.Check(step == SweepRules::Continue && rules.m_LastEid == 0, "rules-prefix-does-not-stop",
+              "a stateless prefix stopped the sweep before anything was found");
+      step = rules.Feed(true, 401);
+      t.Check(step == SweepRules::Continue && rules.m_LastEid == 401 && rules.m_Count == 1,
+              "rules-first-find-is-recorded", "the first with-state id was not recorded");
+      for(int i = 0; i < 255; i++)
+        step = rules.Feed(false, 402 + i);
+      t.Check(step == SweepRules::Continue, "rules-empty-run-counts-to-one-less",
+              "the empty run stopped one id early");
+      step = rules.Feed(false, 657);
+      t.Check(step == SweepRules::StopEmptyRun, "rules-empty-run-stops",
+              "256 consecutive stateless ids after a find did not stop the sweep");
+      // A with-state id resets the run, and the id that trips a cap is collected first.
+      SweepRules caps(3, 100000);
+      caps.Feed(true, 10);
+      caps.Feed(false, 11);
+      caps.Feed(true, 12);
+      const SweepRules::Step third = caps.Feed(true, 13);
+      t.Check(third == SweepRules::StopMaxEvents && caps.m_Count == 3 && caps.m_LastEid == 13,
+              "rules-max-events-collects-the-last-id",
+              "the id that tripped --max-events was not collected");
+      SweepRules budget(0, 2);
+      budget.Feed(true, 7);
+      const SweepRules::Step second = budget.Feed(true, 8);
+      t.Check(second == SweepRules::StopIdBudget && budget.m_LastEid == 8,
+              "rules-budget-stops-at-the-bound", "the id budget did not stop the sweep");
+    }
+  }
+
   printf("\n%d passed, %d failed, %d skipped\n", t.passed, t.failed, t.skipped);
   if(t.failed == 0)
     printf(

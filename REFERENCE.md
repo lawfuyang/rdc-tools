@@ -695,12 +695,12 @@ the scan at all:
 | the stream's pages, in a fresh process | 0.78 s warm, 1.54 s once the file cache has dropped them | a full-stream scan faults them itself. `madvise(MADV_WILLNEED)` does not exist on Windows (checked: `mmap` has no `madvise`) and `PrefetchVirtualMemory` needs a *writable* buffer, which a read-only map cannot give `ctypes`; reading the stream into memory instead was already measured 0.30 s slower plus 1.5 GB (§4.14) |
 | starting a pool | 0.39 s for 8 workers, 0.44 s for 16, 0.48 s for 32 | every worker is a fresh interpreter again -- which is why `MIN_BYTES` and `FIND_MIN_BYTES` are thresholds rather than "always use 32" |
 | a derived container/name index | would remove this scan outright (~0.4 s) | declined again: a second on-disk artefact with its own invalidation, for less than the stream cache already saves |
-| `count <rdc> <pattern>...` | 0.9 s per pattern, one full stream pass each | the same `find_all` applies and is not wired to it yet |
+| `count <rdc> <pattern>...` | ~0.7 s per pattern on the 1.47 GB stream (was ~1.0 s serial) | wired to `find_all` like the DXBC search: one split pass per pattern |
 | re-running the string scan's own merge | the parent merges 586,944 keys in 0.257 s of a 1.74 s scan | not worth moving into the workers (added complexity for 15%) |
 
-For the driver half of the same question, see §9: `dump` is one `SetFrameEvent` per event plus a sweep, and
-the sweep cache is what makes a re-run affordable (measured: a full `PC Renderer.rdc` dump 128 s cold, 60 s
-with the sweep answered from the cache).
+For the driver half of the same question, see §9: `dump` is one `SetFrameEvent` per event plus a sweep, both
+bounded by the frame's last event id, and the sweep cache is what makes a re-run affordable (measured on a
+full `PC Renderer.rdc` frame: 68 s cold, 45 s with the sweep answered from the cache).
 
 ### 4.14 Reading the file: mapped, not copied
 
@@ -1120,18 +1120,51 @@ incomplete rather than silently partial.
 list*, so the driver cannot ask the engine what a given id *was*. A bundle therefore has no call kind
 (draw/copy/clear/marker), no per-event triangle or thread counts, and no marker or pass names — an id is only
 an id with bound state. Those ids come from `probe`'s rule (a root signature or a bound shader), the sweep
-stops when a run of ids has nothing bound, and it is bounded by the file's chunk count, because ids past the
-frame's last event *clamp* to it rather than coming back empty (measured: `probe 4500` reports 4405 ids with
-state on a capture whose structured file has 723 chunks). All of it is written into the bundle's own
-`notInThisBundle` list, so a reader does not conclude that the frame had no copies. Deriving the engine's ids
-from the file is the open item in `ROADMAP.md` §3.
+stops when a run of ids has nothing bound, and it is bounded by the **frame's last event id**, which the
+action list gives exactly: every driver ends a capture's action list with an "End of Capture" action, so the
+largest event id in the tree is the last event there is (`LastEventId`), and ids past it *clamp* to it rather
+than coming back empty (measured: `probe 4500` reports 4405 ids with state on a capture whose structured file
+has 723 chunks — the clamp is why a bound is needed at all). Before that bound existed the sweep ran to the
+file's chunk count and collected the whole clamped tail as if it were events — on `PC Renderer.rdc`, 946 of
+its 2,132 collected ids were one state repeated past the last event; on the hobby capture the tail past event
+1736 would have been 94% of a default dump. The chunk count is the fallback bound when no action list comes
+back, and `--until` can narrow the range but no longer extend it past the frame's end. All of the gaps are
+written into the bundle's own `notInThisBundle` list, so a reader does not conclude that the frame had no
+copies. Deriving the engine's ids from the file is the open item in `ROADMAP.md` §3.
 
 **The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
-that change the answer; `$RDC_NO_CACHE` turns it off), because it is the most expensive thing the driver does
-and a re-run asks the same question again. Measured on a full `PC Renderer.rdc` frame (2,132 ids, 2,251
-scanned): **128 s** with the sweep and **60 s** with it answered from the cache -- the sweep is 40 s of that,
-and the per-event pass (~28 ms per `SetFrameEvent`) is the rest, which is the engine's own cost (REFERENCE
-§9's "the engine is a black box behind a call").
+that change the answer -- including the scan bound, which is why every cache written before the bound existed
+is refused; `$RDC_NO_CACHE` turns it off), because it is the most expensive thing the driver does and a re-run
+asks the same question again. Measured on a full `PC Renderer.rdc` frame (1,186 ids with state, 1,305
+scanned): **68 s** with the sweep and **45 s** with it answered from the cache -- the sweep is 21 s of that,
+the per-event pass is the rest, and both halves are the engine's own cost (REFERENCE §9's "the engine is a
+black box behind a call"). Bounding the sweep at the frame's last event took the same dump from 105 s to 68 s
+on the same afternoon's machine: the 946 clamped-tail ids it stopped collecting were 946 `SetFrameEvent`
+calls in the sweep and as many again in the writing pass, and every state document, cbuffer and image the
+bundle contains was byte-identical across the change.
+
+**Why the sweep is not parallel.** It looks embarrassingly parallel -- one `SetFrameEvent` per id, each
+independent -- and a parallel version was built and measured before being removed: four worker
+processes, each opening its own replay and sweeping a slice of the range, their answers merged under
+the sweep's own stop rules. Mechanically it worked and it was fast: **68.4 s against 209.4 s** for the
+same dump on the same afternoon (3.1x), the sweep phase alone 20.6 s against 71.8 s. It was removed
+because its answer is not the serial sweep's answer, and cannot be made so: the engine's pipeline
+state at an id is a function of *how replay reached that id*, so a worker that starts cold at its
+slice's head answers a different question than a walk from the frame's start. Measured on the PC
+capture: the serial sweep collects 1,186 ids, the parallel one 1,169, and the 17 it loses are exactly
+ids 979..995 -- the head of the last slice, a region between command lists where the serial walk
+still reports the previous list's bindings while a fresh replay reports none (the `state` command's
+own backwards double-jump agrees with the worker at 979, and reports the next bindings only from
+996). Two consequences worth keeping: those 17 serial rows are **replay-history ghosts** -- bindings
+left in the reported state by earlier replay passes, real rows in every bundle to date, and a caveat
+on any per-event reading of a state that sits between command lists -- and the two things that would
+make a parallel sweep honest are both out of reach: reproducing the serial history per worker costs
+the whole prefix (the last worker would pay the entire range), and splitting at command-list
+boundaries needs the event-id-to-chunk mapping that is ROADMAP §3's open item. The attempt also left
+two Windows findings behind: a spawned child must be given a stdin it can use (an inherited slot it
+cannot takes its whole stdio down -- three "successful" workers once left three empty logs), and
+simultaneous replay-device creations can leave one hung at zero CPU with no error, so any such design
+needs a deadline and a serial fallback rather than an unbounded wait.
 
 **Three things a replay host must do**, and the reason this file has a long comment about them: put
 `REPLAY_PROGRAM_MARKER()` at file scope, call `RENDERDOC_InitialiseReplay()` before opening anything,
@@ -1355,20 +1388,22 @@ call it is -- and only then treat a `patch` render as evidence. Reporting this i
   no arithmetic), and it is how the measurements below were taken — the engine is a black box behind a
   call, so timing the calls is the only way to answer "why is this taking minutes".
 
-**What a bundle dump costs, measured.** On the 1.4 GB hobby capture, 900 events collected out of 1740 ids
-scanned: **47 ms per `SetFrameEvent`**, and it is the same 47 ms whether the id changes or not — the call
-re-derives the state, which is what costs. Everything else is small change: `GetD3D12PipelineState` returns
-a cached pointer (0.0 ms over 1440 calls), an event row is 0.4 ms, and `resources.json` for 11,082
-resources took 10.6 s *before* the id-text lookup replaced two linear scans (`IdText` per comparison, 11k ×
-5.6k) and 0.2 s after. `RDC_PROFILE=1` on that run:
+**What a bundle dump costs, measured.** On the 1.4 GB hobby capture, a full default dump (896 events
+collected out of 1,736 ids scanned, both bounded by the frame's last event): **47 ms per `SetFrameEvent`**,
+and it is the same 47 ms whether the id changes or not — the call re-derives the state, which is what costs.
+Everything else is small change: `GetD3D12PipelineState` returns a cached pointer (0.0 ms over 2,632 calls),
+an event row is 0.6 ms, and `resources.json` for 11,082 resources took 10.6 s *before* the id-text lookup
+replaced two linear scans (`IdText` per comparison, 11k × 5.6k) and 0.2 s after. The same dump before the
+sweep was bounded would have walked ~30,000 ids — the clamped tail past event 1736 — for an hour-scale run;
+bounded, it is 160 s. `RDC_PROFILE=1` on that run:
 
 | call site | total | calls | each |
 |---|---|---|---|
-| `SetFrameEvent` | 68.3 s | 1440 | 47.4 ms |
-| state document (`CmdState`) | 1.5 s | 26 | 58.2 ms |
-| shaders document (`CmdShaders`) | 1.5 s | 26 | 58.3 ms |
-| cbuffer documents | 6.2 s | 87 | 71.3 ms |
-| event row (key, hash, targets, JSON) | 0.1 s | 300 | 0.4 ms |
+| `SetFrameEvent` | 124.0 s | 2632 | 47.1 ms |
+| state document (`CmdState`) | 5.7 s | 98 | 57.7 ms |
+| shaders document (`CmdShaders`) | 5.6 s | 98 | 56.9 ms |
+| cbuffer documents | 17.1 s | 245 | 70.0 ms |
+| event row (key, hash, targets, JSON) | 0.5 s | 896 | 0.6 ms |
 | everything else, including 11,082 usage lists | ~0 | | |
 
 The state documents each cost ~58 ms because **each one re-positions the replay itself** — 47 ms of that is

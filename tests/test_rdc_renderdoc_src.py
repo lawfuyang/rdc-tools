@@ -231,11 +231,11 @@ class TestTheFetch(SrcCase):
         # folder and must not clear it.
         root = os.path.join(self.tmp, 'renderdoc-src')
         os.makedirs(root)
-        with open(os.path.join(root, 'PC Renderer.rdc'), 'wb') as fh:
+        with open(os.path.join(root, 'My Frame.rdc'), 'wb') as fh:
             fh.write(b'a capture, not a source file')
         with self.fetch(renderdoc_archive()):
             src.ensure(root=root, tag='v1.46', log=self.quiet()[1])
-        self.assertTrue(os.path.isfile(os.path.join(root, 'PC Renderer.rdc')))
+        self.assertTrue(os.path.isfile(os.path.join(root, 'My Frame.rdc')))
         self.assertTrue(src.is_populated(root))
 
     def test_a_populated_tree_is_a_silent_no_op(self):

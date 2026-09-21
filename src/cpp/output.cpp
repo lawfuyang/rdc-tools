@@ -123,7 +123,7 @@ void Flag(const char *key, bool bValue, bool bLast)
 //: saves the enclosing array's flag and `ArrayClose` restores it. Without this, writing an *empty*
 //: nested array left the enclosing array looking like it had just started, the next item was
 //: written with no comma, and the document did not parse: `states/<eid>.shaders.json` was invalid
-//: for the hobby capture for exactly that reason (a stage whose signature arrays were empty), and
+//: for `desktop-2` for exactly that reason (a stage whose signature arrays were empty), and
 //: `resources.json` would have hit it on any resource with an empty usage list.
 std::vector<bool> g_FirstRowStack;
 

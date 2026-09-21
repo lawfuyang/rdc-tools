@@ -1,0 +1,47 @@
+# deps <capture> 12
+# exit: 0
+--- stdout ---
+resources with a use the stream shows: 88  (the capture names 333 ids; 52 draws/dispatches over 2122 events)
+res       kind      name                       write  read   first    last  flags
+res1907   buffer    Resource Allocator Underly     0   113   #1041   #1981  read-before-write
+res315    buffer    Resource Allocator Underly     0    82   #1098   #1981  read-before-write
+res60868  buffer    InstanceCulling.InstanceId     2    58    #881   #1981  
+res61309  texture2d HZBFurthest                   10    22   #1197   #1991  read-before-write, write-never-read
+res342    buffer    Resource Allocator Underly     0    25   #1255   #1981  read-before-write
+res60843  texture2d SceneDepthZ                   20     4    #927   #1991  
+res719    buffer    Fast Allocator Page            0    21    #875    #895  read-before-write
+res60857  texture2d SceneColor                    13     1    #929   #1818  write-never-read
+res60858  texture2d GBufferA                      11     1    #930   #1991  write-never-read
+res60859  texture2d GBufferB                      11     1    #931   #1991  write-never-read
+res60860  texture2d GBufferC                      11     1    #932   #1991  write-never-read
+res60861  texture2d GBufferD                      11     1    #933   #1991  write-never-read
+... 76 more resource(s) with uses (maxResources=0 shows all)
+read-before-write: 27 resource(s) whose first use is a read nothing writes first (a question: a static resource, a call outside the capture and a producer before it all look the same)
+  res1907[Resource Allocator Underlying Buffer]: read #1041 (cbv), no write in this capture
+  res315[Resource Allocator Underlying Buffer]: read #1098 (vb), no write in this capture
+  res61309[HZBFurthest]: read #1230 (barrier), first write #1991
+  res342[Resource Allocator Underlying Buffer]: read #1255 (cbv), no write in this capture
+  res719[Fast Allocator Page]: read #875 (copy-src), no write in this capture
+  res2253[EyeAdaptationBuffer]: read #1929 (barrier), first write #1991
+  res24521[GPUMessageManager.MessageBuffer]: read #2029 (copy-src), first write #2091
+  res60795[GPUScene.PrimitiveData]: read #1096 (barrier), no write in this capture
+  res60796[GPUScene.InstanceSceneData]: read #1096 (barrier), no write in this capture
+  res60797[GPUScene.InstancePayloadData]: read #1096 (barrier), no write in this capture
+  res60826[SkyAtmosphere.TransmittanceLut]: read #1267 (barrier), first write #1371
+  res60829[SkyAtmosphere.SkyViewLut]: read #1304 (barrier), first write #1371
+write-never-read: 52 resource(s) written with nothing afterwards reading them (0 of them discarded by the frame, which explains the write), and 118 table binding(s) in this frame resolve to nothing at all, so a resource read only through one of those reads as unread here
+  res61309[HZBFurthest]: last write #1991 (barrier)
+  res60857[SceneColor]: last write #1818 (barrier)
+  res60858[GBufferA]: last write #1991 (barrier)
+  res60859[GBufferB]: last write #1991 (barrier)
+  res60860[GBufferC]: last write #1991 (barrier)
+  res60861[GBufferD]: last write #1991 (barrier)
+  res60862[GBufferE]: last write #1508 (rtv)
+  res60867[InstanceCulling.DrawIndirectArgsBuffer]: last write #1371 (barrier)
+  res2207[BufferedRT]: last write #2006 (barrier)
+  res24521[GPUMessageManager.MessageBuffer]: last write #2091 (barrier)
+  res60846[StartOffsetGrid]: last write #1195 (barrier)
+  res60851[NumCulledLightsGrid]: last write #1991 (barrier)
+not decoded as uses: List_BuildRaytracingAccelerationStructure x2, List_ExecuteIndirect x10, List_ResolveQueryData x42, List_SetDescriptorHeaps x21 -- a resource only these touch reads as unused here (REFERENCE 4.15)
+unresolved: 118 descriptor-table binding(s) point at a heap slot the capture never wrote
+--- stderr ---

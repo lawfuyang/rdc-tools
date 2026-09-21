@@ -1,0 +1,31 @@
+# resources <capture> 25
+# exit: 0
+--- stdout ---
+resources: 333 ids (303 with a descriptor, 234 named)
+res13       unknown   -                                  3D Queue (GPU 0)
+res243      buffer    3040 B                             -
+res244      buffer    32768 B                            -
+res245      buffer    131072 B                           -
+res261      buffer    2097152 B                          -
+res267      buffer    96 B                               -
+res271      buffer    2097168 B                          m_MeshletBuf
+res275      buffer    16777216 B                         m_ReadbackBuffer
+res281      buffer    4096 B                             -
+res282      buffer    4096 B                             -
+res284      unknown   -                                  3D Queue Fence (GPU 0)
+res285      unknown   -                                  Copy Queue (GPU 0)
+res288      unknown   -                                  Compute Queue (GPU 0)
+res290      unknown   -                                  Compute Queue Fence (GPU 0)
+res292      unknown   -                                  DiagnosticBuffer
+res293      buffer    2097176 B                          DiagnosticBuffer (3D)
+res294      unknown   -                                  DiagnosticBuffer
+res295      buffer    2097176 B                          DiagnosticBuffer (Copy)
+res296      unknown   -                                  DiagnosticBuffer
+res297      buffer    2097176 B                          DiagnosticBuffer (Compute)
+res298      unknown   -                                  GlobalResourceHeap
+res299      unknown   -                                  GlobalSamplerHeap
+res300      unknown   -                                  FD3D12OfflineDescriptorManager
+res301      unknown   -                                  FD3D12OfflineDescriptorManager
+res302      unknown   -                                  FD3D12OfflineDescriptorManager
+total resources: 333 (shown 25)
+--- stderr ---

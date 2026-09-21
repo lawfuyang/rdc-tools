@@ -1,0 +1,106 @@
+# summary <capture>
+# exit: 0
+--- stdout ---
+chunk count        : 723
+draw/dispatch calls: 24
+markers            : 57
+--- chunk type histogram ---
+  List_SetGraphicsRootConstantBufferView       74
+  SetName                                      57
+  PushMarker                                   57
+  PopMarker                                    57
+  List_EndQuery                                47
+  InitialContents                              29
+  Queue_Signal                                 22
+  List_Reset                                   20
+  List_Close                                   20
+  Device_CreatePlacedResource                  18
+  List_ResolveQueryData                        18
+  Device_CopyDescriptors                       17
+  List_DrawIndexedInstanced                    17
+  List_ResourceBarrier                         15
+  List_SetComputeRootConstantBufferView        15
+  Device_CreateCommittedResource               14
+  Device_CreatePipelineState                   14
+  List_SetPipelineState                        14
+  List_SetGraphicsRootDescriptorTable          14
+  Queue_Wait                                   13
+  List_SetComputeRootDescriptorTable           13
+  List_IASetVertexBuffers                      13
+  Device_CreateRootSignature                   11
+  List_SetDescriptorHeaps                      11
+  Queue_ExecuteCommandLists                    11
+  Device_CreateCommandAllocator                8
+  List_CopyBufferRegion                        8
+  List_IASetIndexBuffer                        8
+  List_BeginQuery                              7
+  Device_CreateHeap                            6
+  List_Dispatch                                6
+  List_SetGraphicsRootSignature                6
+  Device_CreateFence                           5
+  Device_CreateDescriptorHeap                  5
+  Device_CreateCommandList                     5
+  List_DiscardResource                         5
+  List_SetComputeRootSignature                 5
+  Device_CreateQueryHeap                       4
+  CoherentMapWrite                             4
+  Device_CreateCommandQueue                    3
+--- markers in order ---
+  #188    PushMarker       MobileSceneRender
+  #190    PushMarker       InitViews
+  #194    PushMarker       FRDGBuilder::Execute
+  #240    PushMarker       MobileSceneRender
+  #241    PushMarker       Niagara::GPUProfiler_BeginFrame
+  #244    PushMarker       UpdateDirectionalLightUniformBuffers
+  #246    PushMarker       ComputeLightGrid
+  #247    PushMarker       CullLights 32x20x8 NumLights 0 NumCaptures 0
+  #248    PushMarker       ClearBuffer(NumCulledLightsGrid Size=81920bytes)
+  #259    PushMarker       LightGridInject:NotLinkedList
+  #274    PushMarker       FFXSystem::PreRender
+  #276    PushMarker       GPUParticles_PreRender
+  #279    PushMarker       FGPUSortManager::OnPreRender
+  #282    PushMarker       SkyAtmosphereLUTs
+  #283    PushMarker       TransmittanceLut
+  #293    PushMarker       MultiScatteringLut
+  #306    PushMarker       DistantSkyLightLut
+  #320    PushMarker       SkyViewLut
+  #328    PushMarker       CameraVolumeLut
+  #352    PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
+  #358    PushMarker       MobileSceneRender
+  #359    PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
+  #366    PushMarker       PollOcclusionQueries
+  #408    PushMarker       SceneColorRendering
+  #426    PushMarker       MobileRenderPrePass
+  #428    PushMarker       MobileBasePass
+  #429    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #454    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #461    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #468    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #475    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #482    PushMarker       /Game/Developers/rogerfylaw/M_Red.M_Red Cube
+  #505    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #516    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #523    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
+  #532    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
+  #539    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #548    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #555    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+  #562    PushMarker       /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
+  #573    PushMarker       DynamicEd
+  #577    PushMarker       DecalsAndTranslucency
+  #578    PushMarker       ShadowProjectionOnOpaque
+  #580    PushMarker       Translucency
+  #583    PushMarker       Niagara::PostRenderFinish
+  #585    PushMarker       FGPUSortManager::OnPostRenderOpaque
+  #587    PushMarker       PostProcessing
+  #588    PushMarker       Tonemap 2003x1254 (PS GammaOnly=0)
+  #609    PushMarker       FXAA(Quality=0) 2003x1254 PS
+  #621    PushMarker       RenderFinish
+  #622    PushMarker       CanvasFlush
+  #623    PushMarker       CanvasBatchedElements
+  #637    PushMarker       EndScene
+  #640    PushMarker       PollOcclusionQueries
+  #642    PushMarker       ExtractUniformBuffer
+  #645    PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
+  #652    PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
+--- stderr ---

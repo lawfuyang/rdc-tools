@@ -18,8 +18,8 @@ def parse_dxil_containers(stream: Buffer,
     Container header: 'DXBC' magic(4) | hash(16) | version(4) | size(4) | partCount(4) |
     partOffsets[partCount](4) ; each part at +offset: fourcc(4) | size(4) | data.
 
-    Finding the containers is a `find` over the whole stream, which is 1.25 s of the 1.47 GB hobby
-    capture's `draws` and `dxbc` -- so with a `source` (the stream-cache entry, see `load_stream`) the
+    Finding the containers is a `find` over the whole stream, which is 1.25 s of `desktop-2`'s
+    1.47 GB `draws` and `dxbc` -- so with a `source` (the stream-cache entry, see `load_stream`) the
     search goes through `rdc_scan.find_all`, which splits it across processes for a stream big enough to
     pay for them. Without one it is the same serial loop as before, and the containers are identical
     either way: the offsets come back in the order this would have found them.
@@ -114,7 +114,7 @@ def cmd_count(path: str, pats: Sequence[str]) -> None:
 
     The count comes from `rdc_scan.find_all` -- the same `find`-loop answer, split across processes
     when the stream is big enough to pay for them -- because each pattern is otherwise a full serial
-    pass. Measured on the 1.47 GB hobby stream: ~1.0 s per pattern end to end serial against ~0.7 s
+    pass. Measured on `desktop-2`'s 1.47 GB stream: ~1.0 s per pattern end to end serial against ~0.7 s
     with the split (the interpreter's own 0.2 s is under both). An empty pattern keeps the in-file
     loop: its `len(stream) + 1` is `bytes.count`'s answer for `b''`, and not something a find has an
     opinion about.

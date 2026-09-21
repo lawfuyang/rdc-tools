@@ -219,7 +219,7 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     print('notable  : %d pass(es), %d resource(s)' % (len(notable_lists['passes']),
                                                       len(notable_lists['resources'])))
     print('look at  : %d recommendation(s), ranked' % len(todo['rows']))
-    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §6)'
+    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §5)'
           % (len(flags), sum(1 for run in detectors if run['ran'])))
     return 0
 

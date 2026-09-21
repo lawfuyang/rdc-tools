@@ -194,7 +194,7 @@ def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
     destination of exactly `expect` bytes, one call per page, and the 64 KB before the write position as
     the dictionary. So the dictionary is the destination's own tail -- the contiguous case LZ4 has a
     fast path for -- and nothing is allocated or copied per page. Measured on this repo's captures:
-    **0.54 s** for the hobby capture's 1.47 GB and **0.14 s** for PC Renderer's 631 MB, the decode itself
+    **0.54 s** for `desktop-2`'s 1.47 GB and **0.14 s** for `desktop-1`'s 631 MB, the decode itself
     being 0.219 s / 0.078 s (6.4 and 7.7 GB/s).
 
     `expect` is the section's declared `uncompLen`, and the stream has to produce exactly that. A page
@@ -289,7 +289,7 @@ def decompress_zstd(blob: Buffer) -> bytes:
 # Decompressed-stream cache.
 #
 # Decompressing a frame-capture section costs seconds (LZ4 over a few hundred MB of blocks -- 0.54 s for the
-# hobby capture's 1.47 GB, through the built library) and every command needs the
+# `desktop-2`'s 1.47 GB, through the built library) and every command needs the
 # same stream, so the decompressed bytes are cached on disk and keyed by the capture's identity:
 # absolute path + size + mtime + section index + format version. A hit shows up in the method label as
 # `lz4(N blocks, cached)`.
@@ -379,7 +379,7 @@ def chunk_strings(stream: Buffer, ch: ChunkInfo, minlen: int = 4, limit: int = 6
     The cap is applied *while* collecting, and the wide half is skipped once `limit` ASCII strings are
     in -- which is the same answer the old order produced (ASCII first, then UTF-16LE, then the cap),
     for a fraction of the work. It used to collect every run, then de-duplicate with `not in`, then
-    cap: a stream holds 8.4 M runs of four printable bytes or more (measured on the hobby capture), so
+    cap: a stream holds 8.4 M runs of four printable bytes or more (measured on `desktop-2`), so
     that was quadratic per payload and, with the UTF-16 decode it did not need, 13 ms per chunk across
     its 29,212 chunks -- six and a half minutes for `chunks <rdc> 0`, none of it in the decode.
     """

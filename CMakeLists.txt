@@ -102,7 +102,7 @@ add_custom_command(TARGET replay_dump POST_BUILD
 # it with: `rdc_stream.decompress_lz4` looks for a library exporting `LZ4_decompress_safe_usingDict` —
 # `bin/rdc_lz4.dll` first, then whatever the system has (`$RDC_LZ4_DLL` names one) — and raises if there is
 # none, because the tool has no decoder of its own and a stream decoded by anything laxer is one every command
-# downstream would read as fact. Measured: 0.22 s for the hobby capture's 1.47 GB, 0.5 s end to end with the
+# downstream would read as fact. Measured: 0.22 s for `desktop-2`'s 1.47 GB, 0.5 s end to end with the
 # container's own body copy (REFERENCE §3.2).
 #
 # The source is the decoder the replay engine itself vendors (`renderdoc-src/renderdoc/3rdparty/lz4`, LZ4

@@ -223,7 +223,7 @@ void Trace(const char *step);
 //: Where a long run's time went, one slot per thing that can dominate it.
 //:
 //: The engine is a single-threaded black box behind a call, so "why does this take minutes" is
-//: answered by timing the calls -- and the answer is not the obvious one: on the hobby capture a
+//: answered by timing the calls -- and the answer is not the obvious one: on `desktop-2` a
 //: *cold jump* over 1400 chunks costs 0.2 s while 400 swept ids cost 18.8 s, so the cost is
 //: per-call refresh, not replay. Measured rather than reasoned about is the whole point of these
 //: slots.
@@ -255,7 +255,7 @@ void ProfileReport();
 //: Real-time progress for a loop that can run for minutes.
 //:
 //: Time-based, not count-based: the count-based version (one line per 2000 ids) stayed silent for
-//: 164 s on the hobby capture, because `--max-events 900` stopped the sweep at id 1740 -- before
+//: 164 s on `desktop-2`, because `--max-events 900` stopped the sweep at id 1740 -- before
 //: the first line was ever due. A line carries the rate and what is left, which is what a reader
 //: wants while waiting: not "how far", but "how much longer".
 class Progress
@@ -334,7 +334,7 @@ struct ControllerGuard
 //:
 //: `eid` is `ActionDescription::eventId` -- the id `SetFrameEvent`, `probe` and a bundle's ids all
 //: use -- and *not* the structured file's chunk numbering, which is a different one (measured: on
-//: `PC Renderer.rdc` the chunk-derived numbers run to millions where the engine's event ids run to
+//: `desktop-1` the chunk-derived numbers run to millions where the engine's event ids run to
 //: 2132, so the two never meet). `flags` is the engine's own classification, so a call is a call
 //: and a marker is a marker: nothing here is inferred from a name.
 struct ActionNode

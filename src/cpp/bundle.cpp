@@ -495,7 +495,7 @@ void ParseEventList(const std::string &text, std::vector<int> &out)
 //: A function of its own so the cache can skip it: `CmdDump` either reads this answer from a cache
 //: file or pays for it here. `--max-events` stops the *sweep*, not just the writing -- on a big
 //: capture the sweep is the expensive part (each id is a `SetFrameEvent`, measured at 12 ms on the
-//: PC capture and 47 ms on the hobby one) and walking 29216 ids before anything is written is
+//: `desktop-1` and 47 ms on `desktop-2`) and walking 29216 ids before anything is written is
 //: minutes of silence.
 void SweepForEvents(IReplayController *ctrl, const DumpOptions &opts, int until, size_t idBudget,
                     std::vector<int> &ids, int &scanned, int &lastEid, std::string &stopped)
@@ -567,7 +567,7 @@ void ComputeSweepBounds(IReplayController *ctrl, DumpOptions &opts, int &until, 
 // engine's pipeline state at an id is a function of *how replay reached that id* -- the same
 // reason the writing pass below re-reads every id after a backwards first move: a forward walk
 // leaves bindings in the reported state that a fresh replay to the same id does not report, and a
-// worker process starts fresh, at its slice's head. Measured on `PC Renderer.rdc`: the serial
+// worker process starts fresh, at its slice's head. Measured on `desktop-1`: the serial
 // sweep collects 1186 ids, the parallel one 1169, and the 17 it loses are exactly the first ids
 // of the last slice (979..995) -- a region where the serial walk still reports the previous
 // command list's bindings (`vs=60993 ps=60994`, a row in every serial bundle to date) while both
@@ -665,9 +665,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // engine built while loading (no replay), so it is safe before anything else touches the engine.
   // This replaced the file's chunk count as the bound, which was only ever an upper limit and a
   // generous one: the sweep collected the whole clamped tail past the last event as if it were
-  // events -- on `PC Renderer.rdc`, ids 1306..2251 of a 2251-id scan (42% of it, one state repeated
+  // events -- on `desktop-1`, ids 1306..2251 of a 2251-id scan (42% of it, one state repeated
   // with empty marker paths, 946 `SetFrameEvent` calls at ~18 ms each in the sweep and as many
-  // again in the writing pass); on the hobby capture the tail past its last event (1736) would be
+  // again in the writing pass); on `desktop-2` the tail past its last event (1736) would be
   // 94% of a default dump, ~27,000 calls at ~47 ms. An action list that came back empty leaves
   // nothing to derive a bound from, and the chunk count is the fallback again. The empty-run test
   // still ends a sweep early on a sparse capture, and `--until` narrows the range further -- it can
@@ -733,7 +733,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // Formats and dimensions come from the resource list, not from the pipeline state: the state
   // names a target, the description says what it is. Indexed by id text once, because both readers
   // below look resources up per event and per row: the linear scans this replaces built an `IdText`
-  // string per comparison, which on the hobby capture's 11082 resources is 11k x (5.6k buffers + 96
+  // string per comparison, which on `desktop-2`'s 11082 resources is 11k x (5.6k buffers + 96
   // textures) of string churn -- measured, that alone was 10.6 s of a 312 s run.
   std::map<std::string, const TextureDescription *> textures;
   for(size_t i = 0; i < ctrl->GetTextures().size(); i++)

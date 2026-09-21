@@ -32,9 +32,9 @@ IN_BOTH_LIMIT = 40
 #: The shortest string a marker's name may be read from, and the reason it is not 1: a marker payload is
 #: framed, and the frame's bytes decode as one- or two-character printable runs *before* the name does
 #: (measured on both real captures: `chunk_strings(..., 1, 1)` returns `B`, `_` or `r` where the name is
-#: `MobileSceneRender`, and on the hobby capture a two-character floor still returns runs like `6,`). Three
-#: is the floor `markers` and `summary` have always used, and it keeps every real name: the shortest ones
-#: on these captures are `Sky`, `Clear` and `ImGui`.
+#: `MobileSceneRender`, and at two characters it still returns runs that are not names). Three is the
+#: floor `markers` and `summary` have always used, and it keeps every real name: the shortest here are
+#: `Sky` and `Clear`.
 MARKER_MINLEN = 3
 
 

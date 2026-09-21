@@ -140,7 +140,7 @@ char RegisterLetter(DescriptorCategory category)
 
 //: The stages a root parameter is visible to, in the stage letters the rest of the output uses (`vs`, `ps`,
 //: ...), or `all`. It is on the parameter row because the same register can mean different things to
-//: different stages -- measured on `PC Renderer.rdc` at eid 640, whose vertex and pixel shaders *both*
+//: different stages -- measured on `desktop-1` at eid 640, whose vertex and pixel shaders *both*
 //: declare t0..t4, each served by its own table -- so a row without this cannot be matched against the
 //: reflection, and an offline rule that guessed would compare a pixel binding against a vertex table.
 std::string VisibilityText(ShaderStageMask mask)

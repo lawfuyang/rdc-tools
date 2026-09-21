@@ -99,7 +99,7 @@ class ReportPass(TypedDict):
 #: One red flag. `what` is the *observation*; what it means is the reader's, because a bundle can prove what
 #: the engine held, not what the frame intended. `certainty` is what the detector could prove (`certain` -- the
 #: bundle shows it; `question` -- the observation is real, its meaning depends on what the frame was for).
-#: `unproven` is the ROADMAP §6 gate: a detector that has never been checked against a capture whose bugs are
+#: `unproven` is the ROADMAP §5 gate: a detector that has never been checked against a capture whose bugs are
 #: known has not earned a verdict.
 #:
 #: A flag does *not* carry a severity: that is a property of the detector, not of the finding, and it lives in

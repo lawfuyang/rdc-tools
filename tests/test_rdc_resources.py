@@ -134,7 +134,7 @@ class TestParseResourceTable(CmdCase):
         self.assertEqual(self.table(), {})
 
     def test_the_newer_creation_variants_use_the_same_offsets(self):
-        # a hobby-renderer capture creates 5252 resources with `...CommittedResource3` (149-byte
+        # the `desktop-2` capture creates 5252 resources with `...CommittedResource3` (149-byte
         # payloads, `D3D12_RESOURCE_DESC1`) and 148 with `...PlacedResource2`: the extra fields come
         # *after* the descriptor and its first 48 bytes are the same struct, so one offset each
         desc3 = F.pl_committed_resource3(4001, F.pl_resource_desc(3, 1920, 1080, fmt=45))

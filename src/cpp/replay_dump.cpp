@@ -13,7 +13,7 @@
 // replay lives here.
 //
 // Event ids are the *engine's*, not the file's. The offline tool prints chunk indices and used to
-// call them event ids; that held on the two Unreal captures and does not on the hobby-renderer one,
+// call them event ids; that held on the two Unreal captures and does not on `desktop-2`,
 // because RenderDoc numbers only what a command list recorded. `probe` lists the ids that really
 // have pipeline state, and every command here takes engine ids.
 //

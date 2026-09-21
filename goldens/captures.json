@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "note": "The corpus the regression net is run over (REFERENCE §4.17). Two things are deliberately not in it. The captures themselves: hundreds of megabytes each, one command away, and not this repository's to keep. And the paths they live at: a capture is named here by a generic key (`desktop-1`, `desktop-2`, `mobile-1` -- platform, then size ascending) and identified by its SHA-256, while `captures.local.json`, which is not in git, says where this machine's copies are, and every transcript records the key rather than the path. What is checked in is what must hold about them: the transcripts under goldens/<key>/ and the labels in goldens/<key>.expect.json. `python src\\py\\rdc_analysis.py goldens --check` compares what is on this machine and reports the rest as not compared; `--write` refreshes the transcripts, and the diff of that is the point.",
+  "pair": {
+    "a": "mobile-1",
+    "b": "desktop-1",
+    "what": "the mobile-vs-desktop pair this project was started for: the same scene captured on a phone and on the desktop, which is what replaydiff and passdiff were built to compare",
+    "precondition": "both bundles dumped with `--with-images` (the check runs replaydiff --with-images, so a bundle written without images fails the image counts -- which is a true statement about that bundle rather than a bug in the check)",
+    "expect": {
+      "same": 10,
+      "removed": 2,
+      "added": 37,
+      "structureChanges": 10,
+      "stateChanges": 10,
+      "constantsChanged": 55,
+      "shadersDifferent": 16,
+      "imagesCompared": 2,
+      "imagesNotCompared": 0
+    },
+    "why": [
+      "10 passes align by marker path or by the innermost name, and 16 shaders differ by hash: the two frames share the mobile base pass and the sky-atmosphere LUT chain, and nothing else (the desktop frame's ray-tracing, HZB, SSR, TAA and eye-adaptation passes exist on one side only).",
+      "55 constant blocks have a member whose value moved, which is the number to watch: it moves when the alignment moves, so a change in the alignment rule shows up here rather than only in a per-pass row.",
+      "2 image pairs are compared and neither is left to identity: the SceneColorRendering readback both bundles hold (49.077% of its pixels differ), and one pair that is identical byte for byte."
+    ]
+  },
+  "captures": [
+    {
+      "name": "desktop-1",
+      "bytes": 63975987,
+      "sha256": "6874db3c6981a6aac94ac07ae10432fe03ea7630a82f0b2bbb8ca5a78649b2ff",
+      "api": "D3D12",
+      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 2,122 chunks, 52 draw/dispatch calls, 131 markers): the desktop half of the pair, and the capture the report's pinned numbers come from (1186 events / 47 passes / 493 resources / 63 findings from 20 detectors, AGENTS.md)",
+      "known": [
+        "its markers balance, every draw and dispatch sits inside one, and no call is zero-work: the three file-side detectors fire nowhere in this frame",
+        "the report over its bundle finds 63 things, none of them checked against a frame whose bugs are known (ROADMAP §5), so every one of them is an observation rather than a verdict",
+        "1186 ids carry bound state, which is every id up to the frame's last event (1305) -- not a claim about how many are draws"
+      ],
+      "bundle": "build/goldens/desktop-1",
+      "commands": [
+        ["summary"],
+        ["markers"],
+        ["draws", "25"],
+        ["resources", "25"],
+        ["descriptors", "15"],
+        ["rootsig", "8"],
+        ["deps", "12"],
+        ["memory", "8"],
+        ["verify"],
+        ["dxbc"],
+        ["passdiff", "<capture>"]
+      ]
+    },
+    {
+      "name": "mobile-1",
+      "bytes": 35865513,
+      "sha256": "3e536c02e0c94d4ad1f9be83eb3414ce3af56cadbe577c54dbf6981fdd907ff0",
+      "api": "D3D12",
+      "what": "an Unreal Engine mobile (Android) frame: the smallest capture here (35.9 MB, 723 chunks, 24 draw/dispatch calls, 57 markers), which is why it is the one to try a new command on first, and the mobile half of the pair",
+      "known": [
+        "its markers balance, every draw and dispatch sits inside one, and no call is zero-work",
+        "its marker tree nests six deep and its pass names are the mobile renderer's own (MobileSceneRender, MobileBasePass, the sky-atmosphere LUT chain)",
+        "its bundle's 35 findings are unproven like the desktop frame's; 14 of them are unbound root parameters, which on a mobile frame with a stripped reflection is the shape of \"the state says it was set, the reflection does not mention it\""
+      ],
+      "bundle": "build/goldens/mobile-1",
+      "commands": [
+        ["summary"],
+        ["markers"],
+        ["draws", "25"],
+        ["resources", "25"],
+        ["descriptors", "15"],
+        ["rootsig", "8"],
+        ["deps", "12"],
+        ["memory", "8"],
+        ["verify"],
+        ["dxbc"],
+        ["passdiff", "<capture>"]
+      ]
+    },
+    {
+      "name": "desktop-2",
+      "bytes": 630680997,
+      "sha256": "7ad0509534ead94ef33feb481837aac8ad79a0d41a1f846ae641c47403f378bb",
+      "api": "D3D12",
+      "what": "a D3D12 desktop frame from a renderer that is not Unreal: the largest capture here (601 MB container, 1.47 GB stream, 29,212 chunks, 50 draw/dispatch calls) and the one that exercises the newer D3D12 API variants (CreateCommittedResource3, List_Barrier, CreateAS)",
+      "known": [
+        "**nothing of what this frame says about itself is committed.** A transcript is the capture's own words -- its marker names, its resource names, its pass names -- and this capture's are not this repository's to publish. So it has no transcript, no label, no document and no bundle here, and its `commands` list is empty by design rather than by omission. What is kept is numbers and API facts, which describe the frame without quoting it",
+        "the corpus still holds it by identity: its size and SHA-256 are checked whenever the file is on this machine, so a re-capture under this key is caught even though nothing it prints is compared",
+        "the eid numbering does not agree with the file's chunk numbering here (REFERENCE §9): the engine's first id with pipeline state is 842 while the structured file's first draw is at chunk 316",
+        "its markers balance and nest up to 37 deep, with repeated names on the way down -- which is why passdiff's rows are as long on this capture as they are. The depth is a number; the names stay out",
+        "no bundle has been dumped for it, so its report-side counts are unlabelled rather than zero. A local dump would let the report be read, and its documents would stay out of the repository for the reason above"
+      ],
+      "commands": []
+    }
+  ]
+}

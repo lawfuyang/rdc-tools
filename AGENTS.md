@@ -9,19 +9,39 @@ Any change to `src/py/` (or to `tests/`, or to `src/cpp/` — which has its own 
 `cmake --build build --config Release` and `clang-format-check`) is not finished until **both** of these pass:
 
 ```powershell
-python src\py\rdc_analysis.py selftest    # whole suite, ~7 s: exit 0 = pass, 1 = fail, 2 = bad option
+python src\py\rdc_analysis.py selftest    # whole suite, ~11 s: exit 0 = pass, 1 = fail, 2 = bad option
 npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
 ```
 
 - `selftest -v` for per-test output, `selftest -k Draws` to run only matching test ids.
+- A change that can move what a **command prints** (a decoder, a table, `draws`/`resources`/`deps`/`memory`/
+  `dxbc`, a report section) is not finished until the corpus agrees either: `python src\py\rdc_analysis.py
+  goldens --check` (REFERENCE §4.17) diffs every transcript under `goldens/` and compares the labels — 36 s on
+  this machine, and it exits 2 when the captures are not here, which means "not compared", not "clean". When
+  the change is deliberate, `goldens --write` refreshes the transcripts and **that diff is the review**: read
+  it, then keep it. The labels (`*.expect.json`) are hand-written and `--write` never touches them.
+- **The corpus is generic, and a path is never committed.** A capture is a key (`desktop-1`, `desktop-2`,
+  `mobile-1`: platform, then size ascending) plus a SHA-256; where *this* machine keeps the file is
+  `goldens/captures.local.json`, which `.gitignore` keeps out of the repository because a path is local state
+  and a file name may name the frame it came from. `redact` is what enforces it: everything a run records (a
+  transcript's command line, both streams, an A/B document's `capture` member) says `<capture>` where the path
+  was. So no doc, comment or test writes a capture's path or file name either — refer to it by its key, and
+  say "Unreal Engine" when the engine matters (it is a public codebase; a private one has no name here).
+  `tests/test_rdc_goldens.py` checks that the checked-in goldens carry no path (and skips where the local file
+  is absent, which is CI).
+- **A capture's own strings are a separate question from its path, and redaction cannot touch them**: a
+  transcript *is* the frame's words, so a capture whose author has not said they may be published is in the
+  corpus by identity only — no transcript, no label, `commands: []`. `desktop-2` is that capture, and
+  REFERENCE §4.17 records both the rule and the scan that verifies nothing of it is left in the tree.
 - Other entry points, one file per area (`tests/rdc_testcase.py` holds what they share, and is not a test
   file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
   table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report, notables,
   recommendations, detectors),   `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
-  (schemas), `test_rdc_scan.py` (the slice scan and the phase/progress instrumentation), `test_rdc_ab.py`
-  (the marker trees, the bundle A/B and the PNG/pixel maths), or all of them with
-  `python -m unittest discover -s tests -t tests`.
+  (schemas),   `test_rdc_scan.py` (the slice scan and the phase/progress instrumentation), `test_rdc_ab.py`
+  (the marker trees, the bundle A/B and the PNG/pixel maths), `test_rdc_goldens.py` (the corpus harness:
+  transcripts, labels, the bundle half — it runs the CLI as a subprocess, which is most of the 11 s), or all
+  of them with `python -m unittest discover -s tests -t tests`.
 - **The suite never reaches the network.** The source-tree fetch is the one place the tool downloads anything,
   and it writes into exactly one folder — `renderdoc-src` at the root, the one `rdc_renderdoc_src.target_dir()`
   names — so a test that hands a command its own tree gets a check and a fallback, never a download. That is why
@@ -32,12 +52,14 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
   their setup and found nothing.
 - A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
-  `renderdoc-src\PC Renderer.rdc` must still print `1186 events / 47 passes / 493 resources / 63 findings from
+  `desktop-1` must still print `1186 events / 47 passes / 493 resources / 63 findings from
   20 detectors` and `engine   : Unreal Engine (31 concept(s) by name, 1 question(s))`, and the driver's text
   output must stay byte-identical. (1,186 is every id with bound state up to the frame's last event; the
   sweep that produced 2,132 also collected the clamped tail past it, which is gone since REFERENCE §9's
   sweep bound.)
-- New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix.
+- New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix. A new **detector**
+  needs a fixture bundle in `tests/test_rdc_report.py` that makes it fire (and one that makes it not fire),
+  because a detector that is only ever exercised by a real capture is a detector nobody can falsify.
 - Never weaken, skip or delete an assertion to make a run pass. Tests pinning behaviour that looks wrong
   are marked `CHARACTERIZATION` — change code and test together, and say so.
 - Report the real numbers in your reply (test count, pyright error/warning counts), not just "passes".
@@ -116,7 +138,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   index alone is what produced the wrong conclusion in REFERENCE §9.
 - The driver's `psoKind` is the *call kind*, and everything downstream groups by it: it comes from the
   capture's action tree (a `Dispatch*` chunk or not; an event that is not a call takes the kind of the call it
-  follows), **never** from the bound shaders. Measured: `PC Renderer.rdc` has a compute shader bound at every
+  follows), **never** from the bound shaders. Measured: `desktop-1` has a compute shader bound at every
   one of its 1,186 events, so the shader-based guess called the whole frame compute and the report grouped a
   frame of draws into compute passes. A wrong value here is wrong everywhere downstream.
 - The replay driver (`src/cpp/replay_dump.cpp`, REFERENCE §9) keeps the same rule: it prints what the engine returns and
@@ -147,7 +169,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - Never assume an event id is a chunk index: `probe` is the authority (`REFERENCE.md` §9), and since
   2026-09-17 `draws` prints the engine's own ids too (`ActionDescription::eventId`, from `GetRootActions`),
   which is the numbering `SetFrameEvent`, `probe` and a bundle all use. The offline tool's `chunks`/`summary`
-  keep their own chunk numbering; the two agreed on the Unreal captures and do not on the hobby-renderer one,
+  keep their own chunk numbering; the two agreed on the Unreal captures and do not on `desktop-2`,
   and a wrong id silently returns an *empty* state rather than failing.
 - A **marker path** is available with the ids: every event carries the markers it sits inside, written by
   `state`/`shaders`/`cb` as a `marker` field and by `dump` into `events.json`, and a bundle older than that
@@ -181,7 +203,8 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `rdc_report_render.py` the report, `rdc_passdiff.py` the two captures' marker trees, `rdc_image.py` the PNG
   reader/writer and the pixel maths (a leaf, like `rdc_profile`), `rdc_ab.py`/`rdc_ab_render.py` the A/B of
   two bundles and its Markdown, `rdc_engine_schema.py` the engine-name interpretation (`engine-schemas/`),
-  `rdc_schemas.py` the JSON contract, `rdc_analysis.py` the CLI that re-exports
+  `rdc_schemas.py` the JSON contract, `rdc_goldens.py` the capture corpus and its transcripts/labels
+  (REFERENCE §4.17; a harness beside `rdc_driver.py`, not a test), `rdc_analysis.py` the CLI that re-exports
   them all. C++: `src/cpp/replay_dump.cpp` the entry point, `common.h` the modules' shared declarations,
   `text.cpp`/`output.cpp` the printing, `capture.cpp` the engine session, `actions.cpp` the action tree,
   `commands_frame.cpp`/`commands_state.cpp` the commands by area, `commands_image.cpp`/`commands_patch.cpp`
@@ -193,7 +216,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   payloads → commands → CLI); the C++ split moved whole families out (`text`, `output`, `capture`, `actions`,
   the two command files, `bundle`, `selftest`) and touched no logic. A new module belongs beside the layer it
   serves, and its imports must point *down* the layering (see the Python structure rules above).
-- A capture path with a space in it (`PC Renderer.rdc`) needs its quotes **inside** the argument:
+- A capture path with a space in it (`desktop-1`) needs its quotes **inside** the argument:
   `Start-Process -ArgumentList` joins with spaces and does not quote, so `@('dump', $rdc)` arrives as
   `renderdoc-src\PC` and the run dies in under a second with `cannot open ...\renderdoc-src\PC`. Write it as
   `"`"$rdc`""` (or `'"' + $rdc + '"'`) — and read the driver's own stderr/log, which says exactly this. Two
@@ -245,7 +268,7 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 - The writer's separator state nests with the arrays: `ArrayOpen` saves the enclosing array's `g_firstRow` and
   `ArrayClose` restores it. Without that, an *empty* nested array leaves the enclosing one looking like it had
   just started, the next item is written with no comma, and the document does not parse — which is exactly how
-  `states/<eid>.shaders.json` came out invalid for the hobby capture (a stage whose signature arrays were
+  `states/<eid>.shaders.json` came out invalid for `desktop-2` (a stage whose signature arrays were
   empty). Validate a writer change with a parse **and** a duplicate-key check.
 - Undefined behaviour and IFNDR are treated as bugs here: no `memcpy` out of a class without a
   `static_assert` that it is trivially copyable and the right size, no signed overflow in size arithmetic
@@ -320,8 +343,8 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   before doing anything). An empty answer that *is* an answer carries its evidence: `usagesUpTo`, the events up
   to the scope that touch the texture at all. Every row prints the value before, from and after the fragment,
   because one verdict is not a closed case on D3D12: the `sample masked` test is an instrumented re-draw
-  (RenderDoc marks the flag `TODO: figure out if we always need to check this`), and measured on the hobby
-  capture's 1-sample targets every base-pass fragment is flagged while one of them carries a changed `postMod`
+  (RenderDoc marks the flag `TODO: figure out if we always need to check this`), and measured on desktop-2's
+  1-sample targets every base-pass fragment is flagged while one of them carries a changed `postMod`
   in the same row -- so the document's `note` (printed as one of the header's key/value lines, in both formats)
   says which two members to compare.
   The vocabulary those rows are phrased in (`CastFromName`/`CastText`, `PixelValueText`, the
@@ -373,6 +396,6 @@ element type of a container the engine declared. A path that reaches `fopen`/`Cr
 `const char*`/`const std::string &` rather than a view, because those want a NUL-terminated string.
 
 **Text output is the contract this refactor had to keep**: `draws`, `state`, `shaders` and `cb` over
-`renderdoc-src\PC Renderer.rdc`, text *and* `--json`, were captured before the rename and diffed after it, and
+`desktop-1`, text *and* `--json`, were captured before the rename and diffed after it, and
 came out byte-identical. Do the same for the next one: `batch` a command list into a file, rename, rebuild,
 diff.

@@ -1,0 +1,45 @@
+# passdiff <capture> <capture>
+# exit: 0
+--- stdout ---
+A         : <capture>
+B         : <capture>
+passes    : 34 in A, 34 in B (a pass is a marker with a call inside it)
+verdicts  : added 0, removed 0, renamed? 0, 34 path(s) in both
+--- in both, by pass path ---
+#     chunks A         chunks B         calls A  calls B  pass
+1     259..270         259..270         1        1        FRDGBuilder::Execute > MobileSceneRender > ComputeLightGrid > CullLights 32x20x8 NumLights 0 NumCaptures 0 > LightGridInject:NotLinkedList
+2     247..270         247..270         1        1        FRDGBuilder::Execute > MobileSceneRender > ComputeLightGrid > CullLights 32x20x8 NumLights 0 NumCaptures 0
+3     246..270         246..270         1        1        FRDGBuilder::Execute > MobileSceneRender > ComputeLightGrid
+4     283..291         283..291         1        1        FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > TransmittanceLut
+5     293..304         293..304         1        1        FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > MultiScatteringLut
+6     306..318         306..318         1        1        FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > DistantSkyLightLut
+7     320..326         320..326         1        1        FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > SkyViewLut
+8     328..341         328..341         1        1        FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > CameraVolumeLut
+9     282..341         282..341         5        5        FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs
+10    429..452         429..452         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+11    454..459         454..459         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+12    461..466         461..466         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+13    468..473         468..473         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+14    475..480         475..480         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+15    482..503         482..503         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Game/Developers/rogerfylaw/M_Red.M_Red Cube
+16    505..514         505..514         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+17    516..521         516..521         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+18    523..530         523..530         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
+19    532..537         532..537         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
+20    539..546         539..546         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+21    548..553         548..553         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+22    555..560         555..560         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+23    562..571         562..571         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
+24    428..571         428..571         14       14       FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass
+25    408..571         408..571         15       15       FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering
+26    588..607         588..607         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > PostProcessing > Tonemap 2003x1254 (PS GammaOnly=0)
+27    609..618         609..618         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > PostProcessing > FXAA(Quality=0) 2003x1254 PS
+28    587..618         587..618         2        2        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > PostProcessing
+29    623..634         623..634         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > RenderFinish > CanvasFlush > CanvasBatchedElements
+30    622..634         622..634         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > RenderFinish > CanvasFlush
+31    621..634         621..634         1        1        FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > RenderFinish
+32    358..634         358..634         18       18       FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender
+33    240..634         240..634         24       24       FRDGBuilder::Execute > MobileSceneRender
+34    194..634         194..634         24       24       FRDGBuilder::Execute
+note      : chunk indices are the file's numbering, not the engine's event ids (REFERENCE �9): `replay_dump draws` prints the engine's own, and both take a marker path
+--- stderr ---

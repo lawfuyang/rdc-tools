@@ -32,7 +32,7 @@ walks this into `info['sections']`, stopping at the first byte that is not 0 (th
   block** (no frame header), decoded by `decompress_lz4()` through the vendored library
   (`LZ4_decompress_safe_usingDict`, called with `ctypes`): one destination of exactly `uncompLen` bytes, one
   call per page, and the 64 KB before the write position as the dictionary. Measured on this repo's captures:
-  **0.54 s** for the hobby capture's 1.47 GB and **0.14 s** for the PC capture's 631 MB — the decode itself is
+  **0.54 s** for `desktop-2`'s 1.47 GB and **0.14 s** for `desktop-1`'s 631 MB — the decode itself is
   0.219 s / 0.078 s (6.4 and 7.7 GB/s) and the rest is the container's own body copy and the zeroed
   destination.
 
@@ -54,7 +54,7 @@ walks this into `info['sections']`, stopping at the first byte that is not 0 (th
   `LZ4_compress_fast_continue` and decompresses with `LZ4_decompress_safe_continue` over a shared stream
   context (`serialise/lz4io.cpp`), so a match may point up to 64 KB back into the previous page. That is why
   one destination is carried across the blocks and why the blocks **cannot** be decoded in parallel: a pooled
-  attempt produced 625,911,281 bytes for `PC Renderer.rdc` where the section declares 630,790,592. See §8 and
+  attempt produced 625,911,281 bytes for `desktop-1` where the section declares 630,790,592. See §8 and
   `decompress_lz4`'s docstring for the measured evidence.
 * **raw** — copied as-is.
 
@@ -190,7 +190,7 @@ which replay does not expose.
 | Command | Arguments | Output |
 |---|---|---|
 | `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §8.5) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §6.5) |
 
 ### 4.5 Chunk level
 
@@ -240,7 +240,7 @@ is a **NULL vertex buffer** — a useful signature in itself.
 The *write* side of the state is printed the same way: `RTV:`/`DSV:` are the targets the list last bound
 (`List_OMSetRenderTargets`, whose payload carries the descriptors themselves — §3.4), and `SRV:`/`UAV:` are root
 descriptors of those kinds, which the stream carries in the same `(resource, byteOffset)` shape a root CBV uses.
-Two draws of the PC capture's deferred base pass:
+Two draws of `desktop-1`'s deferred base pass:
 
 ```
         RTV: res60857[SceneColor]  res60858[GBufferA]  res60859[GBufferB]  res60860[GBufferC]  res60861[GBufferD]  res60862[GBufferE]
@@ -301,7 +301,7 @@ Exit code is 0 when everything passes, 1 on failure, 2 for a bad option.
 
 The real-capture integration tests are skipped unless a capture is pointed at them
 (`$env:RDC_TEST_CAPTURE = 'C:\path\capture.rdc'`). Copies of the three captures used here live in the ignored
-`renderdoc-src/` folder — two from Unreal Engine (PC and Android) and `HobbyRenderer FlyingWorld.rdc` from a
+`renderdoc-src/` folder — two from Unreal Engine (PC and Android) and `desktop-2` from a
 custom D3D12 renderer, which is the one that exercises ray tracing, `...CommittedResource3` and `CreateAS`.
 They take about a minute, because each command re-decompresses the whole stream unless the cache (§4.8) has
 it. A third class parses the real `renderdoc-src` enums and is skipped when the tree is absent. Tests that pin
@@ -473,7 +473,7 @@ which is why the checked-in copy cannot quietly go stale after a document change
 | pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
 | notable passes | the ranking's top five, plus every pass an oddity rule matches (depth-only, one call, unmarked, dead, the only pass touching a resource) — with the **rule printed above the rows**: each input, how it is measured, and which ones *this* bundle could not answer |
 | notable resources | the same for resources: ranked by size and by how many passes read them, plus never-read, targets, formats whose bytes mislead, and textures the table names no format for |
-| red flags | what the detectors found, each with the evidence that proves it and how certain it is — grouped by the severity table printed with it (the tool's declared judgement, per detector, so a line of it can be disagreed with), and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §6, the capture corpus) |
+| red flags | what the detectors found, each with the evidence that proves it and how certain it is — grouped by the severity table printed with it (the tool's declared judgement, per detector, so a line of it can be disagreed with), and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §5, the known-bug lists) |
 | recommendations | what to look at first, ranked by the same severity: one row per detector that fired, per oddity rule that matched and per gap the report could not close — each with the driver command that shows its evidence |
 | what this report cannot tell you | the report states its own gaps, and every one of them is a roadmap item |
 | appendix | the `replay_dump state` / `shaders` / `usage` commands that reproduce a pass, a claim and a notable row |
@@ -527,11 +527,11 @@ documents, each with the eid its document was written at and the report pass tha
 makes the claim checkable: `replay_dump cb <capture> <eid> <stage> <slot>` prints the same numbers.
 
 The project's original question is the acceptance case, and it is two lines of the same section. On
-`Android Renderer.rdc` the table claims **mobile base pass** (`MainVertexShader`/`MainPixelShaderMRT` with
+`mobile-1` the table claims **mobile base pass** (`MainVertexShader`/`MainPixelShaderMRT` with
 `MobileBasePass` bound) plus the **indirect lighting cache** and **mobile reflection capture** blocks: at eid 262
 nothing is bound to the cache (every member reads its default, and the row says so), and at eid 313
 `IndirectLightingCacheMaxUV = 1, 1, 1` with `DirectionalLightShadowing = 1` — the cache is filled from the
-frame's own state, not left at zero. On `PC Renderer.rdc` it claims **base pass** (`MainVS`/`MainPS` with
+frame's own state, not left at zero. On `desktop-1` it claims **base pass** (`MainVS`/`MainPS` with
 `Scene`, `Material`) plus **reflection capture (SM5)** and **forward lighting**, with
 `ForwardLightData.NumReflectionCaptures = 0`, and the marker concepts name the passes outright
 (`BasePass (engine marker)` for pass 24, `depth prepass` for pass 9). That is the difference between the two
@@ -562,12 +562,12 @@ state: `samples` is in the resource table and a resolve is a usage row, so a mul
 nothing ever resolved is decidable as it stands.
 
 Cross-referenced against the three captures to hand, the state rules say something on two of them and
-nothing on the third for a checked reason: `depth-logic` fires once on `PC Renderer.rdc` (depth testing on
-with no depth target bound, eids 888–891), `stencil-without-writer` once on the Hobby capture (eids 841–851
+nothing on the third for a checked reason: `depth-logic` fires once on `desktop-1` (depth testing on
+with no depth target bound, eids 888–891), `stencil-without-writer` once on `desktop-2` (eids 841–851
 testing a *read-only* depth-stencil target nothing wrote), and the two heuristics are silent there because
 that frame's 30 GBuffer-named target bindings are all bound with blending *off* and it binds no 8-bit linear
 target at all — an HDR frame, not a gap in the rules. That is the difference between a heuristic and a guess:
-the finding names what it keys off, so its silence is checkable too. The 601 MB Hobby capture is dumped as a
+the finding names what it keys off, so its silence is checkable too. The 601 MB `desktop-2` is dumped as a
 600-event window (`--max-events`), which the report's provenance states. From
 the capture's chunk stream: marker imbalance,
 unattributed draws, and calls that can only draw nothing (0 vertices/indices/instances/groups). A detector
@@ -610,7 +610,7 @@ command.
 
 **Read the numbers as ratios.** The same serial scan of the same stream measured 14.5 s and 25.2 s an hour
 apart on this machine (64 cores, other processes running); what stayed stable is the parallel path being
-6-13x faster *within one session*. Measured that way, on `HobbyRenderer FlyingWorld.rdc` (601 MB container,
+6-13x faster *within one session*. Measured that way, on `desktop-2` (601 MB container,
 1.47 GB stream, 29,212 chunks):
 
 | command | before | after | what it was |
@@ -679,7 +679,7 @@ identical output, and none of the saving was in the decode.
 | `sections`, `summary`, `markers`, `resources`, `descriptors`, `verify` | 1.1-1.8 s | 0.55-0.68 s |
 
 `shader_bind_names` scans the stream for `DXBC` containers so a root parameter can be given the name its
-reflection offers: 1.2-1.7 s on the hobby capture, and **no names at all** on it (that capture's DXIL has
+reflection offers: 1.2-1.7 s on `desktop-2`, and **no names at all** on it (that capture's DXIL has
 reflection stripped). Gating that scan on a chunk *name* would be a guess rather than a check -- a shader can
 sit inside any payload, and the containers really are there (85 of them) -- so what it gets is the same sliced
 `find` as everything else (`find_all`, above): the same one full pass, split across processes when the stream
@@ -700,15 +700,15 @@ the scan at all:
 
 For the driver half of the same question, see §9: `dump` is one `SetFrameEvent` per event plus a sweep, both
 bounded by the frame's last event id, and the sweep cache is what makes a re-run affordable (measured on a
-full `PC Renderer.rdc` frame: 68 s cold, 45 s with the sweep answered from the cache).
+full `desktop-1` frame: 68 s cold, 45 s with the sweep answered from the cache).
 
 ### 4.14 Reading the file: mapped, not copied
 
-Every command used to pay two full reads before doing anything: the container (601 MB for the hobby capture,
+Every command used to pay two full reads before doing anything: the container (601 MB for `desktop-2`,
 in `parse_container`) and the stream (1.47 GB, in `load_stream`). Both are now `mmap`s, because nothing needs
 the bytes all at once -- the header and section table are a few KB, one section body is decompressed on a
 cache miss, and a command that only walks the frame touches one 4 KB page per chunk header. Measured on
-`HobbyRenderer FlyingWorld.rdc`, in one session:
+`desktop-2`, in one session:
 
 | phase | before | after |
 |---|---|---|
@@ -767,7 +767,7 @@ words around every finding say.
 **Measured** on the two captures (the stream is cached for every run after the first, §4.8; the ledger phase is
 0.08 s of `deps`' 0.27 s / 0.45 s):
 
-| | `PC Renderer.rdc` (631 MB stream, 52 draws) | `HobbyRenderer FlyingWorld.rdc` (1.47 GB, 50 draws) |
+| | `desktop-1` (631 MB stream, 52 draws) | `desktop-2` (1.47 GB, 50 draws) |
 |---|---|---|
 | resources with a use the stream shows | 88 | 117 |
 | `read-before-write` | 27 | 26 |
@@ -776,7 +776,7 @@ words around every finding say.
 
 Those counts are large for a reason worth stating plainly: **most of UE's descriptor tables are filled at
 startup**, so a read through an unwritten slot is invisible — the PC capture resolves 9 slots of its 118 table
-bindings (§8). The commands print that count *with* the finding, and the hobby capture's nine is why its
+bindings (§8). The commands print that count *with* the finding, and `desktop-2`'s nine is why its
 `write-never-read` list is the more meaningful of the two. `deps` also prints which resource-referencing chunks
 it does **not** attribute (`rdc_chunkmap.UNATTRIBUTED_CHUNKS`: `List_ResolveQueryData`, `List_ExecuteIndirect`,
 `List_BuildRaytracingAccelerationStructure`, `List_SetDescriptorHeaps`, …), because "nothing read it" and
@@ -816,7 +816,7 @@ python src\py\rdc_analysis.py replaydiff ab\mobile ab\pc --out ab\diff --with-im
 **Why `replaydiff` takes bundles and not two `.rdc` paths.** Because the engine replays one capture at a
 time: two replay devices on one GPU is what makes a run look stuck (§9), so a command that opened both
 would be a command that hangs. Everything it needs is already a file after `dump`, and reading files is
-the half that is testable without a GPU, a capture or a driver (ROADMAP §6). The driver half stays what it
+the half that is testable without a GPU, a capture or a driver (ROADMAP §5). The driver half stays what it
 was — one `dump` per capture, the engine's answers — and this half is the analysis.
 
 **`passdiff <a.rdc> <b.rdc> [--all]`** — the marker trees side by side. A *pass* here is a marker with at
@@ -827,9 +827,9 @@ a pass too. The tree is built from `PushMarker`/`Queue_BeginEvent` through to `P
 the stream ends is still recorded (the frame was cut — `verify` and the report's marker-balance detector
 are what report the imbalance itself). A name is read with `MARKER_MINLEN = 3` characters, because a
 marker payload's own frame decodes as one- and two-character printable runs *before* the name does
-(measured: `chunk_strings(..., 1, 1)` answers `B` where the name is `MobileSceneRender`, and the hobby
-capture still returns runs like `6,` at two characters); the shortest real names on these captures are
-`Sky`, `Clear` and `ImGui`.
+(measured: `chunk_strings(..., 1, 1)` answers `B` where the name is `MobileSceneRender`, and at two
+characters it still answers runs that are not names); the shortest real names on these captures are
+`Sky` and `Clear`.
 
 The two lists are aligned by **full path** first and the **innermost name** second — a path carries dynamic
 text no table could list, and one real pair has `CullLights 32x20x8 NumLights 0` against
@@ -869,15 +869,101 @@ delta, the 64-bit difference hash's distance and a heat map (`<out>/heat/<pass>_
 of different sizes are reported as two sizes, because a difference across sizes is a different question.
 `--threshold` is a percentage: pairs below it are counted in the summary instead of listed row by row.
 
-**Measured on the pair this exists for** (`renderdoc-src\Android Renderer.rdc` against
-`renderdoc-src\PC Renderer.rdc`, bundles written with `--with-images`): `passdiff` reports 34 passes in the
+**Measured on the pair this exists for** (`mobile-1` against
+`desktop-1`, bundles written with `--with-images`): `passdiff` reports 34 passes in the
 mobile frame against 71 in the PC one, 20 paths in both, and the shifts that matter —
-`SceneColorRendering > MobileBasePass` present on both, the PC frame's ray-tracing, HZB, SSR, TAA and eye
+`SceneColorRendering > MobileBasePass` present on both, `desktop-1`'s ray-tracing, HZB, SSR, TAA and eye
 adaptation passes present on one side only. `replaydiff` aligns 10 passes, reports 55 constant blocks
 whose values moved and 16 shaders whose hash differs, names the adds/removes, and compares the one
 `SceneColorRendering` pair both bundles hold a readback for: **49.077% of its 2,517,012 pixels differ**,
 mean delta 245.904, worst 255. The other passes have no readback *pair* (the two frames' targets are bound
 at different events), which the document states per row rather than leaving the reader to infer.
+
+### 4.17 The corpus and its goldens: `goldens`
+
+The regression net for the **analyser**, where the payload tests are the net for the parsers. One command
+over one checked-in corpus:
+
+```powershell
+python src\py\rdc_analysis.py goldens                    # --check is the default
+python src\py\rdc_analysis.py goldens --capture desktop-1 --verbose
+python src\py\rdc_analysis.py goldens --write            # refresh the transcripts, then read the diff
+```
+
+| file | what it is |
+|---|---|
+| `goldens/captures.json` | the index: each capture's **key**, size and SHA-256, what it is and what is *known* about it, the commands whose transcript is pinned, the bundle to check it against, and the `pair` whose `replaydiff` numbers must reproduce. It names no files: a capture here is `desktop-1`, `desktop-2` or `mobile-1` (platform, then size ascending) and its identity is the digest |
+| `goldens/captures.local.json` | **not in git**: `capturePaths` says where *this machine's* copies of those keys live. A key with no entry is *not compared*; a key the corpus does not have is refused (that is a typo, not a missing capture); a file that is absent -- a fresh clone, CI -- is simply no paths, which is the same answer as no captures |
+| `goldens/<key>.expect.json` | the **labels**: which detectors must fire over the `.rdc` (and how many findings each), what the report over that capture's bundle must count, the findings *histogram*, and what `replaydiff` must say about the bundle against itself |
+| `goldens/<key>/<command>.txt` | a **transcript**: the command line, the exit code, stdout and stderr, written by `--write` and compared byte for byte by `--check`, with the capture written `<capture>` and never a path |
+
+**A transcript is a run of the CLI, not a call to a function**: each command is a subprocess of
+`rdc_analysis.py` with the capture path inserted after the command name (`<capture>` in the corpus stands
+for it where a command takes it twice, as `passdiff` does), so what is pinned is the command's output
+contract, usage line and exit code. Two environment variables are fixed for those children:
+`$RDC_PROFILE`/`$RDC_PROGRESS` are removed (a phase table would be a golden of this machine's speed) and
+`$RDC_NO_CACHE` is set, because the stream cache is invisible *except* in one place — the `, cached` marker
+in a method label that `dxbc` and `verify` print — and a transcript that depends on what this machine has
+already decoded fails on a fresh checkout. Line endings are normalised on the way in and out, so a
+`core.autocrlf` checkout compares equal.
+
+**The path is redacted.** Everything a run records — the command line, both streams, and the `capture`
+member of an A/B document — says `<capture>` where the path was, in each spelling it arrives in (the path as
+given, its other slash, and the JSON-escaped form a document carries). Two reasons, and the second is why
+this is a rule rather than a nicety: the corpus is committed and read by everyone, while a path is this
+machine's state and a file's name may name the frame it came from; and a golden that carried the path would
+fail the moment the same capture moved, where the digest is what identifies it. The file's *stem* (`My
+Frame` for `My Frame.rdc`) is deliberately not one of the forms: it cannot be told from the tool's or the
+frame's own words, so rewriting it could silently alter an answer. That no checked-in golden carries a path
+or a file name is a test over the corpus rather than a hope.
+
+**A capture's own strings are a different question from its path, and redaction cannot touch them.** A
+transcript *is* the frame's words — its marker names, its resource names, its shader entry points — because
+reproducing what the tool prints is the whole point of one. So a capture whose author has not said its words
+may be published is in the corpus **by identity only**: `desktop-2` has no transcript, no label and no
+document, its `commands` list is empty by design, and its `known` lines are numbers and API facts rather
+than quotations. What is published about it is its size and digest, which still verify the file where it is
+present. The check that nothing of it is left anywhere is a scan rather than a reading: regenerate that
+capture's transcripts into a throwaway corpus under `build/`, subtract the words the other captures use, keep
+the identifier-like remainder, and grep the tree for those. That remainder was 111 identifiers, and the only
+hits are the public ones the tool cannot avoid — `List_Barrier`, `Device_CreateCommittedResource3`,
+`R8G8B8A8_UNORM`, and the two Unreal names the other captures print (`Niagara::GPUProfiler_BeginFrame`,
+`FSlateFontTextureRHIResource`).
+
+**The captures are not in the repository**, and neither are the bundles or the paths they sit at: a capture
+lives in the gitignored `renderdoc-src/` and its path in the local `captures.local.json`, a bundle is engine
+output for one machine's GPU, and all of them are one command away. What
+is checked in is what must hold *about* them, so a capture or a bundle that is not on this machine is reported
+as **not compared**, and the exit code says which of the three answers a run is: **0** everything compared
+matched, **1** a transcript, a label or a document differs, **2** nothing could be compared at all. That is
+`build --check`'s rule for the same reason — whether a capture, a bundle or a binary has been produced is
+the state of a working tree, not a property of the tool — and it is why none of this is in `tests/`: the
+suite is hermetic and takes eleven seconds, this reads hundreds of megabytes.
+
+**The bundle half** answers three questions about the engine's side of the tool, all from files: are the
+driver's documents still documents (`validate` against the checked-in `schema/`, which now also refuses a
+repeated JSON key — the one check a schema cannot make, because a plain parse keeps the last value and says
+nothing), does the report still count what it counted (events, passes, resources, findings, and the
+findings *per detector*, so a detector that stops firing while another fires more is a mismatch rather than
+a smaller total), and does the analyser agree with itself — `replaydiff` of a bundle against the **same**
+bundle must find no difference at all, which is what makes "the same capture through two builds of the
+tools" a command rather than a reading (§4.16). The driver's own device-free check (`schema --check schema`)
+runs in the same pass when `bin/replay_dump.exe` is built; everything else the driver does needs a GPU and
+stays a manual gate (§9).
+
+**What is here, checked on 2026-09-21**: three captures, 22 transcripts and 58 labels (49 of them about a
+capture, nine about the pair). `goldens --check` compares them in **36 s** on this machine: every child runs
+without the stream cache (§4.8) and pays its own decode, and the pair's A/B reads both bundles. One of the
+three is held **by identity only** — `desktop-2` is a frame from a renderer that is not Unreal, and what a
+frame says about itself (its marker names, its resource names, its pass names) is its own, so that capture
+has no transcript, label or document here and its `commands` list is empty **by design**. Its size and
+digest are still checked, so the file is verified when it is on this machine; nothing it prints is compared,
+and the corpus's `known` lines for it are numbers and API facts rather than quotations. The two bundles' self-A/Bs are `47`
+and `12` passes with every difference at 0, and the pair — the mobile frame against the desktop one, both
+dumped `--with-images` — answers `10` passes in both, `2` only in A, `37` only in B, `55` constant blocks
+whose values moved, `16` shader hashes differing and `2` image pairs compared. **The captures themselves are not verified**: the SHA-256 in the corpus is, so a re-capture under
+the same name is caught, but nothing here can tell you that a frame recorded on a phone is what it says it
+is.
 
 ---
 
@@ -1061,7 +1147,7 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 Most of these bullets are **replay's job, not offline work** — decoded textures, disassembly, the non-frame
 sections, uniform names — and `ROADMAP.md` keeps them out of the offline plan on purpose ("what is deliberately
 not on this list"). The ones that stay offline work items are tracked with an acceptance gate in
-`ROADMAP.md` §11. A bullet here is a known limitation, not a permanent design decision.
+`ROADMAP.md` §8. A bullet here is a known limitation, not a permanent design decision.
 
 * **Chunk names need the RenderDoc source tree.** The tool fetches it into `<root>/rdc-tools/renderdoc-src/`
   on first use (README §1.1) and says so; when the fetch cannot happen — no network, `$RDC_NO_BOOTSTRAP`, a
@@ -1092,7 +1178,7 @@ not on this list"). The ones that stay offline work items are tracked with an ac
 * **No shader disassembly** *offline*. `dump-shaders` extracts containers; `replay_dump shaders <eid> --disasm`
   (§9) prints the disassembly the engine generates.
 * **Chunk indices are not event ids.** `summary`/`markers`/`draws` number chunks the way the file stores them,
-  which matched the engine's event ids on the two Unreal captures and does not on the hobby-renderer one
+  which matched the engine's event ids on the two Unreal captures and does not on `desktop-2`
   (`replay_dump probe`, §9). Use the driver's ids when talking to the driver.
 * **A lifetime read out of the file is capture-relative.** D3D12 writes no release to the stream — no chunk
   records a resource being destroyed — so the frame's *last use* is where a lifetime ends, and a resource created
@@ -1170,7 +1256,7 @@ half (and a reader) can work without a device. It writes:
 |---|---|
 | `manifest.json` | bundle version, driver and RenderDoc version, the capture's absolute path, byte count and SHA-256, the flags used, the scan result, every written file with its size and hash, and a `notInThisBundle` list saying what it cannot contain and why |
 | `capture.json` | the capture header: API, driver, machine, feature flags (`shaderDebugging`, `pixelHistory`), counts, file size |
-| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash. `psoKind` is the *call kind* from the capture's action tree — a dispatch or not — and not a reading of the bound shaders: on `PC Renderer.rdc` every event has a compute shader bound, so the shaders would call all 2132 of them compute, draws included |
+| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash. `psoKind` is the *call kind* from the capture's action tree — a dispatch or not — and not a reading of the bound shaders: on `desktop-1` every event has a compute shader bound, so the shaders would call all 2132 of them compute, draws included |
 | `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints — including each stage's `hash` (the SHA-256 of its bytes), which is what `replaydiff` compares two bundles' shaders by (§4.16) |
 | `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant block of every bound stage, at the state events |
 | `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it || `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |
@@ -1206,8 +1292,8 @@ action list gives exactly: every driver ends a capture's action list with an "En
 largest event id in the tree is the last event there is (`LastEventId`), and ids past it *clamp* to it rather
 than coming back empty (measured: `probe 4500` reports 4405 ids with state on a capture whose structured file
 has 723 chunks — the clamp is why a bound is needed at all). Before that bound existed the sweep ran to the
-file's chunk count and collected the whole clamped tail as if it were events — on `PC Renderer.rdc`, 946 of
-its 2,132 collected ids were one state repeated past the last event; on the hobby capture the tail past event
+file's chunk count and collected the whole clamped tail as if it were events — on `desktop-1`, 946 of
+its 2,132 collected ids were one state repeated past the last event; on `desktop-2` the tail past event
 1736 would have been 94% of a default dump. The chunk count is the fallback bound when no action list comes
 back, and `--until` can narrow the range but no longer extend it past the frame's end. All of the gaps are
 written into the bundle's own `notInThisBundle` list, so a reader does not conclude that the frame had no
@@ -1216,7 +1302,7 @@ copies. Deriving the engine's ids from the file is the open item in `ROADMAP.md`
 **The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
 that change the answer -- including the scan bound, which is why every cache written before the bound existed
 is refused; `$RDC_NO_CACHE` turns it off), because it is the most expensive thing the driver does and a re-run
-asks the same question again. Measured on a full `PC Renderer.rdc` frame (1,186 ids with state, 1,305
+asks the same question again. Measured on a full `desktop-1` frame (1,186 ids with state, 1,305
 scanned): **68 s** with the sweep and **45 s** with it answered from the cache -- the sweep is 21 s of that,
 the per-event pass is the rest, and both halves are the engine's own cost (REFERENCE §9's "the engine is a
 black box behind a call"). Bounding the sweep at the frame's last event took the same dump from 105 s to 68 s
@@ -1257,7 +1343,7 @@ installer ships none) and put a copy of `renderdoc.dll` beside the exe.
 **Event ids are the engine's, not the file's.** `draws` takes its ids from the engine's own action list
 (`ActionDescription::eventId`), and so do `probe`, the bundle and every command that takes an `<eid>`; the
 *offline* tool's `chunks`/`summary` print their own **chunk indices**, which are a different numbering. On the
-two Unreal captures the two happened to agree, and on the hobby-renderer capture they do not: `probe` shows
+two Unreal captures the two happened to agree, and on `desktop-2` they do not: `probe` shows
 the engine's first event with pipeline state at 842 while the structured file's first draw is at chunk 316,
 because RenderDoc numbers only what a *command list* recorded (resource and PSO creation, `SetName` and
 descriptor writes are in the file but are not events). `probe <rdc> <maxEid>` lists the ids that do have state,
@@ -1303,7 +1389,7 @@ directory>\renderdoccmd.exe crashhandle` for its crash handler, and without it e
 create crashhandle server: 2`, waits 400 ms for a server that never arrives, and continues with no handler.
 
 **Opening a capture is the expensive part, so batch it.** Standing the replay engine up — its own copy
-of the frame plus a replay device — is ~2 s on the Android capture and ~6 s on the 1.4 GB hobby one,
+of the frame plus a replay device — is ~2 s on `mobile-1` and ~6 s on `desktop-2` (1.4 GB),
 while individual commands cost 0.0–1.5 s. A batch file pays the open once:
 
 ```powershell
@@ -1352,7 +1438,7 @@ question entirely, which is the tested path).
 [--mip/--slice/--sample N] [--cast <type>] [--max N]` asks the engine for one pixel's history: every event up
 to `<eid>` that tried to write it, the test that rejected each attempt (`depth test failed`, `stencil test
 failed`, `scissor clipped`, `view clipped`, `shader discarded`, `backface culled`, `sample masked`, ...), and the
-value before, from and after it. That is the answer no other command gives. Measured on `PC Renderer.rdc`, pixel
+value before, from and after it. That is the answer no other command gives. Measured on `desktop-1`, pixel
 (960,540) of `SceneColor` is four rows and a story: the `GBufferClear` at eid 599, the lit cube of `BasePass` at
 eid 692 — whose `ps` value `0.9535,0.2053,0.3410` is the colour that landed — the reflection pass at 881, and
 `SkyAtmosphere` at eid 901 **rejected, `depth test failed`**: the sky is behind the cube. On the scoped form
@@ -1363,7 +1449,7 @@ The scope is the *event*: the engine's history covers every write up to the one 
 (`ReplayController::PixelHistory` filters the usage list by it), so `last` (the frame's own last event, from the
 same action list `draws` prints) is the whole frame and a pass's last eid is the answer at the end of that pass.
 `--at-marker <path>` supplies the scope instead of a positional id — `pixelhistory --at-marker BasePassParallel
-res60857 960 540` on `PC Renderer.rdc` returns one row, the `GBufferClear` at eid 599, because the BasePass
+res60857 960 540` on `desktop-1` returns one row, the `GBufferClear` at eid 599, because the BasePass
 write at 692 is *after* the scope the marker resolves to, which is the semantics rather than a bug: a marker
 path resolves to its first call, so a pass's *last* eid is what asks about the end of it.
 Two things it refuses to fake, both because an empty answer reads as a fact: the capture's driver must support
@@ -1380,17 +1466,17 @@ texture's own format deciding otherwise and a typeless format printing raw 32-bi
 `pre`/`ps`/`post` with `-` where the engine marked a value invalid: an invalid value's union holds
 `0xdeadbeef`, and printing that is a plausible-looking colour that never existed. It is not a file read — the
 D3D12 implementation re-runs the frame's draws with instrumented shaders to catch this pixel's fragments —
-so it belongs in a batch with the other questions: measured on the 1.4 GB hobby capture, the first call in a
+so it belongs in a batch with the other questions: measured on `desktop-2` (1.4 GB), the first call in a
 process costs ~4 s (it builds the instrumented pipelines) and each further one ~1 s, while two calls on
-`PC Renderer.rdc` cost ~2 s together.
+`desktop-1` cost ~2 s together.
 
 **The one verdict in it that is not a closed case.** On D3D12 the `sample masked` test is an instrumented
 re-draw of the event, and RenderDoc's own source carries `TODO: figure out if we always need to check this` over
-the flag that enables it. Measured on the hobby capture's 1-sample targets: every base-pass fragment comes back
+the flag that enables it. Measured on `desktop-2`'s 1-sample targets: every base-pass fragment comes back
 flagged, and one of them carries a *changed* `postMod` value in the same row. So the rows always print the
 values next to the verdict, and the document's `note` member (a key/value line in the header, in both formats)
 says which two to compare rather than letting the flag read as a closed case; a capture where nothing is flagged
-— `PC Renderer.rdc` — has an empty `note`, and the same pixel asked of the two captures is what shows which case
+— `desktop-1` — has an empty `note`, and the same pixel asked of the two captures is what shows which case
 a capture is.
 
 **The frame's pictures, and the one experiment (`sheet`, `imgdiff`, `patch`).** `sheet <rdc> [outDir]` renders
@@ -1410,7 +1496,7 @@ heat map. Like `bundle-verify`, it needs no device -- it runs inside a session, 
 depends on one.
 
 One consequence worth knowing, because it is a bundle-visible change and was measured rather than assumed: the
-display readback is **24-bit for some targets** (the hobby capture's 256x256 targets come back as 196,608 bytes,
+display readback is **24-bit for some targets** (`desktop-2`'s 256x256 targets come back as 196,608 bytes,
 three bytes per pixel), and such an image is now expanded to RGBA and written as a BMP -- where the old code
 handed the wrong byte count to `WriteBMP`, failed, and fell back to the engine's own PNG encoder. So a bundle's
 `rt/` set can now hold BMPs where it used to hold PNGs, with the same pixels: more images, not different ones.
@@ -1422,12 +1508,12 @@ difference here, and the writer's bytes are unchanged -- `WriteBMP` itself was m
 for *this replay device* with `BuildTargetShader`, substitutes it for the capture's own with `ReplaceResource`,
 clears the replay cache, re-runs the frame, and with `--compare` writes `before.bmp`, `after.bmp` and
 `diff.bmp` plus the same numbers `imgdiff` prints. `--dump` writes the shader's disassembly so there is
-something to read, `--encodings` prints what the target builds (measured on the hobby capture: **dxbc, dxil,
+something to read, `--encodings` prints what the target builds (measured on `desktop-2`: **dxbc, dxil,
 hlsl**), and every failure says which one it was -- an unbuildable encoding, a compiler message, or no shader of
 that stage bound at that event.
 
 **What is proven about `patch`, and what is not.** Proven: it builds HLSL/DXBC/DXIL for the target, dumps real
-disassembly (112 KB for one of the hobby capture's pixel shaders), compiles a hand-written replacement, reports
+disassembly (112 KB for one of `desktop-2`'s pixel shaders), compiles a hand-written replacement, reports
 the compiler's own message when one fails, installs the replacement, re-runs the frame, and writes the three
 images with an exact difference. **Not proven: that the replacement reaches the draw.** A pixel shader that
 `discard`s every pixel -- a change no bookkeeping can fake -- rendered byte-identically to the original at the
@@ -1469,7 +1555,7 @@ call it is -- and only then treat a `patch` render as evidence. Reporting this i
   no arithmetic), and it is how the measurements below were taken — the engine is a black box behind a
   call, so timing the calls is the only way to answer "why is this taking minutes".
 
-**What a bundle dump costs, measured.** On the 1.4 GB hobby capture, a full default dump (896 events
+**What a bundle dump costs, measured.** On `desktop-2` (1.4 GB), a full default dump (896 events
 collected out of 1,736 ids scanned, both bounded by the frame's last event): **47 ms per `SetFrameEvent`**,
 and it is the same 47 ms whether the id changes or not — the call re-derives the state, which is what costs.
 Everything else is small change: `GetD3D12PipelineState` returns a cached pointer (0.0 ms over 2,632 calls),
@@ -1493,7 +1579,7 @@ that matters for anyone tempted by it:
 
 > **Why the bundle reads the state twice per event.** The sweep refreshes each id to ask "is anything bound
 > here?", and the pass after it refreshes the same ids again to build the rows. Building the rows from what
-> the sweep had *already* read produces, for the hobby capture's first event, `"shaders": "cs=11388 "`,
+> the sweep had *already* read produces, for `desktop-2`'s first event, `"shaders": "cs=11388 "`,
 > `"targets": []`, `"depth": "0"` — where the second read gets `"ps=11402 cs=11388 ms=11368 "`, a 1920x1080
 > target and a depth buffer. The state a `SetFrameEvent` hands back depends on the *direction* the replay
 > travelled to reach that event: the second pass's first move is backwards from where the sweep stopped,
@@ -1528,5 +1614,5 @@ before an id is trusted, so a stale or truncated file is refused and the sweep r
 still makes **one** `SetFrameEvent` to the last scanned id before starting the writing pass, which is what
 reproduces the position the sweep would have left and keeps the state complete (without it, the warm bundle
 differed from the cold one in five files — the same trap as above, one call cheaper than falling into it).
-Measured on the hobby capture, `--max-events 300`: **94.7 s cold, 36.9 s warm**, both bundles byte-identical
+Measured on `desktop-2`, `--max-events 300`: **94.7 s cold, 36.9 s warm**, both bundles byte-identical
 to the cold one (143 files, no differing sha256).

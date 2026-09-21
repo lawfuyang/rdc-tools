@@ -1,0 +1,75 @@
+# memory <capture> 8
+# exit: 0
+--- stdout ---
+memory: 304 resource(s) referenced, 303 created by this capture, 2122 chunk(s) walked
+by placement
+  committed    58  ~216.3 MB   
+  placed      153  ~260.6 MB    in 8 heap(s) the capture creates (232.0 MB)
+  reserved      0  0.0 MB      
+  external      1  (referenced, not created here: a capture records the frame, and UE allocates at startup)
+  (a `~` figure counts a texture at 4 bytes a pixel -- a capture records no texture bytes -- so it need not agree with the heap sizes beside it)
+by kind
+  buffer      149  311.3 MB   
+  texture2d    43  ~157.4 MB    (~ = pixels x 4: a capture records no texture bytes)
+  blas         86  9.0 MB     
+  texture3d    19  ~8.2 MB      (~ = pixels x 4: a capture records no texture bytes)
+  tlas          6  0.0 MB     
+never read
+  52 resource(s), ~137.9 MB: written with nothing afterwards reading them, and 118 table binding(s) here resolve to nothing (the capture never wrote that heap slot): a resource read only through one of those looks unread
+    res60857[SceneColor]: last write #1818 (barrier)
+    res60858[GBufferA]: last write #1991 (barrier)
+    res60859[GBufferB]: last write #1991 (barrier)
+    res60860[GBufferC]: last write #1991 (barrier)
+    res60861[GBufferD]: last write #1991 (barrier)
+    res60862[GBufferE]: last write #1508 (rtv)
+    res61312[DeferredShadowMaskTexture]: last write #1600 (clear)
+    res61321[ScreenSpaceReflections]: last write #1991 (barrier)
+  216 resource(s), ~274.3 MB: created here and touched by no decoded chunk
+    res80125[Nanite.VisibleClustersSWHW]: created #610, placed
+    res80096[Nanite.MainAndPostNodesAndClusterBatches]: created #606, placed
+    res409[Resource Allocator Underlying Buffer]: created #111, committed
+    res80234[Resource Allocator Underlying Buffer]: created #622, committed
+    res275[m_ReadbackBuffer]: created #11, committed
+    res2255[FSlateFontTextureRHIResource]: created #156, placed
+    res60838[NaniteRayTracing.AuxiliaryDataBuffer]: created #270, placed
+    res2206[HitProxyCPUTexture]: created #133, committed
+aliasing
+  31 aliasing barrier(s) hand one piece of memory over, in order:
+    #926 res61044 -> res60843[SceneDepthZ]
+    #1178 res60848[NextCulledLightLink] -> res60864[Substrate.DummyWritableTexture]
+    #1195 res60853[CulledLightLinks] -> res61308[LightFunction.Atlas]
+    #1195 res60853[CulledLightLinks] -> res61309[HZBFurthest]
+    #1195 res60846[StartOffsetGrid] -> res61311[FRayTracingScene::ScratchBuffer]
+    #1195 res60853[CulledLightLinks] -> res61310[FRayTracingScene::InstanceBuffer]
+    #1423 res61311[FRayTracingScene::ScratchBuffer] -> res60863[Substrate.DummyWritableTexture]
+    #1554 res60864[Substrate.DummyWritableTexture] -> res61328[OIT.SampleData]
+  heap2263: 63 resource(s), ~215.3 MB in it, ~185.9 MB live at once (peak at #1187), so up to ~29.4 MB of it could be shared
+    disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
+      res60862[GBufferE] #934..#1508 and res61324[Translucency.AfterDOF.Color] #1761..#1818: ~9.6 MB
+      res60862[GBufferE] #934..#1508 and res61329[PostDOFTranslucency.SceneColor] #1785..#1831: ~9.6 MB
+      res61312[DeferredShadowMaskTexture] #935..#1600 and res61324[Translucency.AfterDOF.Color] #1761..#1818: ~9.6 MB
+      res61312[DeferredShadowMaskTexture] #935..#1600 and res61329[PostDOFTranslucency.SceneColor] #1785..#1831: ~9.6 MB
+      res60853[CulledLightLinks] #1187..#1195 and res61324[Translucency.AfterDOF.Color] #1761..#1818: ~2.5 MB
+      res60853[CulledLightLinks] #1187..#1195 and res61329[PostDOFTranslucency.SceneColor] #1785..#1831: ~2.5 MB
+      res60853[CulledLightLinks] #1187..#1195 and res61330[PostProcessing.SceneColor.HalfRes] #1786..#1847: ~2.4 MB
+      res60862[GBufferE] #934..#1508 and res61330[PostProcessing.SceneColor.HalfRes] #1786..#1847: ~2.4 MB
+  heap304: 78 resource(s), 23.3 MB in it, 22.6 MB live at once (peak at #1096), so up to 0.7 MB of it could be shared
+    disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60795[GPUScene.PrimitiveData] #1096..#1523: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60796[GPUScene.InstanceSceneData] #1096..#1523: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60797[GPUScene.InstancePayloadData] #1096..#1523: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60804[InstanceCulling.Compaction.BlockInstance] #1033..#1033: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60805[InstanceCullingLoadBalancer.Items] #884..#1371: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60844[InstanceCulling.DrawCommandDescs] #877..#1371: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60845[InstanceCulling.ViewIds] #878..#1371: 0.1 MB
+      res2253[EyeAdaptationBuffer] #1929..#2006 and res60850[InstanceCulling.BatchInds] #882..#1371: 0.1 MB
+  heap325: 3 resource(s), ~0.0 MB in it, ~0.0 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  heap2150: 5 resource(s), ~0.0 MB in it, ~0.0 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  4 heap(s) hold one resource each (~22.0 MB): nothing in them to share
+what this cannot prove
+  destruction: D3D12 writes no release to the stream, so every lifetime ends at the
+    frame's last use, and a resource created before the capture starts has no creation
+  a texture's bytes are not recorded: `~` marks every figure counted at 4 bytes a pixel
+  a buffer sub-allocated out of a UE page is named after the page (REFERENCE 4.9)
+  reads and writes this does not attribute: List_BuildRaytracingAccelerationStructure x2, List_ExecuteIndirect x10, List_ResolveQueryData x42, List_SetDescriptorHeaps x21
+--- stderr ---

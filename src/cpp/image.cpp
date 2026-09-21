@@ -429,7 +429,7 @@ bool ReadTargetImage(IReplayController *ctrl, ResourceId target, ImageData &img,
   else
   {
     // Three bytes per pixel: the display dropped the alpha channel (measured: a 256x256 target of
-    // the hobby capture comes back as 196,608 bytes). Expanded as R,G,B with an opaque alpha -- the
+    // `desktop-2` comes back as 196,608 bytes). Expanded as R,G,B with an opaque alpha -- the
     // bytes are the format's own order and a swap would be *visible* in the picture rather than
     // silent, which is why this is done rather than refusing the target outright.
     img.Reset(pixels * 4u, 255);

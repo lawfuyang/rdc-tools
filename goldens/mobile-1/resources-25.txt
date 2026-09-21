@@ -1,0 +1,31 @@
+# resources <capture> 25
+# exit: 0
+--- stdout ---
+resources: 57 ids (32 with a descriptor, 57 named)
+res13       unknown   -                                  3D Queue (GPU 0)
+res284      unknown   -                                  3D Queue Fence (GPU 0)
+res285      unknown   -                                  Copy Queue (GPU 0)
+res288      unknown   -                                  Compute Queue (GPU 0)
+res290      unknown   -                                  Compute Queue Fence (GPU 0)
+res298      unknown   -                                  GlobalResourceHeap
+res299      unknown   -                                  GlobalSamplerHeap
+res300      unknown   -                                  FD3D12OfflineDescriptorManager
+res301      unknown   -                                  FD3D12OfflineDescriptorManager
+res302      unknown   -                                  FD3D12OfflineDescriptorManager
+res304      unknown   -                                  PoolAllocator Heap
+res315      buffer    33554432 B                         Resource Allocator Underlying Buffer
+res322      unknown   -                                  FD3D12CommandList (GPU 0)
+res325      unknown   -                                  PoolAllocator Heap
+res326      texture2d 1x1x1 mips=1 fmt=R8G8B8A8_TYPELESS ColoredTexture
+res342      buffer    4194304 B                          Resource Allocator Underlying Buffer
+res386      unknown   -                                  Timestamp Query Heap
+res387      buffer    65536 B                            Timestamp Query Heap Result Buffer
+res628      buffer    4194304 B                          Fast Allocator Page
+res1818     unknown   -                                  PoolAllocator Heap
+res1907     buffer    4194304 B                          Resource Allocator Underlying Buffer
+res1928     buffer    65520 B                            GPUScene.LightData
+res2096     unknown   -                                  PoolAllocator Heap
+res2150     unknown   -                                  PoolAllocator Heap
+res2207     texture2d 2003x1254x1 mips=1 fmt=R10G10B10A2_UNORM BufferedRT
+total resources: 57 (shown 25)
+--- stderr ---

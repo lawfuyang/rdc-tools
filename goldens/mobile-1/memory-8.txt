@@ -1,0 +1,62 @@
+# memory <capture> 8
+# exit: 0
+--- stdout ---
+memory: 32 resource(s) referenced, 32 created by this capture, 723 chunk(s) walked
+by placement
+  committed    14  ~54.0 MB    
+  placed       18  ~50.9 MB     in 6 heap(s) the capture creates (296.0 MB)
+  reserved      0  0.0 MB      
+  external      0  (referenced, not created here: a capture records the frame, and UE allocates at startup)
+  (a `~` figure counts a texture at 4 bytes a pixel -- a capture records no texture bytes -- so it need not agree with the heap sizes beside it)
+by kind
+  texture2d    14  ~59.8 MB     (~ = pixels x 4: a capture records no texture bytes)
+  buffer       17  45.1 MB    
+  texture3d     1  ~0.0 MB      (~ = pixels x 4: a capture records no texture bytes)
+never read
+  13 resource(s), ~38.9 MB: written with nothing afterwards reading them, and 77 table binding(s) here resolve to nothing (the capture never wrote that heap slot): a resource read only through one of those looks unread
+    res2269[SceneColor]: last write #617 (barrier)
+    res2270[SceneDepthZ]: last write #571 (dsv)
+    res2273[Tonemap]: last write #691 (barrier)
+    res2207[BufferedRT]: last write #673 (barrier)
+    res2266[NumCulledLightsGrid]: last write #257 (clear)
+    res2233[SkyAtmosphere.TransmittanceLut]: last write #375 (barrier)
+    res24587[ForwardLocalLightBuffer]: last write #211 (copy-dst)
+    res24591[LightFunctionAtlasLightInfoData]: last write #214 (copy-dst)
+  9 resource(s), ~17.0 MB: created here and touched by no decoded chunk
+    res2255[FSlateFontTextureRHIResource]: created #77, placed
+    res2700[SkyTextureCube]: created #121, placed
+    res2267[CulledLightDataGrid]: created #83, placed
+    res2254[CombineLUTs]: created #75, committed
+    res387[Timestamp Query Heap Result Buffer]: created #39, committed
+    res9002[Timestamp Query Heap Result Buffer]: created #135, committed
+    res4766[Pipeline Statistics Query Heap Result Bu]: created #130, committed
+    res326[ColoredTexture]: created #32, placed
+aliasing
+  3 aliasing barrier(s) hand one piece of memory over, in order:
+    #249 res2704 -> res2270[SceneDepthZ]
+    #590 res2272 -> res2271
+    #590 res2271 -> res2273[Tonemap]
+  heap2263: 6 resource(s), ~34.0 MB in it, ~24.3 MB live at once (peak at #253), so up to ~9.7 MB of it could be shared
+    disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
+      res2270[SceneDepthZ] #250..#571 and res2273[Tonemap] #591..#691: ~9.6 MB
+      res2268[QuadOverdrawTexture] #253..#253 and res2273[Tonemap] #591..#691: ~4.8 MB
+      res2266[NumCulledLightsGrid] #257..#257 and res2268[QuadOverdrawTexture] #253..#253: ~0.1 MB
+      res2266[NumCulledLightsGrid] #257..#257 and res2273[Tonemap] #591..#691: ~0.1 MB
+  heap304: 8 resource(s), 0.5 MB in it, 0.2 MB live at once (peak at #214), so up to 0.3 MB of it could be shared
+    disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
+      res2253[EyeAdaptationBuffer] #217..#673 and res24587[ForwardLocalLightBuffer] #211..#211: 0.1 MB
+      res2253[EyeAdaptationBuffer] #217..#673 and res24591[LightFunctionAtlasLightInfoData] #214..#214: 0.1 MB
+      res2253[EyeAdaptationBuffer] #217..#673 and res24592[DUMMYLocalFogVolumeGPUInstanceDataBuffer] #215..#215: 0.1 MB
+      res2253[EyeAdaptationBuffer] #217..#673 and res24593[DUMMYLocalFogVolumeGPUInstanceCullingDat] #216..#216: 0.1 MB
+      res24587[ForwardLocalLightBuffer] #211..#211 and res24589[ViewSpacePosAndRadiusData] #212..#375: 0.1 MB
+      res24587[ForwardLocalLightBuffer] #211..#211 and res24590[ViewSpacePosAndRadiusData] #213..#375: 0.1 MB
+      res24587[ForwardLocalLightBuffer] #211..#211 and res24591[LightFunctionAtlasLightInfoData] #214..#214: 0.1 MB
+      res24587[ForwardLocalLightBuffer] #211..#211 and res24592[DUMMYLocalFogVolumeGPUInstanceDataBuffer] #215..#215: 0.1 MB
+  4 heap(s) hold one resource each (~16.4 MB): nothing in them to share
+what this cannot prove
+  destruction: D3D12 writes no release to the stream, so every lifetime ends at the
+    frame's last use, and a resource created before the capture starts has no creation
+  a texture's bytes are not recorded: `~` marks every figure counted at 4 bytes a pixel
+  a buffer sub-allocated out of a UE page is named after the page (REFERENCE 4.9)
+  reads and writes this does not attribute: List_ResolveQueryData x18, List_SetDescriptorHeaps x11
+--- stderr ---

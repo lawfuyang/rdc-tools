@@ -1062,7 +1062,7 @@ int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *pat
 
   // The one verdict here that is not a fact on its own. On D3D12 the sample-mask test is an
   // instrumented re-draw of the event -- RenderDoc's own source carries `TODO: figure out if we
-  // always need to check this` over the flag that enables it -- and measured on the hobby capture's
+  // always need to check this` over the flag that enables it -- and measured on `desktop-2`'s
   // 1-sample targets every base-pass fragment comes back flagged while one of them carries a
   // *changed* `postMod` value in the same row. So the rows print the values next to the verdict,
   // and this says which two to compare rather than letting `sample masked` read as a closed case.
@@ -1579,7 +1579,7 @@ int CmdCrosscheck(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // wrong twice over -- an id that is not a call has no state of its own to check (`SetFrameEvent`
   // answers at any id with whatever is still bound, so the same state comes back dozens of times),
   // and a stop-after-256 rule on a capture where 119 of 1736 ids are calls ends the walk inside the
-  // first marker. Measured on the hobby capture: 1736 ids, 119 calls.
+  // first marker. Measured on `desktop-2`: 1736 ids, 119 calls.
   std::vector<int> ids;
   if(eid > 0)
   {

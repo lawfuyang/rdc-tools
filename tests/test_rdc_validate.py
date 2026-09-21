@@ -256,6 +256,24 @@ class TestValidateCommand(unittest.TestCase):
         self.assertIn("required member 'bundleVersion' is missing", out)
         self.assertEqual(code, 1)
 
+    def test_a_document_with_a_repeated_key_is_refused_rather_than_read(self):
+        """The one check a schema cannot make: a plain parse keeps the *last* value of a repeated key and
+        says nothing, which is how a dropped vertex-shader block went unnoticed (ROADMAP §5)."""
+        self.write('manifest.json', minimal(self.schemas()['manifest']))
+        with open(os.path.join(self.tmp, 'events.json'), 'w', encoding='utf-8') as fh:
+            fh.write('{"capture": "c", "events": [], "vs": [], "vs": []}')
+        out, code = self.validate(self.tmp, SCHEMA_DIR)
+        self.assertTrue(line_with(out, 'events.json').startswith('FAIL'), out)
+        self.assertIn('appears twice', out)
+        self.assertEqual(code, 1)
+
+    def test_the_duplicate_key_hook_is_usable_on_its_own(self):
+        with self.assertRaises(ValueError) as caught:
+            json.loads('{"a": 1, "a": 2}', object_pairs_hook=R.no_duplicate_keys)
+        self.assertIn("'a'", str(caught.exception))
+        self.assertEqual(json.loads('{"a": 1, "b": {"c": 2}}', object_pairs_hook=R.no_duplicate_keys),
+                         {'a': 1, 'b': {'c': 2}})
+
     def test_a_file_needs_a_kind_and_the_error_says_so(self):
         path = self.write('t.json', {})
         out, code = self.validate(path, SCHEMA_DIR)

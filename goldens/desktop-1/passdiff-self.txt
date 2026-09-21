@@ -1,0 +1,52 @@
+# passdiff <capture> <capture>
+# exit: 0
+--- stdout ---
+A         : <capture>
+B         : <capture>
+passes    : 71 in A, 71 in B (a pass is a marker with a call inside it)
+verdicts  : added 0, removed 0, renamed? 0, 71 path(s) in both
+--- in both, by pass path ---
+#     chunks A         chunks B         calls A  calls B  pass
+1     925..948         925..948         1        1        FRDGBuilder::Execute > ClearGPUMessageBuffer
+2     956..960         956..960         1        1        FRDGBuilder::Execute > ShaderPrint::UploadParameters
+3     1035..1041       1035..1041       1        1        FRDGBuilder::Execute > Scene > Scene > BuildRenderingCommandsDeferred(Culling=On) > ClearIndirectArgInstanceCount
+4     1043..1052       1043..1052       1        1        FRDGBuilder::Execute > Scene > Scene > BuildRenderingCommandsDeferred(Culling=On) > CullInstances(Generic)
+5     1054..1062       1054..1062       1        1        FRDGBuilder::Execute > Scene > Scene > BuildRenderingCommandsDeferred(Culling=On) > CullInstances(UnCulled)
+6     1027..1062       1027..1062       3        3        FRDGBuilder::Execute > Scene > Scene > BuildRenderingCommandsDeferred(Culling=On)
+7     1077..1098       1077..1098       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+8     1100..1103       1100..1103       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+9     1105..1108       1105..1108       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+10    1110..1113       1110..1113       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+11    1115..1118       1115..1118       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+12    1120..1129       1120..1129       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere 5 instances
+13    1131..1134       1131..1134       1        1        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Cube 4 instances
+14    1075..1134       1075..1134       7        7        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel
+15    1074..1134       1074..1134       7        7        FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite)
+16    1164..1175       1164..1175       1        1        FRDGBuilder::Execute > Scene > Scene > ComputeLightGrid > CullLights 22x14x8 NumLights 0 NumCaptures 0 > LightGridInject:LinkedList
+17    1177..1188       1177..1188       1        1        FRDGBuilder::Execute > Scene > Scene > ComputeLightGrid > CullLights 22x14x8 NumLights 0 NumCaptures 0 > CompactLinks
+18    1141..1188       1141..1188       2        2        FRDGBuilder::Execute > Scene > Scene > ComputeLightGrid > CullLights 22x14x8 NumLights 0 NumCaptures 0
+19    1140..1188       1140..1188       2        2        FRDGBuilder::Execute > Scene > Scene > ComputeLightGrid
+20    1210..1222       1210..1222       1        1        FRDGBuilder::Execute > Scene > Scene > BuildHZB(ViewId=0) > BuildHZB > ReduceHZB(mips=[0;3] Furthest) 1024x512
+21    1224..1231       1224..1231       1        1        FRDGBuilder::Execute > Scene > Scene > BuildHZB(ViewId=0) > BuildHZB > ReduceHZB(mips=[4;7] Furthest) 64x32
+22    1233..1241       1233..1241       1        1        FRDGBuilder::Execute > Scene > Scene > BuildHZB(ViewId=0) > BuildHZB > ReduceHZB(mips=[8;9] Furthest) 4x2
+23    1209..1241       1209..1241       3        3        FRDGBuilder::Execute > Scene > Scene > BuildHZB(ViewId=0) > BuildHZB
+24    1208..1241       1208..1241       3        3        FRDGBuilder::Execute > Scene > Scene > BuildHZB(ViewId=0)
+25    1246..1255       1246..1255       1        1        FRDGBuilder::Execute > Scene > Scene > SkyAtmosphereLUTs > TransmittanceLut
+26    1257..1268       1257..1268       1        1        FRDGBuilder::Execute > Scene > Scene > SkyAtmosphereLUTs > MultiScatteringLut
+27    1270..1282       1270..1282       1        1        FRDGBuilder::Execute > Scene > Scene > SkyAtmosphereLUTs > DistantSkyLightLut
+28    1284..1290       1284..1290       1        1        FRDGBuilder::Execute > Scene > Scene > SkyAtmosphereLUTs > SkyViewLut
+29    1292..1305       1292..1305       1        1        FRDGBuilder::Execute > Scene > Scene > SkyAtmosphereLUTs > CameraVolumeLut
+30    1245..1305       1245..1305       5        5        FRDGBuilder::Execute > Scene > Scene > SkyAtmosphereLUTs
+31    1331..1347       1331..1347       2        2        FRDGBuilder::Execute > Scene > Scene > BuildTLASInstanceBuffer
+32    1425..1449       1425..1449       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Game/Developers/rogerfylaw/M_Red.M_Red Cube
+33    1451..1462       1451..1462       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+34    1464..1467       1464..1467       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+35    1469..1472       1469..1472       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+36    1474..1477       1474..1477       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+37    1479..1482       1479..1482       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+38    1484..1492       1484..1492       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere 5 instances
+39    1494..1501       1494..1501       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube 2 instances
+40    1503..1508       1503..1508       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
+  ... 31 more (--all prints every row)
+note      : chunk indices are the file's numbering, not the engine's event ids (REFERENCE �9): `replay_dump draws` prints the engine's own, and both take a marker path
+--- stderr ---

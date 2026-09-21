@@ -48,6 +48,8 @@ Usage:
   python rdc_analysis.py build    [--check]                # are the built artefacts (bin/replay_dump.exe,
                                                           #   bin/rdc_lz4.dll) older than their sources,
                                                           #   and build them (`--check` only reports)
+  python rdc_analysis.py goldens  [--check|--write] [--capture <name>] [--corpus <file>] [--verbose]
+                                                         # the corpus's transcripts and labels (goldens/)
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
 
 Speed (REFERENCE 4.13): the one decode a capture needs is 0.5 s, through `bin/rdc_lz4.dll` -- the same
@@ -106,7 +108,9 @@ from rdc_renderdoc_src import (BootstrapError as BootstrapError,
 from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPORT_SCHEMA,
                          SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,
-                         load_schemas as load_schemas, schema_for_file as schema_for_file,
+                         load_document as load_document, load_schemas as load_schemas,
+                         no_duplicate_keys as no_duplicate_keys,
+                         schema_for_file as schema_for_file,
                          validate_document as validate_document)
 
 from rdc_types import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -125,6 +129,7 @@ from rdc_uses import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_profile import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_driver import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_goldens import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 
 def _filter_suite(suite: unittest.TestSuite, patterns: Sequence[str]) -> unittest.TestSuite:
     """Keep only the tests whose id contains one of `patterns` (like `unittest -k`)."""
@@ -239,6 +244,8 @@ def _dispatch() -> None:
         sys.exit(cmd_bootstrap(argv[2:]))
     if len(argv) > 1 and argv[1] == 'build':
         sys.exit(cmd_build(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'goldens':
+        sys.exit(cmd_goldens(argv[2:]))
     if len(argv) < 3:
         print(__doc__)
         return

@@ -119,7 +119,7 @@ std::string MarkerPathAt(IReplayController *ctrl, int eid)
 
 //: Whether each event id is a *dispatch* rather than a draw, from the engine's own action list.
 //:
-//: Two wrong ways to get this, both measured. The bound shaders: `PC Renderer.rdc` has a compute
+//: Two wrong ways to get this, both measured. The bound shaders: `desktop-1` has a compute
 //: shader bound at every one of its 2132 events, so "a cs is bound" called a frame of draws compute
 //: -- which is what this field did before, and the offline tool then grouped draws into compute
 //: passes. The structured file's own numbering: the action tree numbers its objects by *chunk

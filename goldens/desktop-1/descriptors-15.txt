@@ -1,0 +1,23 @@
+# descriptors <capture> 15
+# exit: 0
+--- stdout ---
+descriptor heaps: 2, 16 written slots
+heap298 GlobalResourceHeap
+  [279336   ] uav      res60823[VirtualTextureFeedbackGP]
+  [279337   ] uav      res60804[InstanceCulling.Compacti]
+  [279380   ] uav      res60846[StartOffsetGrid]
+  [279381   ] uav      res60848[NextCulledLightLink]
+  [279382   ] uav      res60849[NextCulledLightData]
+  [279383   ] uav      res60851[NumCulledLightsGrid]
+  [279422   ] srv      res384[Resource Allocator Under]
+  [279423   ] srv      res342[Resource Allocator Under]
+  [279425   ] srv      res384[Resource Allocator Under]
+  [279426   ] srv      res342[Resource Allocator Under]
+  [279427   ] srv      res384[Resource Allocator Under]
+  [279458   ] uav      res60886[InstanceCulling.Compacti]
+heap300 FD3D12OfflineDescriptorManager
+  [831      ] srv      res384[Resource Allocator Under]
+  [832      ] srv      res384[Resource Allocator Under]
+  [941      ] srv      res342[Resource Allocator Under]
+total slots: 16 (shown 15)
+--- stderr ---

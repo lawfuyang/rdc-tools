@@ -31,7 +31,7 @@ def report_caveats() -> List[str]:
         'event, not what the shader made of it.',
         'Twenty detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
         'state, one over the resource table and three over the capture\'s chunk stream -- and every finding '
-        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §6). '
+        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §5). '
         'What is not checked at all is stated rather than approximated: MSAA\'s *which '
         'subresource did the resolve copy* half needs the ResolveSubresource payload, and the sRGB/linear half '
         'of the format rule needs a later sampling view\'s sRGB flag -- neither is in a bundle. The pipeline '
@@ -56,7 +56,7 @@ def report_caveats() -> List[str]:
         'debugging is a capture property, not a bundle one: nothing here can say what a shader computed from '
         'its inputs, only what it was bound to.',
         'The frame was replayed on this machine\'s GPU: the capture properties in the bundle say whether the '
-        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §7, '
+        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §5, '
         'remote replay). A pass is also not a *dispatch* of work in the engine\'s own terms -- the report groups '
         'events, and the engine\'s own pass structure is only as close as its markers are.',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
@@ -440,7 +440,7 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('')
     lines.append('`certain` means the bundle proves the observation; `question` would mean the observation is '
                  'real but its meaning depends on what the frame was for. Every finding is **unproven**: none '
-                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §6), '
+                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §5), '
                  'so they are leads, not verdicts.')
     lines.append('')
     lines.extend(_severity_block(doc['severityTable']))
@@ -491,7 +491,7 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('Every row in this report carries the event id or the resource id it is about -- a pass by its '
                  'eid range, a resource by its `res` id, a finding by the evidence on its own row -- and the '
                  'recommendations carry the command that shows each one. A row that could not cite either would '
-                 'be a claim without evidence, and the suite fails on one (ROADMAP §6).')
+                 'be a claim without evidence, and the suite fails on one (ROADMAP §5).')
     lines.append('')
     lines.append('A usage finding is checked the same way: `replay_dump usage \'%s\' <resId>` prints the same '
                  'list the detectors read (the engine\'s own `GetUsage`).' % _md(rdc))

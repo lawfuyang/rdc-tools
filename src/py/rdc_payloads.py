@@ -248,8 +248,8 @@ def parse_barrier_groups(blob: Buffer) -> Optional[List[GroupBarrier]]:
     records with the resource inside them -- 60 bytes for a texture barrier (`SyncBefore`,
     `SyncAfter`, `AccessBefore`, `AccessAfter`, `LayoutBefore`, `LayoutAfter`, the resource, a
     24-byte subresource range and the flags) and 40 for a buffer one (the same access words, the
-    resource, the offset and the size). Measured on all 91 `List_Barrier` payloads of the hobby
-    capture: every walk lands at the end.
+    resource, the offset and the size). Measured on all 91 `List_Barrier` payloads of `desktop-2`:
+    every walk lands at the end.
     """
     if len(blob) < 20:
         return None
@@ -314,7 +314,7 @@ def parse_targets(blob: Buffer) -> Optional[Tuple[List[int], int]]:
     [DSV descriptor]`: the call serialises the descriptors themselves rather than handles, which is
     why this is a walk and not two field reads (`D3D12Descriptor` in d3d12_serialise.cpp). The depth
     target is 0 when the call bound none. Measured on the 25 payloads of the two captures here --
-    16 in the PC capture and 9 in the hobby one -- every walk lands at its payload's end.
+    16 in `desktop-1` and 9 in `desktop-2` -- every walk lands at its payload's end.
     """
     if len(blob) < 21:
         return None

@@ -1,0 +1,41 @@
+{
+  "name": "mobile-1",
+  "detectors": {
+    "marker-imbalance": 0,
+    "unattributed-draws": 0,
+    "zero-work": 0
+  },
+  "report": {
+    "events": 445,
+    "passes": 12,
+    "resources": 133,
+    "findings": 35,
+    "detectors": 20
+  },
+  "findings": {
+    "all-zero-constant-block": 7,
+    "binding-kind-mismatch": 1,
+    "dead-compute": 4,
+    "load-instead-of-clear": 1,
+    "read-before-write": 2,
+    "unbound-root-parameter": 14,
+    "write-never-read": 6
+  },
+  "selfAb": {
+    "same": 12,
+    "removed": 0,
+    "added": 0,
+    "structureChanges": 0,
+    "stateChanges": 0,
+    "constantsChanged": 0,
+    "shadersDifferent": 0,
+    "imagesCompared": 0,
+    "imagesNotCompared": 0
+  },
+  "document": "selfab.json",
+  "why": [
+    "the mobile frame is 445 ids with bound state against the desktop frame's 1186, and 12 passes against 47: the two numbers are the shortest statement of what the pair is",
+    "the findings histogram differs from the desktop frame's in kind as well as in count -- one `load-instead-of-clear` here and none there, and no `depth-logic` -- which is why the histogram is the label and not the total",
+    "14 unbound root parameters out of 35 findings is the mobile frame's characteristic shape: a stripped reflection over a signature the state does set, which is an observation the report states as one"
+  ]
+}

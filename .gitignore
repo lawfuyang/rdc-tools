@@ -6,3 +6,7 @@ bin/
 *.pyc
 *.log
 __pycache__/
+
+# The corpus names its captures by key and digest; this file says where this machine's copies are (a path
+# is local state, and a capture's file name can name the frame it came from), so it is not shared.
+goldens/captures.local.json

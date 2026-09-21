@@ -16,7 +16,7 @@ CONSTANT_BLOCK_ROW = re.compile(r'\bb(?P<reg>\d+)\s+s(?P<space>\d+)\b')
 #: `rp0   reg=0 space=0 vis=cs heap298+0x21cde` for a table, or -- for one that is *not set to anything* --
 #: `rp1   reg=0 space=0 vis=ps` and nothing more. `vis=` is optional on purpose: a bundle written by an
 #: earlier driver has no visibility, and its rows are then taken as serving every stage, which is what the
-#: tool assumed before the token existed. The visibility is not decoration -- measured on `PC Renderer.rdc`
+#: tool assumed before the token existed. The visibility is not decoration -- measured on `desktop-1`
 #: at eid 640, the vertex and pixel shaders both declare `t0`..`t4` and each is served by its own table, so
 #: a row without it cannot be matched against the reflection.
 ROOT_PARAMETER_ROW = re.compile(r'^rp(?P<param>\d+)\s+reg=(?P<reg>\d+)\s+space=(?P<space>\d+)'
@@ -189,7 +189,7 @@ def detect_unbound_table_slots(bundle: BundleData) -> List[RedFlag]:
     as zeros, so the stage reads zeros rather than data -- and unlike the root-descriptor half above there is
     no second explanation to weigh, which is why this one is certain.
 
-    Only rows from a parameter *visible* to the reading stage are matched: measured at `PC Renderer.rdc`
+    Only rows from a parameter *visible* to the reading stage are matched: measured at `desktop-1`
     eid 640, the vertex and pixel shaders both declare `t0`..`t4`, each served by its own table. A table that
     was never set prints no slot rows at all, so this rule stays silent there and the half above keeps its
     own, weaker finding instead.
@@ -321,7 +321,7 @@ def _pair(semantic: Tuple[str, int, Optional[int], str]) -> Tuple[str, int]:
 def _semantic_matches(produced: Tuple[str, int], consumed: Tuple[str, int]) -> bool:
     """Whether one side's semantic serves the other's, ignoring an interpolation suffix on either.
 
-    `TEXCOORD10_centroid0` and `TEXCOORD10` are the same semantic -- measured on `PC Renderer.rdc` at eid 700,
+    `TEXCOORD10_centroid0` and `TEXCOORD10` are the same semantic -- measured on `desktop-1` at eid 700,
     where the vertex shader emits `TEXCOORD10_centroid0` and the pixel shader reads exactly that, so the
     suffix is not what distinguishes them. The suffix is only removed when the base name matches the other
     side, so this can never invent a match that is not there.
@@ -346,7 +346,7 @@ def detect_shader_io_mismatch(bundle: BundleData) -> List[RedFlag]:
       the reason the rule ignores `SV_` on both sides). A vertex shader emitting *more* than the pixel shader
       reads is legal and never reported.
     * **The same semantic at a greater width.** The driver's rows carry the engine's component count
-      (`c4`, `c3`, `c1`; measured on `PC Renderer.rdc`, where `TEXCOORD9` is c3 and `SV_Position0` is c4), and
+      (`c4`, `c3`, `c1`; measured on `desktop-1`, where `TEXCOORD9` is c3 and `SV_Position0` is c4), and
       an input that reads *more* components of a semantic than its producer writes cannot be satisfied at
       pipeline creation. Reading *fewer* is a legal prefix subset and stays silent. The component *type*
       (float against uint) is not in the row, so a type-level mismatch is not reported: the row says what it

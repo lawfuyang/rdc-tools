@@ -1,7 +1,7 @@
 """The whole-stream string scan, split across processes (REFERENCE 4.13).
 
 Two commands -- `strings` and `names` -- scan every byte of the frame stream with one regex, and that
-single `re` call is the whole cost of the command: measured on the 1.47 GB hobby capture, 14.5 s of a
+single `re` call is the whole cost of the command: measured on `desktop-2` (1.47 GB), 14.5 s of a
 17.6 s run, at ~100 MB/s. Nothing around it matters (the container is 0.4 s, counting and
 de-duplicating the 588,900 matches 0.3 s), and no cache can help a first look.
 A third kind of scan is not a string run at all: the DXBC container search that `draws`, `rootsig`, `dxbc`
@@ -39,7 +39,7 @@ from typing import Dict, List, Optional, Tuple
 #: Below this a pool costs more than it saves: the spawn is ~0.5 s, the scan of a smaller stream less.
 MIN_BYTES = 64 << 20
 #: Slices, i.e. the cap on workers -- never more than the cores there are, and the sweep that picked
-#: this (REFERENCE 4.13) is on the hobby capture: 8 slices 7.3 s, 16 slices 5.3 s, 32 slices 4.0 s for
+#: this (REFERENCE 4.13) is on `desktop-2`: 8 slices 7.3 s, 16 slices 5.3 s, 32 slices 4.0 s for
 #: `minlen=6`, and 4.9 / 3.1 / 2.2 s for `minlen=10`, each including the spawn.
 MAX_SLICES = 32
 #: How far a slice boundary may be pushed to find a byte no match can cross. A longer printable run
@@ -51,8 +51,8 @@ SERIAL_WINDOW = 128 << 20
 
 #: A byte-pattern find costs a *pool* to parallelise, and a pool costs 0.48 s here (every worker is a
 #: fresh interpreter, 0.37 s of that its own startup -- see `MIN_BYTES`), so it only pays where the find
-#: is long enough. Measured on the two captures in this repository: the 1.47 GB hobby stream goes
-#: 1.25 s -> 0.67 s in 16 or 32 slices, while the 631 MB PC stream goes 0.53 s -> 0.62 s, i.e. *slower*.
+#: is long enough. Measured on the desktop captures: `desktop-2`'s 1.47 GB stream goes
+#: 1.25 s -> 0.67 s in 16 or 32 slices, while `desktop-1`'s 631 MB goes 0.53 s -> 0.62 s, i.e. *slower*.
 #: Hence a gigabyte -- sixteen times the string scan's threshold, because that scan is 14 s where this
 #: one is 1 s -- and the serial loop below it, which is what every caller got before this existed.
 FIND_MIN_BYTES = 1 << 30

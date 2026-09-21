@@ -366,7 +366,7 @@ class TestReportDocument(BundleCase):
         self.assertEqual(len(self.document(bundle)['caveats']), len(R.report_caveats()))
 
     def test_the_json_twin_is_schema_valid(self):
-        """The report's own schema against the document it describes (the acceptance gate of ROADMAP §6).
+        """The report's own schema against the document it describes (the acceptance gate of ROADMAP §5).
 
         The schema lives in `rdc_schemas.py` rather than in `schema/`, because that folder is what the driver
         publishes and the driver does not write this document. It is exhaustive and closed, so a member a
@@ -397,7 +397,7 @@ class TestReportDocument(BundleCase):
         # ranking's unavailable inputs (the action list) and the counters (the frame's pictures and counters).
         # The marker path is no longer one of the gaps -- the driver records it -- so the caveat speaks of the
         # *bundle's* age instead, which is what the last needle checks.
-        for needle in ('ROADMAP §6', 'ROADMAP §1', 'ROADMAP §3'):
+        for needle in ('ROADMAP §5', 'ROADMAP §1', 'ROADMAP §3'):
             self.assertIn(needle, text)
         self.assertIn('as of 2026-09-17', text)
         # The vocabulary's own two limits: what a name can say, and which names exist at all.
@@ -638,7 +638,7 @@ class TestReportRecommendations(BundleCase):
 
 
 class TestReportEvidence(BundleCase):
-    """ROADMAP §6: no claim without evidence -- every row says which event or resource it is about."""
+    """ROADMAP §5: no claim without evidence -- every row says which event or resource it is about."""
 
     def test_every_row_of_every_section_cites_an_event_or_a_resource(self):
         bundle = self.path('b')
@@ -855,7 +855,7 @@ class TestReportDetectors(BundleCase):
         self.assertEqual(empty, [], 'an empty slot is the other detector\'s finding, not a mismatch')
 
     def test_the_measured_vertex_and_pixel_signature_pair_does_not_fire(self):
-        """The real rows from `PC Renderer.rdc` at eid 700, and the same window's rows with their widths.
+        """The real rows from `desktop-1` at eid 700, and the same window's rows with their widths.
 
         The vertex shader emits five semantics and the pixel shader reads six; the extra one is
         `SV_IsFrontFace`, which the rasteriser supplies. That is why the rule ignores `SV_` on both sides --

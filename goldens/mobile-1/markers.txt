@@ -1,0 +1,61 @@
+# markers <capture>
+# exit: 0
+--- stdout ---
+#188    PushMarker       MobileSceneRender
+#190    PushMarker       InitViews
+#194    PushMarker       FRDGBuilder::Execute
+#240    PushMarker       MobileSceneRender
+#241    PushMarker       Niagara::GPUProfiler_BeginFrame
+#244    PushMarker       UpdateDirectionalLightUniformBuffers
+#246    PushMarker       ComputeLightGrid
+#247    PushMarker       CullLights 32x20x8 NumLights 0 NumCaptures 0
+#248    PushMarker       ClearBuffer(NumCulledLightsGrid Size=81920bytes)
+#259    PushMarker       LightGridInject:NotLinkedList
+#274    PushMarker       FFXSystem::PreRender
+#276    PushMarker       GPUParticles_PreRender
+#279    PushMarker       FGPUSortManager::OnPreRender
+#282    PushMarker       SkyAtmosphereLUTs
+#283    PushMarker       TransmittanceLut
+#293    PushMarker       MultiScatteringLut
+#306    PushMarker       DistantSkyLightLut
+#320    PushMarker       SkyViewLut
+#328    PushMarker       CameraVolumeLut
+#352    PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
+#358    PushMarker       MobileSceneRender
+#359    PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
+#366    PushMarker       PollOcclusionQueries
+#408    PushMarker       SceneColorRendering
+#426    PushMarker       MobileRenderPrePass
+#428    PushMarker       MobileBasePass
+#429    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#454    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#461    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#468    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#475    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#482    PushMarker       /Game/Developers/rogerfylaw/M_Red.M_Red Cube
+#505    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#516    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#523    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
+#532    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
+#539    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#548    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#555    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#562    PushMarker       /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
+#573    PushMarker       DynamicEd
+#577    PushMarker       DecalsAndTranslucency
+#578    PushMarker       ShadowProjectionOnOpaque
+#580    PushMarker       Translucency
+#583    PushMarker       Niagara::PostRenderFinish
+#585    PushMarker       FGPUSortManager::OnPostRenderOpaque
+#587    PushMarker       PostProcessing
+#588    PushMarker       Tonemap 2003x1254 (PS GammaOnly=0)
+#609    PushMarker       FXAA(Quality=0) 2003x1254 PS
+#621    PushMarker       RenderFinish
+#622    PushMarker       CanvasFlush
+#623    PushMarker       CanvasBatchedElements
+#637    PushMarker       EndScene
+#640    PushMarker       PollOcclusionQueries
+#642    PushMarker       ExtractUniformBuffer
+#645    PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
+#652    PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
+--- stderr ---

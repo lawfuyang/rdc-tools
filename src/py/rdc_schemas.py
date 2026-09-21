@@ -283,6 +283,30 @@ def validate_document(doc: Any, schema: Dict[str, Any], path: str = '$') -> List
             errors.extend(validate_document(item, schema['items'], '%s[%d]' % (path, index)))
     return errors
 
+def no_duplicate_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    """A `json` object hook that refuses an object with a repeated key.
+
+    A plain `json.load` keeps the *last* value of a repeated key and says nothing, which is how a dropped
+    vertex-shader block went unnoticed once (two `"vs"` members, the second winning the first's place).
+    The hook is what makes a document's own redundancy a validation failure rather than a silent choice --
+    and it is the one check a *schema* cannot make, because by the time the schema sees the object the
+    repetition is already gone.
+    """
+    seen: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError('the key %r appears twice in one object (a JSON reader keeps the last one)'
+                             % key)
+        seen[key] = value
+    return seen
+
+
+def load_document(path: str) -> Any:
+    """One JSON document, read so a repeated key is a *failure* (`no_duplicate_keys`)."""
+    with open(path, encoding='utf-8-sig') as fh:
+        return json.load(fh, object_pairs_hook=no_duplicate_keys)
+
+
 def load_schemas(schema_dir: str) -> Dict[str, Dict[str, Any]]:
     """The schemas in a directory (or a single schema file), keyed by kind.
 
@@ -391,9 +415,10 @@ def cmd_validate(path: str, schema_dir: str, name: Optional[str] = None) -> int:
             failed += 1
             continue
         try:
-            with open(full, encoding='utf-8-sig') as fh:
-                doc = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
+            doc = load_document(full)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            # `ValueError` is the duplicate-key hook: a document with a repeated key is not read, because
+            # the object a plain parse would hand the schema is not the object the file holds.
             print('FAIL %-40s not readable as JSON: %s' % (shown, exc))
             failed += 1
             continue

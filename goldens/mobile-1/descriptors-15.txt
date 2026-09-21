@@ -1,0 +1,10 @@
+# descriptors <capture> 15
+# exit: 0
+--- stdout ---
+descriptor heaps: 2, 2 written slots
+heap298 GlobalResourceHeap
+  [138455   ] uav      res2266[NumCulledLightsGrid]
+heap300 FD3D12OfflineDescriptorManager
+  [533      ] uav      res2266[NumCulledLightsGrid]
+total slots: 2 (shown 2)
+--- stderr ---

@@ -1,0 +1,135 @@
+# markers <capture>
+# exit: 0
+--- stdout ---
+#852    PushMarker       FRDGBuilder::Execute
+#925    PushMarker       ClearGPUMessageBuffer
+#950    PushMarker       VirtualTextureClear
+#956    PushMarker       ShaderPrint::UploadParameters
+#962    PushMarker       Scene
+#963    PushMarker       Niagara::GPUProfiler_BeginFrame
+#967    PushMarker       AccessModePass[Graphics] (Textures: 0, Buffers: 1)
+#973    PushMarker       Scene
+#974    PushMarker       AccessModePass[AsyncCompute] (Textures: 0, Buffers: 1)
+#1019   PushMarker       FFXSystem::PreRender
+#1021   PushMarker       GPUParticles_PreRender
+#1024   PushMarker       FGPUSortManager::OnPreRender
+#1027   PushMarker       BuildRenderingCommandsDeferred(Culling=On)
+#1028   PushMarker       ClearBuffer(InstanceCulling.Compaction.BlockInstanceCounts Size=4bytes)
+#1035   PushMarker       ClearIndirectArgInstanceCount
+#1043   PushMarker       CullInstances(Generic)
+#1054   PushMarker       CullInstances(UnCulled)
+#1064   PushMarker       Instance Compaction Phase 1
+#1066   PushMarker       Instance Compaction Phase 2
+#1069   PushMarker       ClearDepthStencil (SceneDepthZ)
+#1074   PushMarker       PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite)
+#1075   PushMarker       DepthPassParallel
+#1077   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+#1100   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+#1105   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+#1110   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+#1115   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
+#1120   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere 5 instances
+#1131   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Cube 4 instances
+#1137   PushMarker       EditorPrimitives
+#1140   PushMarker       ComputeLightGrid
+#1141   PushMarker       CullLights 22x14x8 NumLights 0 NumCaptures 0
+#1142   PushMarker       ClearBuffer(StartOffsetGrid Size=40960bytes)
+#1149   PushMarker       ClearBuffer(NextCulledLightLink Size=4bytes)
+#1154   PushMarker       ClearBuffer(NextCulledLightData Size=4bytes)
+#1159   PushMarker       ClearBuffer(NumCulledLightsGrid Size=81920bytes)
+#1164   PushMarker       LightGridInject:LinkedList
+#1177   PushMarker       CompactLinks
+#1192   PushMarker       LightFunctionAtlas Generation
+#1208   PushMarker       BuildHZB(ViewId=0)
+#1209   PushMarker       BuildHZB
+#1210   PushMarker       ReduceHZB(mips=[0;3] Furthest) 1024x512
+#1224   PushMarker       ReduceHZB(mips=[4;7] Furthest) 64x32
+#1233   PushMarker       ReduceHZB(mips=[8;9] Furthest) 4x2
+#1245   PushMarker       SkyAtmosphereLUTs
+#1246   PushMarker       TransmittanceLut
+#1257   PushMarker       MultiScatteringLut
+#1270   PushMarker       DistantSkyLightLut
+#1284   PushMarker       SkyViewLut
+#1292   PushMarker       CameraVolumeLut
+#1316   PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
+#1322   PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
+#1329   PushMarker       CommitRayTracingSkinnedGeometryUpdates
+#1331   PushMarker       BuildTLASInstanceBuffer
+#1349   PushMarker       RayTracingDynamicUpdate
+#1354   PushMarker       RayTracingUpdate
+#1361   PushMarker       RayTracingEndUpdate
+#1412   PushMarker       GBufferClear
+#1420   PushMarker       BasePass
+#1421   PushMarker       BasePassParallel
+#1425   PushMarker       /Game/Developers/rogerfylaw/M_Red.M_Red Cube
+#1451   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#1464   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#1469   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#1474   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#1479   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+#1484   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere 5 instances
+#1494   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube 2 instances
+#1503   PushMarker       /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
+#1511   PushMarker       EditorPrimitives
+#1512   PushMarker       SDPG_World
+#1515   PushMarker       SkyPassParallel
+#1541   PushMarker       ShadowDepths
+#1542   PushMarker       BuildRenderingCommandsDeferred(Culling=On)
+#1543   PushMarker       ClearBuffer(InstanceCulling.Compaction.BlockInstanceCounts Size=4bytes)
+#1551   PushMarker       ClearIndirectArgInstanceCount
+#1553   PushMarker       CullInstances(Generic)
+#1560   PushMarker       CullInstances(UnCulled)
+#1562   PushMarker       Instance Compaction Phase 1
+#1564   PushMarker       Instance Compaction Phase 2
+#1568   PushMarker       DispatchToRHI
+#1594   PushMarker       ClearStencil (SceneDepthZ)
+#1597   PushMarker       WaitForRayTracingScene
+#1599   PushMarker       ClearRenderTarget(DeferredShadowMaskTexture, slice 0, mip 0) 2004x1256 ClearAction
+#1602   PushMarker       ClearTranslucencyLightingVolumeCompute 64
+#1611   PushMarker       DitheredLODFadingOutMask
+#1614   PushMarker       FilterTranslucentVolume 64x64x64 Cascades:2
+#1615   PushMarker       Cascade0
+#1635   PushMarker       Cascade1
+#1649   PushMarker       ReflectionIndirect
+#1650   PushMarker       ScreenSpaceReflections(Quality=2)
+#1651   PushMarker       SSR RayMarch(Quality=2 RayPerPixel=1) 1368x856
+#1672   PushMarker       ReflectionEnvironmentAndSky(1368x856,SubstrateMat=Off)
+#1692   PushMarker       SkyAtmosphere
+#1712   PushMarker       SetSceneTexturesUniformBuffer
+#1716   PushMarker       FFXSystem::PostRenderOpaque
+#1718   PushMarker       GPUParticles_PostRenderOpaque
+#1721   PushMarker       AsyncGpuTraceHelper::PostRenderOpaque
+#1723   PushMarker       NiagaraUpdateCollisionGroupsMap
+#1726   PushMarker       Niagara::PostRenderFinish
+#1728   PushMarker       UnsetSceneTexturesUniformBuffer
+#1730   PushMarker       FGPUSortManager::OnPostRenderOpaque
+#1754   PushMarker       Translucency
+#1755   PushMarker       Translucency(BeforeDistortion Parallel) 1368x856
+#1759   PushMarker       ClearRenderTarget(Translucency.AfterDOF.Color, slice 0, mip 0) 2004x1256 ClearAction
+#1764   PushMarker       Translucency(AfterDOF Parallel) 1368x856
+#1772   PushMarker       VirtualTextureFeedbackCopy
+#1779   PushMarker       PostProcessing
+#1780   PushMarker       ComposeTranslucencyToNewSceneColor(AfterDOF) 1368x856 -> 1368x856
+#1806   PushMarker       TAA(MainUpsampling Quality=High) 1368x856 -> 2003x1254
+#1821   PushMarker       Downsample(PostProcessing.SceneColor.HalfRes Quality=Bilinear PS) 2003x1254 -> 1002x627
+#1834   PushMarker       SceneDownsample
+#1835   PushMarker       Downsample(Scene(1/4) Quality=High PS) 1002x627 -> 501x314
+#1846   PushMarker       BasicEyeAdaptationSetup (PS) 501x314
+#1862   PushMarker       Downsample(Scene(1/8) Quality=High PS) 501x314 -> 251x157
+#1875   PushMarker       Downsample(Scene(1/16) Quality=High PS) 251x157 -> 126x79
+#1887   PushMarker       Downsample(Scene(1/32) Quality=High PS) 126x79 -> 63x40
+#1897   PushMarker       Downsample(Scene(1/64) Quality=High PS) 63x40 -> 32x20
+#1910   PushMarker       BasicEyeAdaptation (CS)
+#1922   PushMarker       CopyEyeAdaptationToTexture (CS)
+#1932   PushMarker       EnqueueCopy(EyeAdaptationBuffer)
+#1943   PushMarker       Tonemap 2003x1254 (PS GammaOnly=0)
+#1965   PushMarker       ReleaseRayTracingResources
+#1968   PushMarker       RenderFinish
+#1969   PushMarker       CanvasFlush
+#1970   PushMarker       CanvasBatchedElements
+#1984   PushMarker       EndScene
+#2023   PushMarker       ExtractUniformBuffer
+#2027   PushMarker       EnqueueCopy(GPUMessageManager.MessageBuffer)
+#2038   PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 1)
+#2044   PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 1)
+--- stderr ---

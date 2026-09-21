@@ -66,6 +66,9 @@ rdc-tools/
   .clang-format       RenderDoc's own C++ style, copied (the driver is a RenderDoc client)
   tools/              deploy_dlls.cmake — copies the engine's DLLs next to the exe
   schema/             the driver's schemas, checked in (`schema --check` fails when they drift, §4.12)
+  goldens/            the capture corpus: the index, the labels, and one transcript per command (§4.17) — generic
+                      (a capture is a key and a digest); captures.local.json in it holds this machine's paths and
+                      is gitignored
   engine-schemas/     a known engine's names and what each one means (REFERENCE §4.11; `$RDC_ENGINE_SCHEMAS`)
   bin/                the built driver, the DLLs it loads, and rdc_lz4.dll (§1) (gitignored)
   build/              the CMake build tree (gitignored)
@@ -77,6 +80,7 @@ rdc-tools/
                       rdc_testcase.py holds the cases and fixtures they share
   pyrightconfig.json  type-checker config: typeCheckingMode "standard", target Python 3.8
   typings/            stub for the optional zstandard dependency
+  .github/workflows/  CI: the hermetic offline gate on every push, the driver as a manual job (§4.17)
 ```
 
 ---
@@ -87,7 +91,7 @@ rdc-tools/
 |---|---|
 | Python 3.8+ | tested with `C:\Program Files\Python311\python.exe` |
 | `zstandard` (optional) | only for Zstd-compressed sections. Not needed for the captures used so far (they are LZ4, which the next row covers). `pip install zstandard` if `sections` reports `zstd`. |
-| **`bin/rdc_lz4.dll`** | **the decoder, and the build writes it** (`cmake --build build`, from `src/cpp/third_party/lz4`) — so a tree that has not built it cannot read a capture's stream, and says so, naming the command. Nothing to install and no `pip` package involved; `$RDC_LZ4_DLL` points at a system `liblz4` (`lz4.dll` / `liblz4.so.1` / `liblz4.dylib`) instead if one is there. Decodes the hobby capture's 1.47 GB stream in **0.54 s** (REFERENCE §3.2). |
+| **`bin/rdc_lz4.dll`** | **the decoder, and the build writes it** (`cmake --build build`, from `src/cpp/third_party/lz4`) — so a tree that has not built it cannot read a capture's stream, and says so, naming the command. Nothing to install and no `pip` package involved; `$RDC_LZ4_DLL` points at a system `liblz4` (`lz4.dll` / `liblz4.so.1` / `liblz4.dylib`) instead if one is there. Decodes `desktop-2`'s 1.47 GB stream in **0.54 s** (REFERENCE §3.2). |
 | **RenderDoc source tree** | **Fetched for you** — the tool reads the *real implementation of RenderDoc* (the chunk-name enums) from a `renderdoc-src` folder in the root folder, and downloads the latest tagged source into it the first time a command needs a name (see §1.1). Nothing to clone. On a machine with no network the tool still runs, printing numeric chunk IDs (`1040`) instead of names (`List_DrawIndexedInstanced`); `bootstrap` fetches it up front, and `$RDC_NO_BOOTSTRAP` turns the fetch off. |
 | A `.rdc` capture | any D3D12 capture; Vulkan captures parse at container level but the chunk decoders are D3D12-specific |
 
@@ -250,8 +254,8 @@ not exist yet, everything else runs today.
 
 * **Offline today** — `sections`, `blocks`, `resources`, `descriptors`, `verify`, `summary`, `markers`,
   `chunks`, `chunk`, `draws`, `deps`, `memory`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`,
-  `dxbc`, `dump-chunk`, `dump-shaders`, `report`, `passdiff`, `replaydiff`, `validate`, `cache`, `selftest`
-  (REFERENCE §4; the A/B pair is §4.16).
+  `dxbc`, `dump-chunk`, `dump-shaders`, `report`, `passdiff`, `replaydiff`, `validate`, `goldens`, `cache`,
+  `selftest` (REFERENCE §4; the A/B pair is §4.16 and the corpus harness §4.17).
 * **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `pixelhistory`, `shaders`, `cb`,
   `textures`,
   `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters` (`--per-pass`), `crosscheck`,
@@ -261,8 +265,8 @@ not exist yet, everything else runs today.
   pass rather than at an id.
 * **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), shader debugging, overlays
   (ROADMAP §2), `mesh --stage/--obj`, texture subresources (ROADMAP §3), `--format`, structural `diff`,
-  the root-signature/chunk cross-check, the VRAM budget (ROADMAP §4), the capture corpus and the
-  golden/fixture tests (ROADMAP §6).
+  the root-signature/chunk cross-check, the VRAM budget (ROADMAP §4), the driver-version guard, and the
+  driver's own golden text (ROADMAP §5).
 
 ### The rule, and why it is the rule
 
@@ -462,10 +466,15 @@ earlier eid.
 ```
 
 Compare the **text** output byte-for-byte (it is the contract: this is how the driver's own regression pass is
-run, REFERENCE §9), and validate the JSON separately — parse it, and check for duplicate keys, because a plain
-parse hides a repeated key and that is exactly how a dropped vertex-shader block went unnoticed once. With
-images, compare with a difference threshold *(ROADMAP §3)* rather than by eye: "did the picture change" should be a
-number. Keep the two bundles: the golden/fixture tests *(ROADMAP §6)* are the same idea, checked in.
+run, REFERENCE §9), and validate the JSON separately — `validate` now refuses a repeated key as well as a
+wrong shape, because a plain parse hides it and that is exactly how a dropped vertex-shader block went
+unnoticed once. With images, compare with a difference threshold rather than by eye: "did the picture change"
+should be a number (`imgdiff`, or `replaydiff --with-images` for a whole frame — REFERENCE §4.16).
+
+For the **offline** half the same idea is checked in: `python src\py\rdc_analysis.py goldens` re-runs a fixed
+command list over the captures in `goldens/` and diffs the output against the transcripts kept there
+(REFERENCE §4.17). When the change is to the analyser rather than to a parser, the check that matters is the
+self-A/B in that same run: `replaydiff` of one bundle against *itself* must find nothing.
 
 **J. "Triage a capture someone sent me."** A fixed order, because each step can end the investigation.
 
@@ -480,7 +489,7 @@ number. Keep the two bundles: the golden/fixture tests *(ROADMAP §6)* are the s
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
 with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §7.5):
+this is the one case for the standalone harness (ROADMAP §6.5):
 
 ```powershell
 python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
@@ -504,13 +513,17 @@ silence.
 * State the environment caveats: replayed on this machine's GPU (not the device that recorded it), counters may
   be absent, and a stale bundle is stale (its manifest has the capture hash).
 
-**M. "Run it headless."** Two different regimes, and they should not be confused:
+**M. "Run it headless."** Three regimes, and they should not be confused:
 
-* **CI, no GPU:** the offline tool only — `verify`, `summary`, `draws`, `resources`, `report` *(REFERENCE §4.11)*, `selftest`,
-  Pyright. The fixture bundles *(ROADMAP §6)* are what make even the report generator testable there.
+* **CI, no GPU and no capture:** `selftest` (778 hermetic cases) and Pyright — that is the whole gate in
+  `.github/workflows/checks.yml`, and the fixture bundles in `tests/` are what make even the report generator
+  and the A/B testable there.
+* **A machine with the captures but no GPU:** `goldens --check` (REFERENCE §4.17) — the transcripts and labels
+  for the corpus in `goldens/`, plus the driver's device-free `schema --check`. It exits **2** when no capture
+  of the corpus is present, which means "nothing compared" and not "clean".
 * **A machine with the GPU and the capture:** the driver, gated — `probe` alone, one replay at a time,
   `debug --fail-on error` *(ROADMAP §1)* as the pass/fail line, `bundle-verify` over the artefacts, and the
-  golden/baseline comparison of recipe I (below). Record what CI cannot cover rather than implying coverage.
+  before/after comparison of recipe I. Record what CI cannot cover rather than implying coverage.
 
 ### Pitfalls an agent must not walk into
 
@@ -563,7 +576,7 @@ built on.
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
 * **`ROADMAP.md`** — what is not implemented yet, in priority order: the driver's navigation and experiment
   commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4), the
-  stored golden A/B (§5), the verification corpus and CI (§6), the work beyond the local desktop (§7),
+  the driver version guard (§6), the work beyond the local desktop (§7),
   robustness and scope (§8), the REFERENCE §8 items being closed (§9), and the suggested order (§10).
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.

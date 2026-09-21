@@ -174,8 +174,8 @@ RESOURCE_CHUNKS: Dict[str, int] = {
 #: is `u64 buffer, u64 offset, u32 type, u64 byteSize, u64 asId` (d3d12_device.cpp
 #: `Serialise_CreateAS`), and `asId` is the id the frame references. The type is a
 #: `D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE`, where **0 is TOP_LEVEL** and 1 BOTTOM_LEVEL --
-#: the capture that exercises this has 5205 small type-0 structures rebuilt every frame (RTXDI's
-#: per-light TLASes) and 3 large type-1 ones (the static BLASes), which is what those two are.
+#: one capture here has 5205 small type-0 structures rebuilt every frame (a TLAS per light) and 3 large
+#: type-1 ones (the static BLASes), which is what those two are.
 AS_KINDS: Dict[int, str] = {0: 'tlas', 1: 'blas'}
 
 #: `D3D10_RESOURCE_DIMENSION` (common/dds_readwrite.cpp): what a descriptor's Dimension field means.

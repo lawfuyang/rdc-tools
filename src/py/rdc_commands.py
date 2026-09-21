@@ -158,7 +158,7 @@ def cmd_strings(path: str, minlen: int = 6, maxlines: int = 200) -> None:
         print('%6d  @0x%-9x %s' % (counts[s], order[s], s[:150]))
 
 #: What makes a string look like an object, a shader or a pass name. Compiled once: this is applied to
-#: every unique string the scan found (427,823 of them on the hobby capture).
+#: every unique string the scan found (427,823 of them on `desktop-2`).
 _NAME_LIKE = re.compile(
     r'(Shader|shader|BasePass|Lightmap|LightMap|Volumetric|IndirectLighting|HISM|Instanced|'
     r'StaticMesh|Sphere|Mobile|CachedPoint|NoLightMap|Policy|Permutation|FScreenPass|SceneColor|'
@@ -323,7 +323,7 @@ def cmd_draws(path: str, max_draws: int = 80) -> None:
     for idx, ch in enumerate(iter_chunks(stream), 1):
         nm = names.get(ch['id'], '')
         # The payload is sliced only for the chunks this loop reads (`STATE_CHUNKS` is the setters plus
-        # `List_Reset`). Slicing every one of the hobby capture's 29,212 payloads copies 1.47 GB to throw
+        # `List_Reset`). Slicing every one of `desktop-2`'s 29,212 payloads copies 1.47 GB to throw
         # it away and measured 1.08 s of this command's 2.8 s; `summary` and `markers` never paid it
         # because they hand `chunk_strings` the chunk and it slices for itself.
         blob = chunk_payload(stream, ch) if (nm in DRAW_CHUNKS or nm in STATE_CHUNKS) else b''
@@ -416,7 +416,7 @@ def cmd_dump_chunk(path: str, index: int, outfile: str) -> None:
 def cmd_dump_shaders(path: str, outdir: str) -> None:
     """Write every DXBC/DXIL container to `outdir` as a `.dxil` file plus an index in `shaders.txt`.
 
-    This is the offline route to the D3D12 harness's input (ROADMAP §7.5) and a way to hand a shader to
+    This is the offline route to the D3D12 harness's input (ROADMAP §6.5) and a way to hand a shader to
     `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
     reflection's job, and the reflection is the replay driver's (REFERENCE §9).
     """

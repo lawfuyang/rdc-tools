@@ -36,9 +36,15 @@ METHOD_RAW, METHOD_LZ4, METHOD_ZSTD = 0, 1, 2
 #: Set once, so a broken cache directory warns a single time per process.
 _CACHE_WARNED = False
 
+#: The two environment variables that move or disable the cache (REFERENCE §4.8). Named here because a
+#: caller that *wants* a cache-free run -- the goldens harness, so a transcript cannot depend on what this
+#: machine has already decoded -- should not spell the variable itself.
+CACHE_DIR_ENV = 'RDC_CACHE_DIR'
+NO_CACHE_ENV = 'RDC_NO_CACHE'
+
 def cache_dir() -> str:
     """Directory holding the cached streams (`$RDC_CACHE_DIR` overrides the platform default)."""
-    env = os.environ.get('RDC_CACHE_DIR')
+    env = os.environ.get(CACHE_DIR_ENV)
     if env:
         return env
     if os.name == 'nt':
@@ -49,7 +55,7 @@ def cache_dir() -> str:
 
 def _cache_enabled() -> bool:
     """False when `$RDC_NO_CACHE` is set to anything non-empty."""
-    return not os.environ.get('RDC_NO_CACHE')
+    return not os.environ.get(NO_CACHE_ENV)
 
 def _cache_file(abspath: str, size: int, mtime: int, section_index: int) -> str:
     """Cache file for one (capture, section): the identity key hashed into a file name."""

@@ -1,0 +1,59 @@
+name: checks
+
+# What each job can and cannot cover, stated rather than implied (ROADMAP §6):
+#
+#   * `python` runs on every push and pull request and is the whole of the offline tool's gate: the unit
+#     suite is hermetic (no capture, no GPU, no `renderdoc-src`, no network) and Pyright "Standard" is the
+#     type gate. It never opens a real capture.
+#   * `driver` is **manual** (`workflow_dispatch`): the build links against an installed RenderDoc, and
+#     nothing below a device can replay a frame. It installs RenderDoc, builds, and stops at the driver's
+#     own `selftest`/`schema --check` -- all of which need no GPU. It has never been run in CI from this
+#     repository, so treat its first run as a step to fix rather than a gate that was always green.
+#   * Neither job can run `goldens --check` (the corpus needs captures this repository does not carry) nor
+#     the real-capture pins in AGENTS.md (they need a GPU): both stay local, and `goldens --check` exits 2
+#     -- "nothing to compare" -- on a machine without captures, which is neither a pass nor a failure.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: the unit suite
+        run: python src/py/rdc_analysis.py selftest
+      - name: pyright, standard mode: zero errors and zero warnings
+        run: npx --yes pyright@latest
+      - name: the CLI still answers for a missing capture (usage, not a traceback)
+        run: |
+          python src/py/rdc_analysis.py
+          python src/py/rdc_analysis.py summary does-not-exist.rdc || echo "reported, as it should"
+
+  driver:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: RenderDoc, the DLL the driver links against (version per REFERENCE §1)
+        run: |
+          curl -L -o RenderDoc.msi https://renderdoc.org/stable/1.46/RenderDoc_1.46_64.msi
+          msiexec /i RenderDoc.msi /qn /norestart
+      - name: configure and build (Release is /W4 /WX: a warning is a failure)
+        run: |
+          cmake -S . -B build -A x64
+          cmake --build build --config Release
+      - name: the driver's own checks (no device, no capture)
+        run: |
+          .\bin\replay_dump.exe selftest
+          .\bin\replay_dump.exe schema --check schema
+      - name: the sources are clang-formatted (needs clang-format where CMake found it)
+        run: cmake --build build --config Release --target clang-format-check

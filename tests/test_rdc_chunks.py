@@ -533,7 +533,7 @@ class TestDecodeChunk(unittest.TestCase):
         self.assertEqual(R.decode_chunk('List_IASetIndexBuffer', F.pl_index_buffer(7, 1, 2, 3, 4)[:32]), [])
 
     def test_index_buffer_bytes_from_a_real_capture(self):
-        # raw payload of List_IASetIndexBuffer #1122 in "PC Renderer.rdc" (RenderDoc 1.46, D3D12):
+        # raw payload of List_IASetIndexBuffer #1122 in "desktop-1" (RenderDoc 1.46, D3D12):
         # the draw that uses it is `idx=2880`, and size == 2880 * 2 with fmt == R16_UINT, so this
         # also cross-checks the offsets against the capture rather than against our own fixture
         blob = bytes.fromhex(

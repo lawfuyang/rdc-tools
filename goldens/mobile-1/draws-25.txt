@@ -1,0 +1,145 @@
+# draws <capture> 25
+# exit: 0
+--- stdout ---
+chunk   pass / primitive         pso      args      state
+#270    GridInject:NotLinkedList 2300     x=8 y=5 z=2 Dispatch
+        CBV: rp2(cbv b0 s0)=res1907+0x174b00[Resource Allocator Under]  rp3(cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp4(cbv b2 s0)=res1907+0x121800[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[138458][GlobalResourceHeap]  rp1(table u0 n16 s0)=heap298[138456][GlobalResourceHeap]
+#291    eLUTs / TransmittanceLut 2350     x=32 y=8 z=1 Dispatch
+        CBV: rp1(cbv b0 s0)=res342+0x84800[Resource Allocator Under]  rp2(cbv b1 s0)=res1907+0x125100[Resource Allocator Under]
+        Table: rp0(table u0 n16 s0)=heap298[138460][GlobalResourceHeap]
+#304    UTs / MultiScatteringLut 2291     x=4 y=4 z=1 Dispatch
+        CBV: rp3(cbv b0 s0)=res342+0x84800[Resource Allocator Under]  rp4(cbv b1 s0)=res1907+0x125100[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[138462][GlobalResourceHeap]  rp1(table s0 n32 s0)=heap299[0][GlobalSamplerHeap]  rp2(table u0 n16 s0)=heap298[138461][GlobalResourceHeap]
+#318    UTs / DistantSkyLightLut 2312     x=1 y=1 z=1 Dispatch
+        CBV: rp3(cbv b0 s0)=res1907+0x174c00[Resource Allocator Under]  rp4(cbv b1 s0)=res342+0x84800[Resource Allocator Under]  rp5(cbv b2 s0)=res1907+0x125100[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[138464][GlobalResourceHeap]  rp1(table s0 n32 s0)=heap299[1][GlobalSamplerHeap]  rp2(table u0 n16 s0)=heap298[138463][GlobalResourceHeap]
+#326    osphereLUTs / SkyViewLut 2308     x=12 y=7 z=1 Dispatch
+        CBV: rp3(cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp4(cbv b1 s0)=res342+0x84800[Resource Allocator Under]  rp5(cbv b2 s0)=res1907+0x125100[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[138464][GlobalResourceHeap]  rp1(table s0 n32 s0)=heap299[1][GlobalSamplerHeap]  rp2(table u0 n16 s0)=heap298[138467][GlobalResourceHeap]
+#341    reLUTs / CameraVolumeLut 2316     x=8 y=8 z=1 Dispatch
+        CBV: rp3(cbv b0 s0)=res1907+0x174d00[Resource Allocator Under]  rp4(cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp5(cbv b2 s0)=res342+0x84800[Resource Allocator Under]  rp6(cbv b3 s0)=res1907+0x125100[Resource Allocator Under]
+        Table: rp0(table t0 n64 s0)=heap298[138469][GlobalResourceHeap]  rp1(table s0 n32 s0)=heap299[1][GlobalSamplerHeap]  rp2(table u0 n16 s0)=heap298[138468][GlobalResourceHeap]
+#425    er / SceneColorRendering 2294     verts=4 inst=1 DrawInstanced
+        CBV: rp0(ps cbv b0 s0)=res1907+0x174f00[Resource Allocator Under]  rp1(vs cbv b0 s0)=res1907+0x174e00[Resource Allocator Under]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0xa00(sz64,st16)[Resource Allocator Under]
+#452    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x3b000[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x8d200[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x80c00[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp11(vs cbv b1 s0)=res342+0x3b000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138473][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138471][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res315+0x467500(sz40,st40)[Resource Allocator Under]  res315+0x418300(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#459    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0xb8800[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x8aa00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x80c00[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp11(vs cbv b1 s0)=res342+0xb8800[Resource Allocator Under]  rp12(vs cbv b2 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138473][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138471][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res315+0x469c00(sz40,st40)[Resource Allocator Under]  res315+0x468000(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#466    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x3bc00[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0xb9c00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x80c00[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp11(vs cbv b1 s0)=res342+0x3bc00[Resource Allocator Under]  rp12(vs cbv b2 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138473][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138471][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res315+0x40fa00(sz40,st40)[Resource Allocator Under]  res315+0x465e00(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#473    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0xb5400[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x36c00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x80c00[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp11(vs cbv b1 s0)=res342+0xb5400[Resource Allocator Under]  rp12(vs cbv b2 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138473][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138471][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res315+0x418800(sz40,st40)[Resource Allocator Under]  res315+0x466600(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#480    asicShapeMaterial Sphere 3042     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x3d400[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x91600[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x80c00[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp11(vs cbv b1 s0)=res342+0x3d400[Resource Allocator Under]  rp12(vs cbv b2 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138473][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138471][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res315+0x46a100(sz40,st40)[Resource Allocator Under]  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#503    erfylaw/M_Red.M_Red Cube 3497     idx=144 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x9e400[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x8a200[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x2f600[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175000[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0x9e400[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x40e000(sz648,st12)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x40d900[Resource Allocator Under]
+#514    asicShapeMaterial Sphere 3048     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x83c00[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x3ae00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175100[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0x83c00[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#521    asicShapeMaterial Sphere 3048     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0xd1c00[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0xb9a00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175200[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0xd1c00[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#530    .BasicShapeMaterial Cube 3048     idx=144 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x25000[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0xbd000[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175300[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0x25000[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x40e000(sz648,st12)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x40d900[Resource Allocator Under]
+#537    .BasicShapeMaterial Cube 3048     idx=144 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0xb9000[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x36a00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175400[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0xb9000[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x40e000(sz648,st12)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x40d900[Resource Allocator Under]
+#546    asicShapeMaterial Sphere 3048     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x35800[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0xb2e00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175500[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0x35800[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#553    asicShapeMaterial Sphere 3048     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0xde800[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0x50a00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175600[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0xde800[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#560    asicShapeMaterial Sphere 3048     idx=2880 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x8cc00[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0xde000[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x24200[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175700[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0x8cc00[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x3f7400(sz6708,st12)[Resource Allocator Under]  res315+0x3f5900(sz2236,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x3f6200(sz4472,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x3f2b00[Resource Allocator Under]
+#571    fylaw/M_Blue.M_Blue Cube 3045     idx=144 inst=1 DrawIndexedInstanced
+        CBV: rp4(ps cbv b0 s0)=res1907+0x120000[Resource Allocator Under]  rp5(ps cbv b1 s0)=res342+0x36e00[Resource Allocator Under]  rp6(ps cbv b2 s0)=res342+0x32400[Resource Allocator Under]  rp7(ps cbv b3 s0)=res342+0xb3c00[Resource Allocator Under]  rp8(ps cbv b4 s0)=res342+0x36800[Resource Allocator Under]  rp9(ps cbv b5 s0)=res342+0x6d800[Resource Allocator Under]  rp10(vs cbv b0 s0)=res1907+0x175800[Resource Allocator Under]  rp11(vs cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp12(vs cbv b2 s0)=res342+0x32400[Resource Allocator Under]  rp13(vs cbv b3 s0)=res1907+0x21b500[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138477][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[25][GlobalSamplerHeap]  rp2(vs table t0 n64 s0)=heap298[138475][GlobalResourceHeap]  rp3(vs table s0 n32 s0)=heap299[3][GlobalSamplerHeap]
+        RTV: res2269[SceneColor]
+        DSV: res2270[SceneDepthZ]
+        VB : res315+0x40e000(sz648,st12)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x40d900[Resource Allocator Under]
+#607    03x1254 (PS GammaOnly=0) 2344     idx=3 inst=1 DrawIndexedInstanced
+        CBV: rp2(ps cbv b0 s0)=res1907+0x175a00[Resource Allocator Under]  rp3(ps cbv b1 s0)=res1907+0x120000[Resource Allocator Under]  rp4(vs cbv b0 s0)=res1907+0x175900[Resource Allocator Under]  rp5(vs cbv b1 s0)=res1907+0x33400[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138479][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[9][GlobalSamplerHeap]
+        RTV: res2273[Tonemap]
+        VB : res315+0x0(sz192,st32)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x100[Resource Allocator Under]
+#618    (Quality=0) 2003x1254 PS 2319     idx=3 inst=1 DrawIndexedInstanced
+        CBV: rp2(ps cbv b0 s0)=res1907+0x175e00[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138483][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[12][GlobalSamplerHeap]
+        RTV: res2207[BufferedRT]
+        VB : res315+0x0(sz192,st32)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res315+0x100[Resource Allocator Under]
+#634     / CanvasBatchedElements 2347     idx=1476 inst=1 DrawIndexedInstanced
+        CBV: rp2(ps cbv b0 s0)=res1907+0x176000[Resource Allocator Under]  rp3(vs cbv b0 s0)=res1907+0x175f00[Resource Allocator Under]
+        Table: rp0(ps table t0 n64 s0)=heap298[138484][GlobalResourceHeap]  rp1(ps table s0 n32 s0)=heap299[17][GlobalSamplerHeap]
+        RTV: res2207[BufferedRT]
+        VB : res342+0xc0000(sz62976,st64)[Resource Allocator Under]  res315+0x40dd00(sz216,st4)[Resource Allocator Under]  res315+0x300(sz16,st0)[Resource Allocator Under]  res315+0x40de00(sz432,st8)[Resource Allocator Under]  res315+0x400(sz12,st0)[Resource Allocator Under]  res0+0x0(sz0,st0)  res315+0x467400(sz48,st48)[Resource Allocator Under]
+        IB : res342+0x34000[Resource Allocator Under]
+total draws/dispatches: 24
+--- stderr ---

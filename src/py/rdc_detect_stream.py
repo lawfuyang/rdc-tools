@@ -8,10 +8,14 @@ import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from in
 import rdc_cache  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_stream  # noqa: F401  (used qualified: the loader is called from inside functions)
 
-from typing import Dict, List, Optional, Sequence, Tuple
+# The two markers the tree is built from live in `rdc_chunkmap` (which owns the chunk-name facts) and are
+# imported rather than re-declared: `passdiff` walks the same two families, and a definition copied here
+# is one that can drift from it. `X as X` is the re-export form: these names stay part of this module's
+# interface, which is where the detector tests and REFERENCE §4.11 read them.
+from rdc_chunkmap import (POP_MARKER_CHUNKS as POP_MARKER_CHUNKS,
+                          PUSH_MARKER_CHUNKS as PUSH_MARKER_CHUNKS)
 
-PUSH_MARKER_CHUNKS = ('PushMarker', 'Queue_BeginEvent')
-POP_MARKER_CHUNKS = ('PopMarker', 'Queue_EndEvent')
+from typing import Dict, List, Optional, Sequence, Tuple
 
 #: How many unattributed draws are named before the rest are counted.
 UNATTRIBUTED_LIMIT = 10

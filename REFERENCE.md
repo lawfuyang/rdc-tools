@@ -799,6 +799,86 @@ to the stream, so it ends at the frame's last use, and a resource older than the
 all — and a heap's recorded size need not agree with the totals beside it, because a texture's real size is not
 in the file.
 
+### 4.16 The A/B pair: `passdiff` and `replaydiff`
+
+Two captures, one answer — the mobile-vs-PC question the project was started for. There are two commands
+because there are two halves, and the halves are the tools' usual line (§2): `passdiff` reads the two
+*`.rdc` files* (the marker trees inside their frame streams, no device, no bundle), while `replaydiff`
+compares what the *engine said* about each capture, which it reads out of the two bundles.
+
+```powershell
+python src\py\rdc_analysis.py passdiff 'android.rdc' 'pc.rdc'                 # offline, no bundle
+.\bin\replay_dump.exe dump 'android.rdc' ab\mobile --with-images
+.\bin\replay_dump.exe dump 'pc.rdc'      ab\pc     --with-images
+python src\py\rdc_analysis.py replaydiff ab\mobile ab\pc --out ab\diff --with-images
+```
+
+**Why `replaydiff` takes bundles and not two `.rdc` paths.** Because the engine replays one capture at a
+time: two replay devices on one GPU is what makes a run look stuck (§9), so a command that opened both
+would be a command that hangs. Everything it needs is already a file after `dump`, and reading files is
+the half that is testable without a GPU, a capture or a driver (ROADMAP §6). The driver half stays what it
+was — one `dump` per capture, the engine's answers — and this half is the analysis.
+
+**`passdiff <a.rdc> <b.rdc> [--all]`** — the marker trees side by side. A *pass* here is a marker with at
+least one draw or dispatch inside it (the rule the driver's `sheet` groups a frame by, so a path this
+prints can be pasted into `--at-marker`), and a parent marker counts its children's calls, so a heading is
+a pass too. The tree is built from `PushMarker`/`Queue_BeginEvent` through to `PopMarker`/`Queue_EndEvent`;
+`SetMarker` sets the current name without opening a scope and is not walked, and a marker still open where
+the stream ends is still recorded (the frame was cut — `verify` and the report's marker-balance detector
+are what report the imbalance itself). A name is read with `MARKER_MINLEN = 3` characters, because a
+marker payload's own frame decodes as one- and two-character printable runs *before* the name does
+(measured: `chunk_strings(..., 1, 1)` answers `B` where the name is `MobileSceneRender`, and the hobby
+capture still returns runs like `6,` at two characters); the shortest real names on these captures are
+`Sky`, `Clear` and `ImGui`.
+
+The two lists are aligned by **full path** first and the **innermost name** second — a path carries dynamic
+text no table could list, and one real pair has `CullLights 32x20x8 NumLights 0` against
+`CullLights 22x14x8 NumLights 0`, the same pass with a different light grid. Both pair by *occurrence*, so
+the second `Scene > Shadow` pairs with the second. What is left is `only in A` / `only in B`, except that a
+pair in the same slot, under the **same parent marker**, with the **same call count**, is offered as
+`renamed?` with that evidence in the row: the file cannot prove a rename, and a suggestion made on
+position alone suggested nineteen renames between a mobile and a PC frame that share almost no passes.
+Chunk indices are the file's numbering, not the engine's event ids (§9).
+
+**`replaydiff <bundleA> <bundleB> [--out <dir>] [--with-images] [--image-detail N] [--threshold N]`** —
+`replaydiff.md` and `replaydiff.json` (deterministic: sorted, no timestamps, every path relative to the
+bundle or the output directory it belongs to, so two runs are diffable), plus a summary on stdout. It
+compares, all of it from the documents the bundle carries:
+
+| | |
+|---|---|
+| the frames' shape | events, passes, resources, API, and whether the two bundles describe **the same capture** (one `captureSha256` means a tools A/B, not a capture A/B) |
+| the pass lists | aligned **by marker path**, then by **innermost name**, then by the **resource names both passes write**, then by **call order** (same call kind only) — each fallback writes itself into the row's note, so a match can be disagreed with instead of guessed at |
+| effective state | at each aligned pass's first state event: the `rootParameters`, `shaders` and `renderTargets` rows with resource ids annotated by name (`res2207[SceneColour]`), plus the depth target |
+| named values | every constant block of that event, paired by `(stage, slot)`, member by member — a block only one side binds is reported *with* its members, because "not bound over here" is often the answer |
+| shaders | the `hash` the driver stamps each stage with (§9): *the same shader* or *a different one* as a fact, with the reflection rows that moved; a bundle from a driver before the hash says `no-hash-in-this-bundle` rather than calling equal reflection the same shader |
+| the renders | with `--with-images`: each aligned pass's readback per slot, taken at the **last** event inside the pass that wrote one (a pass's first state event often has no target bound) |
+
+A pass's marker is the path of the first event inside it that sits in one: the ids between two command
+lists carry state but no markers (§9, the replay-history ghosts), and a pass that begins on one of those
+would otherwise have no name to align on.
+
+**The images are compared in two steps**, because only one of them is cheap: every pair is compared by the
+file's **bytes** first (one encoder wrote both, so equal bytes are equal pixels and it costs nothing), and
+a pair that differs is *decoded* and compared pixel by pixel while `--image-detail` lasts (`IMAGE_DETAIL`
+= 8 by default; `rdc_image` is pure Python and measured at ~0.15 s per megabyte — a 9 MB readback is
+1.0-1.4 s, dominated by Paeth rows at ~230 ns/byte, where an all-`Up` image runs at 66 ns/byte). The rest
+are named **as differing** with the reason they were not compared: an image nobody looked at must never
+read as an image that did not change. A compared pair reports the pixels that changed, the mean and worst
+delta, the 64-bit difference hash's distance and a heat map (`<out>/heat/<pass>_<slot>.png`); two pictures
+of different sizes are reported as two sizes, because a difference across sizes is a different question.
+`--threshold` is a percentage: pairs below it are counted in the summary instead of listed row by row.
+
+**Measured on the pair this exists for** (`renderdoc-src\Android Renderer.rdc` against
+`renderdoc-src\PC Renderer.rdc`, bundles written with `--with-images`): `passdiff` reports 34 passes in the
+mobile frame against 71 in the PC one, 20 paths in both, and the shifts that matter —
+`SceneColorRendering > MobileBasePass` present on both, the PC frame's ray-tracing, HZB, SSR, TAA and eye
+adaptation passes present on one side only. `replaydiff` aligns 10 passes, reports 55 constant blocks
+whose values moved and 16 shaders whose hash differs, names the adds/removes, and compares the one
+`SceneColorRendering` pair both bundles hold a readback for: **49.077% of its 2,517,012 pixels differ**,
+mean delta 245.904, worst 255. The other passes have no readback *pair* (the two frames' targets are bound
+at different events), which the document states per row rather than leaving the reader to infer.
+
 ---
 
 ## 5. Worked examples
@@ -1054,8 +1134,9 @@ the answers look like answers, and only the source says what the library should 
 |---|---|
 | `info <rdc>` | RenderDoc version, driver, API properties (`pixelHistory` among them: the flag `pixelhistory` is gated on), resource/texture/buffer/chunk counts |
 | `draws <rdc> [max] [filter]` | the engine's action list (`GetRootActions`) in frame order: markers and calls, each with the engine's **event id**, its depth in the marker nest, and the marker path it sits inside. The filter matches a call's name *or* a marker path, so a marker is a handle for the events under it |
+| — | the `hash` line under a stage in `shaders` is a deliberate text-output change (2026-09-21): `bytes` is a shader's *size*, and two shaders can share one, so an A/B of two captures (`replaydiff`, §4.16) needs the digest to say "the same shader" as a fact |
 | `state <rdc> <eid>` | bound shaders per stage, render targets, depth target, root signature and every root parameter with its register, space and what is bound |
-| `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, and the disassembly on request |
+| `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, the SHA-256 of the shader's own bytes per stage, and the disassembly on request |
 | `cb <rdc> <eid> <stage> <slot>` | the **named values** of one constant buffer, structs and arrays expanded |
 | `textures <rdc> [filter] [--save <dir>]` | the texture list; `--save` decodes each one to PNG through `SaveTexture` |
 | `mesh <rdc> <eid> [instance] [max]` | post-VS geometry: what the vertex shader actually emitted |
@@ -1090,7 +1171,7 @@ half (and a reader) can work without a device. It writes:
 | `manifest.json` | bundle version, driver and RenderDoc version, the capture's absolute path, byte count and SHA-256, the flags used, the scan result, every written file with its size and hash, and a `notInThisBundle` list saying what it cannot contain and why |
 | `capture.json` | the capture header: API, driver, machine, feature flags (`shaderDebugging`, `pixelHistory`), counts, file size |
 | `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash. `psoKind` is the *call kind* from the capture's action tree — a dispatch or not — and not a reading of the bound shaders: on `PC Renderer.rdc` every event has a compute shader bound, so the shaders would call all 2132 of them compute, draws included |
-| `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints |
+| `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints — including each stage's `hash` (the SHA-256 of its bytes), which is what `replaydiff` compares two bundles' shaders by (§4.16) |
 | `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant block of every bound stage, at the state events |
 | `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it || `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |
 | `counters.json` | with `--with-counters`: eid, counter, value |

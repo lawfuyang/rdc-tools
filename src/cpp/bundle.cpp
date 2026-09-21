@@ -4,6 +4,53 @@
 
 #include "common.h"
 
+namespace
+{
+//: The 32-byte digest as 64 lowercase hex characters -- one spelling, so a hash this tool prints
+//: and a hash it compares against are the same string by construction.
+std::string DigestText(const unsigned char *digest)
+{
+  char out[65];
+  for(int i = 0; i < 32; i++)
+    snprintf(out + i * 2, 3, "%02x", digest[i]);
+  return std::string(out, 64);
+}
+}    // namespace
+
+//: SHA-256 of a buffer in memory, for a document that has to identify *bytes* rather than a file:
+//: `shaders` stamps every bound stage with the digest of the shader it read, which is what lets two
+//: bundles (two captures, or the same capture through two builds of this tool) be compared by
+//: shader identity instead of by size. An empty result means the OS provider was missing, and the
+//: field then says so rather than carrying a hash that is not one.
+std::string Sha256Bytes(const void *data, size_t size)
+{
+  if(data == NULL && size != 0)
+    return std::string();
+
+  BCRYPT_ALG_HANDLE alg = NULL;
+  BCRYPT_HASH_HANDLE hash = NULL;
+  if(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) < 0)
+    return std::string();
+
+  DWORD objectBytes = 0, ignored = 0;
+  if(BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&objectBytes, sizeof(objectBytes),
+                       &ignored, 0) < 0)
+    objectBytes = 0;
+  std::vector<unsigned char> object(objectBytes);
+  unsigned char digest[32];
+
+  bool bOk = BCryptCreateHash(alg, &hash, object.empty() ? NULL : object.data(),
+                              (ULONG)object.size(), NULL, 0, 0) >= 0;
+  if(bOk && size > 0)
+    bOk = BCryptHashData(hash, (PUCHAR)data, (ULONG)size, 0) >= 0;
+  bOk = bOk && BCryptFinishHash(hash, digest, (ULONG)sizeof(digest), 0) >= 0;
+
+  if(hash != NULL)
+    BCryptDestroyHash(hash);
+  BCryptCloseAlgorithmProvider(alg, 0);
+  return bOk ? DigestText(digest) : std::string();
+}
+
 std::string Sha256File(const char *path)
 {
   BCRYPT_ALG_HANDLE alg = NULL;
@@ -57,10 +104,7 @@ std::string Sha256File(const char *path)
     return std::string();
   }
 
-  char out[65];
-  for(int i = 0; i < 32; i++)
-    snprintf(out + i * 2, 3, "%02x", digest[i]);
-  return std::string(out, 64);
+  return DigestText(digest);
 }
 
 bool ReadWholeFile(const char *path, std::string &text)

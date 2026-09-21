@@ -51,6 +51,15 @@ def _find_renderdoc_src() -> str:
 
 RENDERDOC_SRC = _find_renderdoc_src()
 MARKER_CHUNKS = ('PushMarker', 'SetMarker', 'Queue_BeginEvent', 'Queue_SetMarker')
+
+#: The marker chunks that open a scope and the ones that close it. `SetMarker`/`Queue_SetMarker` are not
+#: here: they *set* the current marker's name without opening one, so a tree built from them would leave
+#: every later marker nested inside a scope that never closes. They live in `MARKER_CHUNKS` (a reader
+#: listing what it saw) and not in the tree. The two families are one stack because that is how the
+#: marker-imbalance rule has always read them, and a frame that opens a queue marker around its command
+#: lists reads as one pass over all of them -- which is what it is.
+PUSH_MARKER_CHUNKS = ('PushMarker', 'Queue_BeginEvent')
+POP_MARKER_CHUNKS = ('PopMarker', 'Queue_EndEvent')
 _SRC_WARNED = False
 DRAW_CHUNKS = ('List_DrawIndexedInstanced', 'List_DrawInstanced', 'List_Dispatch',
                'List_ExecuteIndirect')
@@ -290,6 +299,8 @@ __all__ = [
     'EXPECTED_LENGTHS',
     'HEAP_CHUNKS',
     'MARKER_CHUNKS',
+    'POP_MARKER_CHUNKS',
+    'PUSH_MARKER_CHUNKS',
     'RENDERDOC_SRC',
     'RESOURCE_CHUNKS',
     'RESOURCE_KINDS',

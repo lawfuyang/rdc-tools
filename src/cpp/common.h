@@ -531,6 +531,8 @@ int CmdBundleVerify(const char *dir);
 
 //: The small file helpers the bundle (and the self-check reading a schema off disk) share.
 std::string Sha256File(const char *path);
+//: The same digest over a buffer in memory: `shaders` identifies a shader by its bytes with this.
+std::string Sha256Bytes(const void *data, size_t size);
 bool ReadWholeFile(const char *path, std::string &text);
 bool FileBytes(const char *path, unsigned long long &bytes);
 bool MakeDir(const std::string &path);

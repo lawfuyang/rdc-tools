@@ -158,7 +158,9 @@ say so explicitly, and should degrade gracefully when it is missing.
 * **Structural capture diff** — `diff <a.rdc> <b.rdc>` for the file's own view: same draw index or marker path,
   what changed in PSO/CBVs/streams/descriptors. It can say *"rp2 was a compute CBV at b0, now a vertex CBV at b1;
   `SkyViewLut` left the table"* because `draws` now carries the command-list state, resource names, descriptor
-  resolution and the `rpN` annotations. The mobile-vs-PC question is the reason this exists. (~1 d)
+  resolution and the `rpN` annotations. The mobile-vs-PC question is the reason this exists — and it is what
+  `passdiff`/`replaydiff` (REFERENCE §4.16) cannot do: they read the marker trees and the engine's answers, this
+  one would read the descriptor writes and the command payloads the stream holds. (~1 d)
 * **Root-signature vs chunk-stream cross-check** — verify that every root parameter the signature declares has the
   descriptor writes the stream shows, and that what replay reports at an eid agrees with what the file recorded.
   Two independent paths to the same fact is exactly what this project uses instead of trust. (~1 d)
@@ -170,21 +172,12 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 5. P2 — A/B: two captures, one answer
 
-* **`replaydiff <a.rdc> <b.rdc>`** — replay both, align by marker path (falling back to call order and the
-  resource names present in both), then diff effective state, named cbuffer values, shader hashes, pass structure
-  and — with `--with-images` — the renders of the passes with a matching name. The report is a table: which
-  passes exist in one and not the other, which values moved, which images changed by more than a threshold. The
-  offline `diff` (§4, the structural capture diff) compares the *file*; this compares what the *engine saw*,
-  including values that come from
-  memory rather than the stream. (~2–3 d)
-* **Pass-list diff by path** — the cheap half of the same idea, offline: the marker trees of two captures side by
-  side, with passes added/removed/renamed and eid ranges shifted, because pass names survive a re-capture and
-  indices do not. (~4 h)
-* **Image comparison** — absolute difference, mean/max delta, a perceptual hash and a heat-map PNG, so an A/B
-  pair can be judged in one glance (and so a *regression* test can be "this render did not change"). (~half a day)
-* **Golden A/B** — store a bundle per capture in the corpus (§6, the capture corpus) and make "the same capture,
-  two builds of the tools" a diffable artefact: the regression net for the analy**ser**, where the goldens above
-  are the net for the parsers. (~4 h)
+* **Golden A/B** — `replaydiff` (REFERENCE §4.16) already compares two bundles, and it names the case where the
+  two sides carry one `captureSha256` as a tools A/B rather than a capture A/B. What is missing is the *storage*:
+  a bundle per capture in the corpus (§6, the capture corpus), plus the checked-in `replaydiff.json` a run is
+  compared against, so "the same capture through two builds of the tools changed nothing" is a command and not a
+  reading. The regression net for the analy**ser**, where the golden outputs below are the net for the parsers.
+  (~4 h)
 
 ## 6. P2 — Verification, regression and the bug atlas
 
@@ -203,6 +196,11 @@ say so explicitly, and should degrade gracefully when it is missing.
   validator and the schemas themselves. What is left is the last mile inside the baseline pass: run the check
   and `validate` over its own output, so a driver change that breaks a document fails the pass instead of the
   next consumer. (~1 h)
+* **Schemas for the tool's own documents** — `report.json` has one (`rdc_schemas.REPORT_SCHEMA`, built in
+  Python because `schema/` is the driver's) and `replaydiff.json` (REFERENCE §4.16) carries a `schemaVersion`
+  but no checked shape, so `validate` cannot tell a reader whether a document it is handed is one this tool
+  wrote. The schema, plus a test that walks it against a document the tests write, closes the same gap for the
+  A/B that the report closed for itself. (~2 h)
 * **The capture corpus with labelled expectations** — a `captures/` index (path, provenance, API, engine, size,
   what is known to be wrong with it) and a `*.expect.json` per capture: "this frame has an unbound `rp7`, a dead
   4 MB UAV, a marker imbalance" — and the detectors must fire. Unlabelled captures are still useful (no crash,
@@ -309,10 +307,9 @@ never silent ones).
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list.
 
 **Phase 1 — comparisons and the long tail**
-1. **A/B: `replaydiff`, pass-list diff, image comparison (§5)** — the mobile-vs-PC workflow done properly.
-2. **Golden outputs and the corpus (§6)** — the regression net under everything above, and what lets a detector
-   be trusted rather than hoped for.
-3. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
+1. **Golden outputs and the corpus (§6, and the golden A/B half of §5)** — the regression net under everything
+   above, and what lets a detector be trusted rather than hoped for.
+2. **Bundled chunk names (§4, = the README's playbook)** — ~2 h, removes the last environment dependency and closes the last
    REFERENCE §8 bullet that is not replay's job.
-4. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
-5. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.
+3. **Remote replay (§7)** — the honest fix for the desktop-GPU caveat, when a device is available.
+4. **The D3D12 harness (§7.5)** — only when a shader must be run with inputs the capture does not contain.

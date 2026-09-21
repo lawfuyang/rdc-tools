@@ -240,7 +240,7 @@ const SchemaDoc kSchemas[] = {
     "eid": {"type": "integer"},
     "stages": {"type": "array", "items": {
       "type": "object",
-      "required": ["stage", "resource", "entry", "encoding", "bytes", "constantBlocks",
+      "required": ["stage", "resource", "entry", "encoding", "bytes", "hash", "constantBlocks",
                    "readOnlyResources", "readWriteResources", "inputSignature", "outputSignature"],
       "properties": {
         "stage": {"type": "string", "description": "vs hs ds gs ps cs as ms"},
@@ -248,6 +248,7 @@ const SchemaDoc kSchemas[] = {
         "entry": {"type": "string"},
         "encoding": {"type": "integer"},
         "bytes": {"type": "integer"},
+        "hash": {"type": "string", "description": "SHA-256 of the shader's bytes, 64 lowercase hex characters: the shader's identity, where `bytes` is only its size (empty when the OS had no SHA-256 provider)"},
         "constantBlocks": {"type": "array", "items": {"type": "string"}},
         "readOnlyResources": {"type": "array", "items": {"type": "string"}},
         "readWriteResources": {"type": "array", "items": {"type": "string"}},

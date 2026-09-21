@@ -18,8 +18,9 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
   table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report, notables,
-  recommendations, detectors), `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
-  (schemas), `test_rdc_scan.py` (the slice scan and the phase/progress instrumentation), or all of them with
+  recommendations, detectors),   `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
+  (schemas), `test_rdc_scan.py` (the slice scan and the phase/progress instrumentation), `test_rdc_ab.py`
+  (the marker trees, the bundle A/B and the PNG/pixel maths), or all of them with
   `python -m unittest discover -s tests -t tests`.
 - **The suite never reaches the network.** The source-tree fetch is the one place the tool downloads anything,
   and it writes into exactly one folder — `renderdoc-src` at the root, the one `rdc_renderdoc_src.target_dir()`
@@ -82,7 +83,9 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   catches it up) → `rdc_types` → `rdc_chunkmap` → `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` →
   `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
   and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors →
-  `rdc_notable`/`rdc_recommend` → `rdc_report_render` → `rdc_report` → `rdc_analysis`. A cycle breaks
+  `rdc_notable`/`rdc_recommend` → `rdc_report_render` → `rdc_report` → `rdc_analysis`, with the A/B chain
+  beside it: `rdc_image` (a leaf) → `rdc_ab_render` → `rdc_ab` → `rdc_analysis`, and `rdc_passdiff` on the
+  capture side, above `rdc_payloads`. A cycle breaks
   `from X import *` at import time (a partially initialised module exports only what it has defined so far), so
   put a shared helper *below* the modules that need it instead of importing upwards — that is why `_name_suffix`
   lives in `rdc_resources` and the loaders in `rdc_cache`.
@@ -175,7 +178,9 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   stream cache and the loaders, `rdc_scan.py` the slice scan over a whole stream, `rdc_dxbc.py` the shader containers, `rdc_resources.py` the resource table and
   everything read out of it (formats, heaps, root signatures, `RDEF`), `rdc_payloads.py` the chunk payload
   decoders, `rdc_commands.py` the commands, `rdc_report.py`/`rdc_bundle.py`/`rdc_passes.py`/`rdc_detect_*.py`/
-  `rdc_report_render.py` the report, `rdc_engine_schema.py` the engine-name interpretation (`engine-schemas/`),
+  `rdc_report_render.py` the report, `rdc_passdiff.py` the two captures' marker trees, `rdc_image.py` the PNG
+  reader/writer and the pixel maths (a leaf, like `rdc_profile`), `rdc_ab.py`/`rdc_ab_render.py` the A/B of
+  two bundles and its Markdown, `rdc_engine_schema.py` the engine-name interpretation (`engine-schemas/`),
   `rdc_schemas.py` the JSON contract, `rdc_analysis.py` the CLI that re-exports
   them all. C++: `src/cpp/replay_dump.cpp` the entry point, `common.h` the modules' shared declarations,
   `text.cpp`/`output.cpp` the printing, `capture.cpp` the engine session, `actions.cpp` the action tree,
@@ -209,6 +214,22 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `tests/test_rdc_report.py` pin the document. A change that alters those bytes is deliberate or it is a bug.
   Its "what this report cannot tell you" section names what is not implemented yet (REFERENCE §4.11): whatever lands
   there must update that section in the same change, or the report starts lying about its own coverage.
+- **An A/B is only as honest as the rule that made each match.** `replaydiff` (§4.16) aligns two passes by
+  marker path, then by innermost name, then by the resources both write, then by call order *within one call
+  kind*; every fallback writes itself into the row's note, so a reader can disagree with a match instead of
+  having to guess how it was made. `passdiff` offers a rename only for a pair in the same slot, under the same
+  parent marker, with the same call count, and says the file cannot prove a rename — the version built on
+  position and call count alone suggested nineteen renames between two frames that share almost no passes. A
+  bundle's `shaders` identity is the `hash` the driver stamps (a size is not an identity: two shaders can share
+  one), and a bundle from before the hash says `no-hash-in-this-bundle` rather than calling equal reflection the
+  same shader. **An image nobody looked at is not an unchanged image**: pairs are compared by bytes, decoded
+  while `--image-detail` lasts, and the rest are named as differing with the reason they were not compared;
+  decoding is pure Python at ~0.15 s/MB (`rdc_image`), which is why the cap exists and why the number is in the
+  document.
+- A marker's name offline is read from a run of at least `rdc_passdiff.MARKER_MINLEN` (3) printable
+  characters, because a marker payload's own frame decodes as one- and two-character runs *before* the name
+  does (measured on both real captures: `B` where the name is `MobileSceneRender`). `markers`/`summary` have
+  always used the same floor; a marker genuinely called `A` reads as `<unnamed>` and that is the cost.
 - The engine vocabulary (`engine-schemas/*.json`, `rdc_engine_schema.py`) keeps three rules, and they are what
   make it worth reading: a concept is claimed **only** because the capture contains a name the table lists (a
   constant block, a shader entry point, a resource, a marker, a pass *structure* string), every claim carries

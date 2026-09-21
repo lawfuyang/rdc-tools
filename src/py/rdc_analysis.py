@@ -37,6 +37,11 @@ Usage:
   python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
   python rdc_analysis.py dump-shaders <rdc> <outdir>
   python rdc_analysis.py report   <rdc> <bundleDir> [outDir]   # frame report from `replay_dump dump`
+  python rdc_analysis.py passdiff <a.rdc> <b.rdc> [--all]     # the two files' pass lists, by marker path
+  python rdc_analysis.py replaydiff <bundleA> <bundleB> [--out <dir>] [--with-images]
+                                   [--image-detail N] [--threshold N]
+                                                         # A/B of two bundles: passes, state, values,
+                                                         #   shaders and (with --with-images) the renders
   python rdc_analysis.py validate <file|bundleDir> <schemaDir> [kind]  # documents vs the schemas
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
   python rdc_analysis.py bootstrap [tag]                   # fetch the RenderDoc source the chunk names come from
@@ -106,6 +111,10 @@ from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPO
 
 from rdc_types import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_stream import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_passdiff import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_ab import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_ab_render import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_image import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_cache import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_chunkmap import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -262,6 +271,17 @@ def _dispatch() -> None:
         cmd_dump_shaders(path, argv[3])
     elif cmd == 'report':
         sys.exit(cmd_report(path, argv[3], argv[4] if len(argv) > 4 else None))
+    elif cmd == 'passdiff':
+        if len(argv) < 4:
+            print('usage: rdc_analysis.py passdiff <a.rdc> <b.rdc> [--all]')
+            sys.exit(2)
+        sys.exit(cmd_passdiff(path, argv[3], '--all' in argv[4:]))
+    elif cmd == 'replaydiff':
+        if len(argv) < 4:
+            print('usage: rdc_analysis.py replaydiff <bundleA> <bundleB> [--out <dir>] [--with-images] '
+                  '[--image-detail N] [--threshold N]')
+            sys.exit(2)
+        sys.exit(cmd_replaydiff(path, argv[3], argv[4:]))
     elif cmd == 'validate':
         if len(argv) < 4:
             print('usage: rdc_analysis.py validate <file|bundleDir> <schemaDir|one.schema.json> [kind]')

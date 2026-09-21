@@ -39,6 +39,10 @@ rdc-tools/
     rdc_commands.py     the commands themselves (draws, resources, descriptors, verify, ...)
     rdc_scan.py         the whole-stream string scan, split across processes (§4.13)
     rdc_report.py       the frame report: a bundle in, deterministic Markdown/JSON out (§4.11)
+    rdc_ab.py           the A/B of two bundles: alignment, state/values/shaders/renders (§4.16)
+    rdc_ab_render.py    the A/B's Markdown writer
+    rdc_passdiff.py     the two files' marker trees side by side, offline (§4.16)
+    rdc_image.py        PNG in and out, the pixel difference and the perceptual hash
     rdc_bundle.py       the bundle's types and loader
     rdc_passes.py       pass reconstruction and the frame-at-a-glance roll-ups
     rdc_notable.py      which passes and resources are worth looking at first, and the rules that say so
@@ -199,6 +203,7 @@ either way. For scripted queries inside one Python session, keep `stream` in a v
 | Why is my capture unreadable / what compression is used? | `blocks` |
 | What is the shape of the frame (passes, draws, chunk histogram)? | `summary` |
 | What does this whole frame do, pass by pass, and what is off about it? | `report <rdc> <bundleDir>` — after `replay_dump dump` (REFERENCE §4.11) |
+| How do two captures differ (mobile vs PC, before vs after)? | `passdiff <a.rdc> <b.rdc>`, then `replaydiff <bundleA> <bundleB>` after a `dump` of each (REFERENCE §4.16) |
 | Do the driver's documents still match their contract? | `validate <bundleDir> schema` (REFERENCE §4.12) |
 | Show me the pass/primitive tree | `markers` |
 | Which draw is the one I care about? | `markers`, then `chunks <limit> List_Draw` |
@@ -245,7 +250,8 @@ not exist yet, everything else runs today.
 
 * **Offline today** — `sections`, `blocks`, `resources`, `descriptors`, `verify`, `summary`, `markers`,
   `chunks`, `chunk`, `draws`, `deps`, `memory`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`,
-  `dxbc`, `dump-chunk`, `dump-shaders`, `cache`, `selftest` (REFERENCE §4).
+  `dxbc`, `dump-chunk`, `dump-shaders`, `report`, `passdiff`, `replaydiff`, `validate`, `cache`, `selftest`
+  (REFERENCE §4; the A/B pair is §4.16).
 * **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `pixelhistory`, `shaders`, `cb`,
   `textures`,
   `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters` (`--per-pass`), `crosscheck`,
@@ -255,8 +261,8 @@ not exist yet, everything else runs today.
   pass rather than at an id.
 * **Roadmap** — `watch`, `debug --group`, `sweep` (ROADMAP §1), shader debugging, overlays
   (ROADMAP §2), `mesh --stage/--obj`, texture subresources (ROADMAP §3), `--format`, structural `diff`,
-  the root-signature/chunk cross-check, the VRAM budget (ROADMAP §4), `replaydiff` (ROADMAP §5), the capture
-  corpus and the golden/fixture tests (ROADMAP §6).
+  the root-signature/chunk cross-check, the VRAM budget (ROADMAP §4), the capture corpus and the
+  golden/fixture tests (ROADMAP §6).
 
 ### The rule, and why it is the rule
 
@@ -356,20 +362,28 @@ history says the shader itself is responsible, patch it *(REFERENCE §9)* — fo
 and re-render the draw to see what changes. That experiment is often faster than reasoning about the
 disassembly.
 
-**C. "Why do mobile and PC look different?"** The project's original question, and the reason `diff` and
-`replaydiff` exist.
+**C. "Why do mobile and PC look different?"** The project's original question, and the reason `passdiff` and
+`replaydiff` exist (REFERENCE §4.16).
 
 ```powershell
-python src\py\rdc_analysis.py diff mobile.rdc pc.rdc                      # roadmap §4: the file's view, no device
-.\bin\replay_dump.exe replaydiff mobile.rdc pc.rdc --with-images # roadmap §5: what the engine saw, and the renders
+python src\py\rdc_analysis.py passdiff mobile.rdc pc.rdc                      # the two files' pass lists, no device
+.\bin\replay_dump.exe dump mobile.rdc ab\mobile --with-images        # the engine's answers for each side
+.\bin\replay_dump.exe dump pc.rdc     ab\pc     --with-images        #   (one replay at a time: §9)
+python src\py\rdc_analysis.py replaydiff ab\mobile ab\pc --out ab\diff --with-images
 ```
 
-Then narrow by name rather than by index: the pass list (aligned by **marker path**, so it survives
-re-captures), the named cbuffer values that moved (`watch <name>` *(ROADMAP §1)* turns that into a table over the whole
-frame), and the tables in `engine-schemas/` *(REFERENCE §4.11)* to say which *concept* the differing block is (`IndirectLightingCache`,
-`Material`, …). Where the two engines' reflections disagree on names entirely, the offline `resources` and
-`rootsig` views are the fallback: they compare what the *file* recorded. State the GPU caveat (the pitfalls above) in the
-answer: both frames were replayed on *this* machine's GPU.
+`passdiff` first, because it is free and it answers "is the same pass even there": the marker trees are
+aligned by **path**, then by the innermost name (a path carries dynamic text — `CullLights 32x20x8` against
+`22x14x8`), with the passes only one side has listed. `replaydiff` then compares what the engine saw for the
+passes that matched: their structure, the state rows at each pass's first event, every named constant value
+member by member, each shader's **hash** (so "a different shader" is a fact), and — with `--with-images` —
+each pass's readback, by bytes first and pixel by pixel up to `--image-detail`, with a heat map per compared
+pair. It writes `replaydiff.md` and `replaydiff.json` and prints a summary. Then narrow by name rather than
+by index: the named cbuffer values that moved (`watch <name>` *(ROADMAP §1)* turns that into a table over the
+whole frame), and the tables in `engine-schemas/` *(REFERENCE §4.11)* to say which *concept* the differing
+block is (`IndirectLightingCache`, `Material`, …). Where the two engines' reflections disagree on names
+entirely, the offline `resources` and `rootsig` views are the fallback: they compare what the *file* recorded.
+State the GPU caveat (the pitfalls above) in the answer: both frames were replayed on *this* machine's GPU.
 
 **D. "Is this texture the problem?"**
 
@@ -382,7 +396,8 @@ python src\py\rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name 
 Three things to check, in this order: is the *content* right (the decoded PNG), is the *format* right for how
 it is sampled (the RT-format audit, *ROADMAP §3*), and was it *written* before it was read (`deps` *(REFERENCE §4.15)*:
 the write→read chain). To prove its contribution rather than argue about it, substitute a flat texture for it and
-diff the renders *(ROADMAP §2, §5)* — if the picture does not change, the texture is not the problem.
+diff the renders (`imgdiff`, or `replaydiff --with-images` for a whole frame — REFERENCE §4.16) — if the picture
+does not change, the texture is not the problem.
 
 **E. "What is in this uniform — and is it ever what we expect?"**
 
@@ -547,8 +562,8 @@ built on.
   reference, §5 worked examples, §6 verified payload facts, §7 how to add a command, §8 pitfalls and known
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
 * **`ROADMAP.md`** — what is not implemented yet, in priority order: the driver's navigation and experiment
-  commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4),
-  two-capture A/B (§5), the verification corpus and CI (§6), the work beyond the local desktop (§7),
+  commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4), the
+  stored golden A/B (§5), the verification corpus and CI (§6), the work beyond the local desktop (§7),
   robustness and scope (§8), the REFERENCE §8 items being closed (§9), and the suggested order (§10).
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.

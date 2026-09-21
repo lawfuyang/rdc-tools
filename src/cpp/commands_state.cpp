@@ -536,6 +536,10 @@ int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, con
 //: that the semantic name alone does not show. The *type* is what a format rule needs: a `float4`
 //: written into an 8-bit UNORM target is a different thing from a `uint4` written into the same
 //: target, and the target's format is already in the bundle.
+//:
+//: Every stage also carries the SHA-256 of the shader's own bytes: `bytes` is a size and two different
+//: shaders can share one, so an A/B of two captures (or of one capture through two builds) needs the
+//: digest to say "the same shader" or "a different one" as a fact rather than as a guess.
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                bool bWantDisasm)
 {
@@ -586,6 +590,9 @@ int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, in
     Field("entry", refl->entryPoint);
     Field("encoding", (long long)refl->encoding);
     Field("bytes", (long long)refl->rawBytes.size());
+    // The shader's identity is its bytes, not its size: two captures (or two bundles of one capture)
+    // are compared by this, and `bytes` alone would call a changed shader body the same shader.
+    Field("hash", Sha256Bytes(refl->rawBytes.data(), refl->rawBytes.size()));
 
     ArrayOpen("constantBlocks");
     for(size_t b = 0; b < refl->constantBlocks.size(); b++)

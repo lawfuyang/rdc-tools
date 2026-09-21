@@ -45,6 +45,9 @@ Usage:
   python rdc_analysis.py validate <file|bundleDir> <schemaDir> [kind]  # documents vs the schemas
   python rdc_analysis.py cache    [list|dir|clear]         # decompressed-stream cache
   python rdc_analysis.py bootstrap [tag]                   # fetch the RenderDoc source the chunk names come from
+  python rdc_analysis.py chunk-names [--check|--write] [--out <file>] [--src <tree>]
+                                                         # the bundled enum table (src/py/rdc_chunknames.py)
+                                                         #   against a source tree: --write regenerates it
   python rdc_analysis.py build    [--check]                # are the built artefacts (bin/replay_dump.exe,
                                                           #   bin/rdc_lz4.dll) older than their sources,
                                                           #   and build them (`--check` only reports)
@@ -101,10 +104,12 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         render_report_markdown as render_report_markdown,
                         report_caveats as report_caveats,
                         severity_of as severity_of, severity_table as severity_table)
+from rdc_chunknames import VERSION as BUNDLED_NAMES_VERSION  # the bundled table's RenderDoc version
 from rdc_renderdoc_src import (BootstrapError as BootstrapError,
                                NO_BOOTSTRAP_ENV as NO_BOOTSTRAP_ENV, describe as describe,
                                ensure as ensure, is_populated as is_populated, latest_tag as latest_tag,
-                               missing_parts as missing_parts, target_dir as target_dir)
+                               missing_parts as missing_parts, target_dir as target_dir,
+                               version as tree_version)
 from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPORT_SCHEMA,
                          SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,
@@ -217,7 +222,16 @@ def cmd_bootstrap(argv: Sequence[str]) -> int:
         print('error: %s' % exc)
         return 1
     print('renderdoc-src : %s (%s)' % (root, 'already populated' if already else 'fetched'))
-    print('chunk names   : %d name(s) parsed from it' % len(load_chunk_names(root)))
+    # What the *tree* contributes, which is what this command is about: `load_chunk_names` would count the
+    # bundled table as well, and the point of that number here is "how much of the vocabulary came from the
+    # tree you just fetched". The table's own version is reported next to it, so a tree that has moved on
+    # says so (`chunk-names --write` is what closes that gap).
+    print('version       : %s' % (tree_version(root) or 'not stated by the tree'))
+    print('chunk names   : %d system + %d driver name(s) parsed from it'
+          % (len(parse_enum(root, 'system')), len(parse_enum(root, 'driver'))))
+    if BUNDLED_NAMES_VERSION and tree_version(root) != BUNDLED_NAMES_VERSION:
+        print('bundled table : RenderDoc %s -- `chunk-names --write` regenerates it from this tree'
+              % BUNDLED_NAMES_VERSION)
     return 0
 
 def main() -> None:
@@ -242,6 +256,8 @@ def _dispatch() -> None:
         sys.exit(cmd_cache(argv[2:]))
     if len(argv) > 1 and argv[1] == 'bootstrap':
         sys.exit(cmd_bootstrap(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'chunk-names':
+        sys.exit(cmd_chunknames(argv[2:]))
     if len(argv) > 1 and argv[1] == 'build':
         sys.exit(cmd_build(argv[2:]))
     if len(argv) > 1 and argv[1] == 'goldens':

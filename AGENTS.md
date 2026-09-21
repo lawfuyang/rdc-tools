@@ -101,7 +101,8 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   module (`from rdc_commands import *`), so `R.<anything>` keeps working for the tests and for scripts. Do not
   turn it back into one file, and do not add an `__init__.py`.
 - **A module may only import modules beneath it**, and the layering is: `rdc_renderdoc_src` (the tree, and
-  fetching it) and `rdc_driver` (the driver's binary against the sources it is built from, and the build that
+  fetching it), `rdc_chunknames` (the bundled enum table: generated data, a leaf) and
+  `rdc_driver` (the driver's binary against the sources it is built from, and the build that
   catches it up) → `rdc_types` → `rdc_chunkmap` → `rdc_stream` → `rdc_cache`/`rdc_dxbc` → `rdc_resources` →
   `rdc_payloads` → `rdc_commands` → `rdc_analysis`,
   and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors →
@@ -111,6 +112,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   `from X import *` at import time (a partially initialised module exports only what it has defined so far), so
   put a shared helper *below* the modules that need it instead of importing upwards — that is why `_name_suffix`
   lives in `rdc_resources` and the loaders in `rdc_cache`.
+- **The bundled enum table is generated, and the tree wins over it.** `src/py/rdc_chunknames.py` is written by
+  `chunk-names --write` from a RenderDoc source tree and carries that tree's version; `load_chunk_names` lays it
+  down as the floor and writes the tree's enums over it, so a tree that is present decides the spelling and a
+  machine without one still prints names (with a warning naming the table's version). Never edit the table by
+  hand: regenerate it when a tree moves on and keep the diff — `TestTheCheckedInTable` in
+  `tests/test_rdc_renderdoc_src.py` fails until you do (it skips where no tree is on the machine, which is CI,
+  the same rule `goldens --check` has).
 - **A rule the report prints is a rule the document carries.** The notable ranking, its inputs and the severity
   each detector's findings are grouped by are in `report.json` (`notables`, `severityTable`), not baked into the
   renderer: the renderer lays them out and joins the flags to their severity by `detector` alone. Adding a

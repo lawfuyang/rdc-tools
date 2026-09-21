@@ -29,7 +29,8 @@ rdc-tools/
     rdc_analysis.py     the CLI: the command table and the dispatch (run this)
     rdc_types.py        the shapes of what the tool reads, and the constants they are framed with
     rdc_profile.py      phase timing and live progress ($RDC_PROFILE / $RDC_PROGRESS, §4.13)
-    rdc_chunkmap.py     chunk id -> name, from the RenderDoc source tree's enums
+    rdc_chunkmap.py     chunk id -> name: the RenderDoc source tree's enums over the bundled table
+    rdc_chunknames.py   the bundled table itself: generated data, not written by hand (§1.1)
     rdc_renderdoc_src.py  where that tree is, and fetching it when it is not there (§1.1)
     rdc_stream.py       the container and the frame stream (sections, framing, LZ4/Zstd)
     rdc_cache.py        the decompressed-stream cache, and `load_stream`
@@ -92,7 +93,7 @@ rdc-tools/
 | Python 3.8+ | tested with `C:\Program Files\Python311\python.exe` |
 | `zstandard` (optional) | only for Zstd-compressed sections. Not needed for the captures used so far (they are LZ4, which the next row covers). `pip install zstandard` if `sections` reports `zstd`. |
 | **`bin/rdc_lz4.dll`** | **the decoder, and the build writes it** (`cmake --build build`, from `src/cpp/third_party/lz4`) — so a tree that has not built it cannot read a capture's stream, and says so, naming the command. Nothing to install and no `pip` package involved; `$RDC_LZ4_DLL` points at a system `liblz4` (`lz4.dll` / `liblz4.so.1` / `liblz4.dylib`) instead if one is there. Decodes `desktop-2`'s 1.47 GB stream in **0.54 s** (REFERENCE §3.2). |
-| **RenderDoc source tree** | **Fetched for you** — the tool reads the *real implementation of RenderDoc* (the chunk-name enums) from a `renderdoc-src` folder in the root folder, and downloads the latest tagged source into it the first time a command needs a name (see §1.1). Nothing to clone. On a machine with no network the tool still runs, printing numeric chunk IDs (`1040`) instead of names (`List_DrawIndexedInstanced`); `bootstrap` fetches it up front, and `$RDC_NO_BOOTSTRAP` turns the fetch off. |
+| **RenderDoc source tree** | **Preferred, optional, and fetched for you** — chunk names are the *capture's* vocabulary when the tool can read the **real implementation of RenderDoc** (a `renderdoc-src` folder in the root folder, downloaded from the latest tag the first time a command needs a name, §1.1). When it cannot — no network, `$RDC_NO_BOOTSTRAP`, a tree that is absent, older, or half-extracted — the names come from a **bundled table** generated from a released RenderDoc, so a chunk still reads `List_DrawIndexedInstanced` rather than `1040`, and the warning says which version those names are. `bootstrap` fetches the tree up front. |
 | A `.rdc` capture | any D3D12 capture; Vulkan captures parse at container level but the chunk decoders are D3D12-specific |
 
 Run it as:
@@ -103,13 +104,13 @@ Run it as:
 
 Running with no arguments prints the command list (the module docstring).
 
-### 1.1 The RenderDoc source tree — fetched for you
+### 1.1 Chunk names — the source tree, and the bundled table behind it
 
 The tool does **not** guess chunk names: it parses the chunk-name enums out of the **real RenderDoc
-implementation** at runtime, so the names it prints match the RenderDoc version that produced the capture.
-That tree used to be a manual step. It is now **fetched on demand**: the first command that needs a chunk name
-downloads the latest tagged RenderDoc source from GitHub and extracts it into `renderdoc-src` in the root
-folder. Nothing to clone, nothing to unzip.
+implementation** at runtime, so the names it prints are the vocabulary of the RenderDoc version that produced
+the capture. That tree used to be a manual step. It is now **fetched on demand**: the first command that needs
+a chunk name downloads the latest tagged RenderDoc source from GitHub and extracts it into `renderdoc-src` in
+the root folder. Nothing to clone, nothing to unzip.
 
 ```
 <root>/rdc-tools/                      <- the root folder of this tool
@@ -120,14 +121,35 @@ folder. Nothing to clone, nothing to unzip.
         renderdoc/
             core/core.h                        SystemChunk enum      (PushMarker, InitialContents, ...)
             driver/d3d12/d3d12_common.h        D3D12Chunk enum       (List_DrawIndexedInstanced, ...)
+            common/dds_readwrite.cpp           DXGI_FORMAT           (R8G8B8A8_UNORM, ...)
         renderdoccmd/
         ...
 ```
 
-Only two header files are actually *read* (`renderdoc/core/core.h` and
-`renderdoc/driver/d3d12/d3d12_common.h`) — "populated" means those two exist, which is also how a
+Only those three files are actually *read* — "populated" means the first two exist, which is also how a
 half-extracted tree is recognised — but the whole tree is kept, because the rest is what you consult while
 extending the tool (REFERENCE §6).
+
+**A tree is preferred, not required.** `src/py/rdc_chunknames.py` holds the same three enums, generated from a
+released RenderDoc and checked in. It is the *floor*, and a tree's enums are written over the top of it:
+
+* a tree that is there names what it knows, in the capture's own version's vocabulary — which is the whole
+  reason to read one, and why a tree matching the capture beats the table;
+* a machine with **no tree at all** — a fresh clone with no network, a locked-down box — still prints
+  `List_DrawIndexedInstanced`, and the warning on stderr says which RenderDoc those names are from, because
+  the capture may be another version's;
+* a tree that is **older than the capture**, or half-extracted, no longer costs the names of the ids it does
+  not have: the table covers them, and the warning says so.
+
+The table is regenerated from a tree and never edited by hand:
+
+```powershell
+& $py src\py\rdc_analysis.py chunk-names            # is the table what the tree would generate?
+& $py src\py\rdc_analysis.py chunk-names --write    # regenerate it from renderdoc-src, then read the diff
+```
+
+`--check` exits **2** when there is no tree on this machine to compare against, like `goldens --check`: a tree
+that is not there is the state of a working tree, not a failure.
 
 **Doing it explicitly.** Every command fetches on demand; these run the same step up front, which is what a
 fresh clone, a script or a pinned version wants:
@@ -138,10 +160,10 @@ fresh clone, a script or a pinned version wants:
 ```
 
 It downloads ~54 MB, extracts ~6,000 files (~900 MB on disk — the full source tree, docs included) in about
-13 seconds, and prints where it put them and how many chunk names parsed out of it. A second run is a silent
-no-op. The extracted tree is RenderDoc's own checkout, so the version it reports (the tag) is the version of
-the enums; if that differs from the RenderDoc that recorded the capture, the tool says so when it names a
-chunk.
+13 seconds, and prints where it put them, the version the tree declares and how many chunk names it parsed
+out of it. A second run is a silent no-op. The extracted tree is RenderDoc's own checkout, so the version it
+reports is the version of the enums; when that differs from the RenderDoc that recorded the capture — or from
+the bundled table's release — the tool says so when it names a chunk.
 
 **The driver's own build.** `bin\replay_dump.exe` is written by `cmake --build build` from `src/cpp`, and a
 binary older than its sources answers with the *previous* revision's behaviour while looking exactly like a
@@ -254,8 +276,8 @@ not exist yet, everything else runs today.
 
 * **Offline today** — `sections`, `blocks`, `resources`, `descriptors`, `verify`, `summary`, `markers`,
   `chunks`, `chunk`, `draws`, `deps`, `memory`, `rootsig`, `strings`, `names`, `grep`, `dump`, `count`, `hex`,
-  `dxbc`, `dump-chunk`, `dump-shaders`, `report`, `passdiff`, `replaydiff`, `validate`, `goldens`, `cache`,
-  `selftest` (REFERENCE §4; the A/B pair is §4.16 and the corpus harness §4.17).
+  `dxbc`, `dump-chunk`, `dump-shaders`, `report`, `passdiff`, `replaydiff`, `validate`, `goldens`, `chunk-names`,
+  `bootstrap`, `cache`, `selftest` (REFERENCE §4; the A/B pair is §4.16 and the corpus harness §4.17).
 * **Driver today** — `info`, `draws`, `find`, `state`, `statediff`, `buffer`, `pixelhistory`, `shaders`, `cb`,
   `textures`,
   `mesh`, `image`, `sheet`, `imgdiff`, `patch`, `counters` (`--per-pass`), `crosscheck`,

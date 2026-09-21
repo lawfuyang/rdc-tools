@@ -127,7 +127,7 @@ def cmd_resources(path: str, limit: int = 200, name_filter: Optional[str] = None
     print('resources: %d ids (%d with a descriptor, %d named)'
           % (len(table), described, named))
     if not formats:
-        print('note: DXGI format names need the RenderDoc source (README 1.1); showing numbers')
+        print('note: no format names at all (no source tree, no bundled table); showing numbers')
     shown = 0
     for rid in sorted(table):
         info = table[rid]
@@ -262,7 +262,10 @@ def cmd_chunks(path: str, limit: int = 200, name_filter: Optional[str] = None) -
     names = rdc_chunkmap.load_chunk_names()
     print('stream %d bytes [%s]; known chunk names: %d' % (len(stream), how, len(names)))
     if not names:
-        print('WARNING: RenderDoc source not found at %r -> numeric chunk ids only' % rdc_chunkmap.RENDERDOC_SRC)
+        # Only when there is nothing to name them with at all: no source tree *and* an empty bundled table.
+        # A tree that is merely absent is covered by `rdc_chunknames`, which warns about its own version on
+        # stderr (`load_chunk_names`), so saying it again here would be the same fact twice.
+        print('WARNING: no chunk names at all (no source tree, no bundled table) -> numeric chunk ids')
     total = shown = 0
     for ch in iter_chunks(stream):
         total += 1

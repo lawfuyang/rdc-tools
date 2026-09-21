@@ -7,26 +7,23 @@ from rdc_chunkmap import *  # noqa: F401,F403
 from rdc_stream import *  # noqa: F401,F403
 from rdc_dxbc import *  # noqa: F401,F403
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_chunknames  # noqa: F401  (the bundled format names, when no tree is there)
 import rdc_profile
-
-import os
 
 from typing import Dict, List, Optional, Tuple
 
 def load_format_names(src_root: Optional[str] = None) -> Dict[int, str]:
-    """DXGI format id -> short name (`R8G8B8A8_UNORM`), from RenderDoc's own copy of the enum.
+    """DXGI format id -> short name (`R8G8B8A8_UNORM`): the tree's copy of the enum, else the bundled table.
 
-    `DXGI_FORMAT` belongs to the Windows SDK, but `common/dds_readwrite.cpp` carries a copy with
-    explicit values. Without the source tree this returns `{}` and formats print as numbers, exactly
-    like chunk names do (README 1.1). `src_root` defaults to `rdc_chunkmap.RENDERDOC_SRC` at call time, so tests
-    (and `$rdc_chunkmap.RENDERDOC_SRC`) can point it somewhere else.
+    `DXGI_FORMAT` belongs to the Windows SDK, but `common/dds_readwrite.cpp` carries a copy with explicit
+    values, and the bundled table carries that copy too -- so a machine with no source tree prints
+    `R8G8B8A8_UNORM` rather than `28`, the same fallback chunk names get (`rdc_chunkmap.load_chunk_names`,
+    README §1.1). `src_root` defaults to `rdc_chunkmap.RENDERDOC_SRC` at call time, so tests (and a patched
+    `rdc_chunkmap.RENDERDOC_SRC`) can point it somewhere else.
     """
-    path = os.path.join(rdc_chunkmap.RENDERDOC_SRC if src_root is None else src_root,
-                        'renderdoc', 'common', 'dds_readwrite.cpp')
-    if not os.path.isfile(path):
-        return {}
-    with open(path, encoding='utf-8', errors='replace') as fh:
-        raw = parse_chunk_enum(fh.read(), 'DXGI_FORMAT')
+    raw = rdc_chunkmap.parse_enum(rdc_chunkmap.RENDERDOC_SRC if src_root is None else src_root, 'formats')
+    if not raw:
+        raw = rdc_chunknames.FORMAT_NAMES
     return {fmt_id: name.replace('DXGI_FORMAT_', '', 1) for fmt_id, name in raw.items()}
 
 def _parse_resource(blob: Buffer, desc_off: int) -> Optional[ResourceInfo]:

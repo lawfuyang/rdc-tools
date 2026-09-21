@@ -35,6 +35,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
 
 import rdc_analysis as R             # noqa: E402
 import rdc_chunkmap as chunkmap      # noqa: E402
+import rdc_chunknames as chunknames  # noqa: E402
 import rdc_renderdoc_src as src      # noqa: E402
 
 #: What a populated tree needs, as paths under its root: the two enums the tool parses.
@@ -337,6 +338,113 @@ class TestWhatItWillNotDo(SrcCase):
         self.assertFalse(os.path.exists(root))
 
 
+class TestVersionOfATree(SrcCase):
+    """`rdc_renderdoc_src.version`: what the bundled table is stamped with, and what `bootstrap` reports.
+
+    It is read out of the tree rather than remembered from a fetch's tag: a tree can be hand-copied, and the
+    two numbers here are the ones RenderDoc's own build turns into the `progVersion` a capture header carries,
+    so the two are comparable as strings (that comparison is the reason a reader can judge a name at all).
+    """
+
+    def test_reads_the_two_numbers_the_header_declares(self):
+        root = self.tree(extra={'renderdoc/api/replay/version.h':
+                                '#define RENDERDOC_VERSION_MAJOR 2\n'
+                                '#define RENDERDOC_VERSION_MINOR 7\n'})
+        self.assertEqual(src.version(root), '2.7')
+
+    def test_a_tree_that_does_not_say_is_empty_rather_than_an_error(self):
+        self.assertEqual(src.version(self.tree()), '')
+        self.assertEqual(src.version(os.path.join(self.tmp, 'nothing-here')), '')
+
+
+class TestTheBundledTable(SrcCase):
+    """`chunk-names`: the table the tool falls back to, against the tree it is generated from."""
+
+    def run_chunk_names(self, *argv: str) -> Tuple[int, str]:
+        out = io.StringIO()
+        with mock.patch.object(sys, 'stdout', out):
+            code = chunkmap.cmd_chunknames(list(argv))
+        return code, out.getvalue()
+
+    def write_table(self, root: str) -> str:
+        path = os.path.join(self.tmp, 'generated_table.py')
+        code, out = self.run_chunk_names('--write', '--out', path, '--src', root)
+        self.assertEqual(code, 0, out)
+        return path
+
+    def test_the_generated_file_is_python_and_holds_what_the_tree_has(self):
+        """The table is a module the tool imports, so generating it has to produce valid Python that says
+        exactly what the tree said -- and it carries the tree's version and the command that rewrites it."""
+        root = self.tree(extra={'renderdoc/api/replay/version.h':
+                                '#define RENDERDOC_VERSION_MAJOR 1\n'
+                                '#define RENDERDOC_VERSION_MINOR 99\n'})
+        path = self.write_table(root)
+        with open(path, encoding='utf-8') as handle:
+            text = handle.read()
+        namespace: Dict[str, Any] = {}
+        exec(compile(text, path, 'exec'), namespace)      # it is a Python module, or it is not a table
+        self.assertEqual(namespace['VERSION'], '1.99')
+        self.assertEqual(namespace['SYSTEM_CHUNKS'], chunkmap.parse_enum(root, 'system'))
+        self.assertEqual(namespace['DRIVER_CHUNKS']['D3D12'], chunkmap.parse_enum(root, 'driver'))
+        self.assertEqual(namespace['FORMAT_NAMES'], chunkmap.parse_enum(root, 'formats'))
+        self.assertIn('chunk-names --write', text)
+
+    def test_check_accepts_a_current_table_and_says_what_moved(self):
+        root = self.tree()
+        path = self.write_table(root)
+        code, out = self.run_chunk_names('--check', '--out', path, '--src', root)
+        self.assertEqual(code, 0)
+        self.assertIn('current', out)
+        # The tree moves on -- one chunk renamed, one added -- and the table is now out of date.
+        with open(os.path.join(root, 'renderdoc', 'driver', 'd3d12', 'd3d12_common.h'), 'w',
+                  encoding='utf-8') as handle:
+            handle.write('enum class D3D12Chunk : uint32_t\n{\n  PushMarker = 1001,\n'
+                         '  List_AddedLater = 1200,\n};\n')
+        code, out = self.run_chunk_names('--check', '--out', path, '--src', root)
+        self.assertEqual(code, 1)
+        self.assertIn('out of date', out)
+        self.assertRegex(out, r'driver: \d+ new, \d+ gone')     # which kind moved, and how much of it
+
+    def test_no_tree_is_exit_2_and_writes_nothing(self):
+        """A tree that is not on this machine is working-tree state, like a capture the goldens cannot read."""
+        path = os.path.join(self.tmp, 'never-written.py')
+        code, out = self.run_chunk_names('--check', '--out', path, '--src',
+                                         os.path.join(self.tmp, 'nothing-here'))
+        self.assertEqual(code, 2)
+        self.assertIn('no tree to compare with', out)
+        self.assertFalse(os.path.exists(path))
+
+    def test_write_refuses_a_half_extracted_tree(self):
+        """Writing from one would shrink the table to what that tree happens to have, which is backwards."""
+        path = os.path.join(self.tmp, 'never-written.py')
+        code, out = self.run_chunk_names('--write', '--out', path, '--src', self.tree(core=False))
+        self.assertEqual(code, 1)
+        self.assertIn('not a complete tree', out)
+        self.assertFalse(os.path.exists(path))
+
+    def test_an_unknown_option_is_a_usage_line_and_exit_2(self):
+        code, out = self.run_chunk_names('--nonsense')
+        self.assertEqual(code, 2)
+        self.assertIn('usage: rdc_analysis.py chunk-names', out)
+
+
+class TestTheCheckedInTable(unittest.TestCase):
+    """The checked-in `src/py/rdc_chunknames.py` against the tree this machine has, when it has one.
+
+    Skips without a tree (a fresh clone, CI) for the same reason `goldens --check` exits 2: whether the input
+    is on this machine is working-tree state, and a check that could not read its input has not passed.
+    """
+
+    def test_the_table_is_what_the_tree_would_generate(self):
+        root = chunkmap.RENDERDOC_SRC
+        if not src.is_populated(root):
+            self.skipTest('no RenderDoc source tree at %s' % root)
+        with open(chunkmap.table_path(), encoding='utf-8', newline='') as handle:
+            checked_in = handle.read()
+        self.assertEqual(checked_in.replace('\r\n', '\n'), chunkmap.table_text(root),
+                         'run `python src\\py\\rdc_analysis.py chunk-names --write` and keep the diff')
+
+
 class TestTheHook(SrcCase):
     """The tree is asked for by `load_chunk_names`, which is the only place the tool needs an enum."""
 
@@ -363,15 +471,20 @@ class TestTheHook(SrcCase):
         self.assertTrue(src.is_populated(root), 'the fetch filled the tree the caller named')
         self.assertIn('PushMarker', names.values())
 
-    def test_a_missing_tree_still_produces_the_warning_and_numeric_ids(self):
+    def test_a_missing_tree_still_produces_names_and_a_versioned_warning(self):
+        """The case the bundled table exists for: no tree, no network, and chunk names anyway.
+
+        The warning is what keeps that honest -- the names are a released RenderDoc's vocabulary while the
+        capture may be another version's -- so it is asserted here with the version in it, not just "a warning".
+        """
         root = self.tree(core=False, d3d12=False)
         stderr = io.StringIO()
         with mock.patch.dict(os.environ, {src.NO_BOOTSTRAP_ENV: '1'}):
             with mock.patch.object(chunkmap, '_SRC_WARNED', False):
                 with mock.patch.object(sys, 'stderr', stderr):
                     names = chunkmap.load_chunk_names(root)
-        self.assertEqual(names, {})
-        self.assertIn('RenderDoc source not found', stderr.getvalue())
+        self.assertIn('PushMarker', names.values())
+        self.assertIn('using bundled names for RenderDoc %s' % chunknames.VERSION, stderr.getvalue())
         self.assertIn('bootstrap', stderr.getvalue())
 
     def test_the_bootstrap_command_reports_where_the_tree_is(self):

@@ -1,12 +1,20 @@
-"""Chunk ids to names, and the classes of chunk this tool cares about: parsed out of the RenderDoc source tree at runtime (ROADMAP.md's environment convention), with a numeric fallback when that tree is absent."""
+"""Chunk ids to names, and the classes of chunk this tool cares about: the tree's enums where they are, the bundled table where they are not.
+
+The names come from the RenderDoc source tree at runtime (`ROADMAP.md`'s environment convention), which is
+what makes them the *capture's* vocabulary rather than this tool's guess. A tree that is absent, or from an
+older release, or half-extracted is no longer a reason to print `1207` instead of `List_DrawInstanced`: the
+checked-in `rdc_chunknames` table -- the same enums, generated from a released RenderDoc -- names what the
+tree does not, and the warning says which version those names are from (`chunk-names` regenerates it).
+"""
 
 from __future__ import annotations
 
 import os
 import re
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
+import rdc_chunknames        # the bundled table: the fallback the tree is preferred over
 import rdc_renderdoc_src     # the tree's location, and fetching it when it is not there
 
 CHUNK_CALLSTACK = 0x00010000
@@ -214,6 +222,45 @@ def align_up(x: int, a: int = ALIGN_UP_DEFAULT) -> int:
     """Round `x` up to the next multiple of `a` (chunks are 64-byte aligned)."""
     return (x + a - 1) & ~(a - 1)
 
+#: The three enums the tool names things with, and the key each one is known by here: the chunk ids every
+#: capture's stream shares (`SystemChunk`), the ones a driver adds on top of them (`D3D12Chunk`), and
+#: RenderDoc's own copy of `DXGI_FORMAT`, which is what `resources` prints a texture's format with.
+ENUM_KINDS: Tuple[str, ...] = ('system', 'driver', 'formats')
+
+
+def enum_path(src_root: str, kind: str, driver: str = 'D3D12') -> str:
+    """The file in a RenderDoc source tree that declares one of those enums."""
+    if kind == 'system':
+        return os.path.join(src_root, 'renderdoc', 'core', 'core.h')
+    if kind == 'formats':
+        return os.path.join(src_root, 'renderdoc', 'common', 'dds_readwrite.cpp')
+    lowered = driver.lower()
+    return os.path.join(src_root, 'renderdoc', 'driver', lowered, lowered + '_common.h')
+
+
+def enum_name(kind: str, driver: str = 'D3D12') -> str:
+    """The C++ enum's own name, which is what `parse_chunk_enum` has to match."""
+    if kind == 'system':
+        return 'SystemChunk'
+    if kind == 'formats':
+        return 'DXGI_FORMAT'
+    return driver + 'Chunk'
+
+
+def parse_enum(src_root: str, kind: str, driver: str = 'D3D12') -> Dict[int, str]:
+    """One enum out of a source tree, or `{}` when that tree does not have the file it lives in.
+
+    A missing file is not an error at this level: every caller has something to fall back on
+    (`load_chunk_names`, `load_format_names`), and a half-extracted tree is a state to report rather than
+    to raise on. `rdc_renderdoc_src.missing_parts` is what says whether a tree is complete.
+    """
+    path = enum_path(src_root, kind, driver)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8', errors='replace') as handle:
+        return parse_chunk_enum(handle.read(), enum_name(kind, driver))
+
+
 def parse_chunk_enum(text: str, enum_name: str) -> Dict[int, str]:
     """Parse a C++ enum into an {id: name} map.
 
@@ -244,40 +291,216 @@ def parse_chunk_enum(text: str, enum_name: str) -> Dict[int, str]:
         val += 1
     return out
 
+def _warn_bundled_names(src_root: str, missing: List[str]) -> None:
+    """The one line a run prints when some or all of the names are the bundled table's rather than the tree's.
+
+    It says which RenderDoc version those names are from -- a chunk named out of a 1.46 table while the
+    capture is 1.47 is a fact the reader has to have, not a detail -- what was missing, so the fix is
+    obvious, and where the fix is documented.
+    """
+    if os.path.isdir(src_root):
+        why = '%s is incomplete (%s)' % (src_root, ', '.join(missing))
+    else:
+        why = 'no RenderDoc source tree at %s' % src_root
+    version = ('RenderDoc %s' % rdc_chunknames.VERSION) if rdc_chunknames.VERSION \
+        else 'an unversioned bundled table'
+    sys.stderr.write(
+        'warning: using bundled names for %s (%s).\n'
+        '         Fetch the tree with `python src\\py\\rdc_analysis.py bootstrap` to name chunks with the\n'
+        '         enums of the version that recorded the capture: a chunk neither of them has prints as a\n'
+        '         number (see README section 1.1).\n' % (version, why))
+
+
 def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: str = 'D3D12') -> Dict[int, str]:
-    """Build the chunk-id -> name map from the RenderDoc source enums.
+    """Build the chunk-id -> name map: the tree's enums where they are, the bundled table where they are not.
 
     The tree is asked for first (`rdc_renderdoc_src.ensure`), which fetches the latest tagged RenderDoc source
     when it is absent and the network allows it -- this function is the only place the tool needs an enum, so
     it is the only place the fetch is hooked, and every command that prints chunk names goes through it.
 
-    Warns once on stderr when there is still no tree (no network, `RDC_NO_BOOTSTRAP`, or a `$RENDERDOC_SRC`
-    that does not hold one); the tool then falls back to numeric ids and everything else keeps working (see
-    README 1.1).
+    The order of the two sources is the whole design: the **table is the floor and the tree is written over
+    it**. A tree that is there names everything it knows -- it is the preferred source, and reading it is what
+    makes the names the capture's own version's vocabulary -- while a tree that is absent, or from an older
+    release, or half-extracted no longer costs the names of the ids it does not mention. Before the table
+    existed, the second case printed numeric ids.
+
+    Warns once on stderr while the tree is incomplete, naming the version the bundled names are from; the rest
+    of the tool is unaffected either way, because a name is only ever printed (README section 1.1).
     """
     global _SRC_WARNED
-    names: Dict[int, str] = {}
     src_root = rdc_renderdoc_src.ensure(src_root)
-    core = os.path.join(src_root, 'renderdoc', 'core', 'core.h')
-    if not os.path.isfile(core) and not _SRC_WARNED:
+    names: Dict[int, str] = dict(rdc_chunknames.SYSTEM_CHUNKS)
+    names.update(rdc_chunknames.DRIVER_CHUNKS.get(driver, {}))
+    names.update(parse_enum(src_root, 'system'))
+    names.update(parse_enum(src_root, 'driver', driver))
+    wanted = [enum_path(src_root, 'system'), enum_path(src_root, 'driver', driver)]
+    missing = [os.path.relpath(path, src_root).replace(os.sep, '/')
+               for path in wanted if not os.path.isfile(path)]
+    if missing and not _SRC_WARNED:
         _SRC_WARNED = True
-        sys.stderr.write(
-            'warning: RenderDoc source not found at %s\n'
-            '         (the convention is a `renderdoc-src` folder at the repository root). It is fetched\n'
-            '         automatically when the network allows it and this one was not, so chunk names fall\n'
-            '         back to numeric ids and everything else still works.\n'
-            '         Fetch it with `python src\\py\\rdc_analysis.py bootstrap`, point $RENDERDOC_SRC at a\n'
-            '         tree, or set %s to skip this (see README section 1.1).\n'
-            % (src_root, rdc_renderdoc_src.NO_BOOTSTRAP_ENV))
-    if os.path.isfile(core):
-        with open(core, encoding='utf-8', errors='replace') as fh:
-            names.update(parse_chunk_enum(fh.read(), 'SystemChunk'))
-    d = driver.lower()
-    drv = os.path.join(src_root, 'renderdoc', 'driver', d, d + '_common.h')
-    if os.path.isfile(drv):
-        with open(drv, encoding='utf-8', errors='replace') as fh:
-            names.update(parse_chunk_enum(fh.read(), driver + 'Chunk'))
+        _warn_bundled_names(src_root, missing)
     return names
+
+
+#: The checked-in table's file name: next to this module, and the only place it is imported from.
+TABLE_NAME = 'rdc_chunknames.py'
+
+
+def table_path() -> str:
+    """Where the bundled table lives."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), TABLE_NAME)
+
+
+def table_text(src_root: str, driver: str = 'D3D12') -> str:
+    """The bundled table's text, generated from one RenderDoc source tree.
+
+    Deterministic on purpose -- ids sorted, one entry per line, no timestamps and no machine paths -- because
+    the file is checked in, and `chunk-names --check` compares it byte for byte with what a tree generates.
+    The docstring it writes names the version it is from and the command that rewrites it, so the file itself
+    says how to keep it true.
+    """
+    version = rdc_renderdoc_src.version(src_root)
+    # The docstring is written **raw** (`r"""`): it names a command with Windows separators in it
+    # (`src\py\...`), and in a normal docstring that backslash would have to be doubled in the text to stay
+    # one character -- a generator detail leaking into the file a reader sees, and a lint warning when it
+    # leaks the other way.
+    header = [
+        'r"""The enum names the tool falls back to: %s, generated by `chunk-names --write`.' % (
+            'RenderDoc %s' % version if version else 'a RenderDoc source tree that did not say its version'),
+        '',
+        'The names come from a RenderDoc source tree at runtime, so that they are the vocabulary of the version',
+        'that recorded the capture (README section 1.1). This file is what the tool names things with when that',
+        'tree is absent, or older than the capture, or half-extracted: the same three enums, generated once',
+        'from a released RenderDoc and checked in, so a machine with no network and no tree still prints',
+        '`List_DrawIndexedInstanced` rather than `1207`.',
+        '',
+        'Generated from `renderdoc/core/core.h`, `renderdoc/driver/%s/%s_common.h` and' % (
+            driver.lower(), driver.lower()),
+        '`renderdoc/common/dds_readwrite.cpp` of that tree. The tree always wins where it is present -- this is',
+        'the floor, not the source -- and `python src\\py\\rdc_analysis.py chunk-names --check` reports when it',
+        'has drifted from one. **Edit nothing here by hand**: run that command with `--write`.',
+        '"""',
+        'from __future__ import annotations',
+        '',
+        'from typing import Dict',
+        '',
+        'VERSION = %r' % version,
+    ]
+    body: List[str] = ['', 'SYSTEM_CHUNKS: Dict[int, str] = {']
+    body += ['    %d: %r,' % (cid, name) for cid, name in sorted(parse_enum(src_root, 'system').items())]
+    body += ['}', '', 'DRIVER_CHUNKS: Dict[str, Dict[int, str]] = {', "    '%s': {" % driver]
+    body += ['        %d: %r,' % (cid, name)
+             for cid, name in sorted(parse_enum(src_root, 'driver', driver).items())]
+    body += ['    },', '}', '',
+             "#: RenderDoc's copy of `DXGI_FORMAT`, as written there: `resources` strips the prefix.",
+             'FORMAT_NAMES: Dict[int, str] = {']
+    body += ['    %d: %r,' % (cid, name) for cid, name in sorted(parse_enum(src_root, 'formats').items())]
+    body += ['}']
+    return '\n'.join(header + body) + '\n'
+
+def _table_counts(table_text_bytes: str) -> str:
+    """`N system + N driver + N format name(s)`, counted off a table file rather than imported from it."""
+    counts = {kind: len(re.findall(r'^\s+\d+: ', block, re.M)) for kind, block in
+              ((kind, part) for kind, part in zip(ENUM_KINDS, _table_blocks(table_text_bytes)))}
+    return '%d system + %d driver + %d format name(s)' % (counts['system'], counts['driver'],
+                                                          counts['formats'])
+
+
+def _table_blocks(text: str) -> List[str]:
+    """Split a table file into its three dict bodies, in `ENUM_KINDS` order.
+
+    Read back out of the *text* rather than imported, so a table being compared (`--out <file>`) does not
+    have to be the module this process already has.
+    """
+    blocks = re.split(r'^(?:SYSTEM_CHUNKS|DRIVER_CHUNKS|FORMAT_NAMES)\b.*$', text, flags=re.M)[1:]
+    return blocks + [''] * (len(ENUM_KINDS) - len(blocks))
+
+
+def cmd_chunknames(argv: Sequence[str] = ()) -> int:
+    """`chunk-names [--check|--write] [--out <file>] [--src <tree>]`: the bundled table against a source tree.
+
+    The table is what the tool names chunks with where a tree is not (`load_chunk_names`), so it has to keep
+    up with the tree this project reads from: `--check` (the default) says whether the checked-in file is what
+    that tree would generate, `--write` regenerates it. Exit codes are `build --check`'s: **0** the table is
+    current, **1** it differs or is missing, **2** there is no tree to compare it with -- a tree that is not on
+    this machine is the state of a working tree rather than a failure, which is the same reason `goldens
+    --check` exits 2 and why this cannot be a gate in CI.
+
+    `--out <file>` and `--src <tree>` are for a caller that is not this repository: a test, or a script
+    keeping a table for another RenderDoc release beside the tool.
+    """
+    write = '--write' in argv
+    out = table_path()
+    src_root = RENDERDOC_SRC
+    index = 0
+    while index < len(argv):
+        option = argv[index]
+        if option in ('--write', '--check'):
+            pass
+        elif option in ('--out', '--src') and index + 1 < len(argv):
+            index += 1
+            if option == '--out':
+                out = argv[index]
+            else:
+                src_root = argv[index]
+        else:
+            print('usage: rdc_analysis.py chunk-names [--check|--write] [--out <file>] [--src <tree>]')
+            return 2
+        index += 1
+
+    wanted = table_text(src_root)
+    current = ''
+    if os.path.isfile(out):
+        with open(out, encoding='utf-8', newline='') as handle:
+            current = handle.read()
+    print('table     : %s (RenderDoc %s: %s)'
+          % (out, rdc_chunknames.VERSION or 'version unknown', _table_counts(current)))
+    # A tree is "there" when at least one of the three enum files is: a partial tree can be compared against
+    # (what it does not have is what the table is *for*), and only a machine with no tree at all has nothing
+    # to say -- which is exit 2 rather than a failure, like every other gate whose input is working-tree state.
+    if not any(os.path.isfile(enum_path(src_root, kind)) for kind in ENUM_KINDS):
+        print('tree      : %s (not here)' % src_root)
+        print('verdict   : no tree to compare with -- nothing was read and nothing was written (exit 2)')
+        return 2
+    print('tree      : %s (RenderDoc %s: %s)'
+          % (src_root, rdc_renderdoc_src.version(src_root) or 'version unknown', _table_counts(wanted)))
+    if write:
+        if not rdc_renderdoc_src.is_populated(src_root):
+            # Writing from a half-extracted tree would *shrink* the table to what that tree happens to have,
+            # which is the opposite of the point: the table exists to cover what a tree does not.
+            print('error    : %s is not a complete tree (%s), so nothing was written'
+                  % (src_root, ', '.join(rdc_renderdoc_src.missing_parts(src_root))))
+            return 1
+        with open(out, 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write(wanted)
+        print('written   : %s (%d line(s)) -- review the diff before keeping it' % (out, wanted.count('\n')))
+        return 0
+    # Line endings normalised, like a golden's: `core.autocrlf` rewrites a checkout and would otherwise make
+    # every line of a correct table look changed.
+    if current.replace('\r\n', '\n') == wanted:
+        print('verdict   : current -- the table is what this tree would generate')
+        return 0
+    print('verdict   : out of date -- %s (write it with `--write`)' % _table_drift(current, wanted))
+    return 1
+
+
+def _table_drift(current: str, wanted: str) -> str:
+    """Why a table is not what a tree generates: the counts that moved, and one example name per kind."""
+    have, want = _table_blocks(current), _table_blocks(wanted)
+    notes: List[str] = []
+    for kind, left, right in zip(ENUM_KINDS, have, want):
+        left_ids = dict(re.findall(r'^\s+(\d+): (.+),$', left, re.M))
+        right_ids = dict(re.findall(r'^\s+(\d+): (.+),$', right, re.M))
+        gone = sorted(set(left_ids) - set(right_ids))
+        new = sorted(set(right_ids) - set(left_ids))
+        renamed = sorted(cid for cid in set(left_ids) & set(right_ids) if left_ids[cid] != right_ids[cid])
+        if gone or new or renamed:
+            notes.append('%s: %d new, %d gone, %d renamed%s'
+                         % (kind, len(new), len(gone), len(renamed),
+                            (' (e.g. %s -> %s)' % (left_ids[renamed[0]], right_ids[renamed[0]]))
+                            if renamed else ''))
+    return '; '.join(notes) if notes else 'the table differs from the tree (rewrite it with `--write`)'
+
 
 __all__ = [
     'ALIGN_UP_DEFAULT',
@@ -296,6 +519,7 @@ __all__ = [
     'DESCRIPTOR_KINDS',
     'DISCARD_CHUNKS',
     'DRAW_CHUNKS',
+    'ENUM_KINDS',
     'EXPECTED_LENGTHS',
     'HEAP_CHUNKS',
     'MARKER_CHUNKS',
@@ -306,6 +530,7 @@ __all__ = [
     'RESOURCE_KINDS',
     'STATE_CHUNKS',
     'STATE_SETTERS',
+    'TABLE_NAME',
     'TARGET_CHUNKS',
     'UNATTRIBUTED_CHUNKS',
     '_DESCRIPTOR_COPY_SIZE',
@@ -315,6 +540,12 @@ __all__ = [
     '_SRC_WARNED',
     '_find_renderdoc_src',
     'align_up',
+    'cmd_chunknames',
+    'enum_name',
+    'enum_path',
     'load_chunk_names',
     'parse_chunk_enum',
+    'parse_enum',
+    'table_path',
+    'table_text',
 ]

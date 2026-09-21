@@ -79,8 +79,11 @@ align to 64              Serialiser::ChunkAlignment
 payload offset** — already past the metadata. Chunk IDs come from `SystemChunk` (`renderdoc/core/core.h`,
 `FirstDriverChunk = 1000`) and `D3D12Chunk` (`renderdoc/driver/d3d12/d3d12_common.h`); `parse_chunk_enum()`
 parses those C++ enums at runtime, **out of the `renderdoc-src` tree in the root folder** — fetched on demand
-when it is not there (README §1.1, `rdc_renderdoc_src`) — so names stay correct for the RenderDoc version that
-produced the capture.
+when it is not there (README §1.1, `rdc_renderdoc_src`) — so the names are the vocabulary of the RenderDoc
+version that produced the capture. A tree that is absent, older than the capture, or half-extracted does not
+leave the ids unnamed: the same enums of a released RenderDoc are checked in as `src/py/rdc_chunknames.py`, the
+tree's are written over them, and the warning says which version the fallback names are from (`chunk-names`,
+§4.1).
 
 > **The single most important detail:** in real captures the flags are usually `0xf0000` (callstack + thread +
 > duration + timestamp all present), so **the payload starts 36 bytes into the chunk, not 8**. Never hand-compute
@@ -157,7 +160,8 @@ parts (`fourcc, offset, length`). Part meanings:
 | `resources` | `<rdc> [limit=200] [nameFilter]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
 | `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
-| `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the numeric-id fallback. Needs no capture file |
+| `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the fallback to the bundled table. Needs no capture file |
+| `chunk-names` | `[--check\|--write] [--out <file>] [--src <tree>]` | the bundled enum table (`src/py/rdc_chunknames.py`) against a source tree: `--write` regenerates it from that tree's `SystemChunk`, `D3D12Chunk` and `DXGI_FORMAT` enums, `--check` reports the drift (exit 0 current, 1 differs or is missing, **2 no tree to compare with**). `--write` refuses an incomplete tree, because a table written from one would shrink to whatever that tree happens to have. Needs no capture file |
 | `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare for an artefact** — no binary, no library or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison for its own binary and says so in its log (§9) — that warning does not cover the library, which it never loads. **Both artefacts `cmake --build` writes are compared, each in its own block**, because they can disagree and the difference matters: a stale exe answers with the previous revision's behaviour, while `bin/rdc_lz4.dll` *is* the offline tool's decoder (§3.2), so a stale one decodes every capture with code its source no longer says. The two are independent — a new `lz4.c` does not make the exe stale, and a new `replay_dump.cpp` does not make the library stale |
 
 ### 4.2 Stream text mining
@@ -384,8 +388,8 @@ total resources: 241 (shown 2)
 * The names come from `SetName`, which RenderDoc emits for every D3D12 object — heaps, queues, fences and PSOs
   included. Those have no descriptor, so they show `-` and `kind=unknown`; they are in the table because
   `draws` prints their ids (`heap298[279377]`).
-* DXGI format names are parsed out of RenderDoc's own copy of the enum (`common/dds_readwrite.cpp`); without
-  the source tree they print as numbers, like chunk names (README §1.1).
+* DXGI format names are parsed out of RenderDoc's own copy of the enum (`common/dds_readwrite.cpp`), and fall
+  back to the bundled table's copy of it on a machine with no tree, exactly like chunk names (README §1.1).
 * `limit` counts rows (`0` = no limit, as in `chunks`) and `nameFilter` is a case-insensitive substring of the
   name, so `0 lut` means "every row with `lut` in the name".
 
@@ -571,8 +575,9 @@ the finding names what it keys off, so its silence is checkable too. The 601 MB 
 600-event window (`--max-events`), which the report's provenance states. From
 the capture's chunk stream: marker imbalance,
 unattributed draws, and calls that can only draw nothing (0 vertices/indices/instances/groups). A detector
-that could not look — no usage lists with `--no-usage`, no chunk-name map without the RenderDoc source tree,
-a capture that has moved — is reported as *skipped* with the reason, because "clean" and "not checked" are
+that could not look — no usage lists with `--no-usage`, no chunk-name map at all (no source tree *and* an
+empty bundled table), a capture that has moved — is reported as *skipped* with the reason, because "clean"
+and "not checked" are
 different answers, and a bundle with no findings says so without implying the frame is fine.
 
 What it does **not** do yet: MSAA's *which subresource did the resolve copy* half (the
@@ -1146,14 +1151,11 @@ draws = [c for c in chunks if names.get(c['id'], '') in R.DRAW_CHUNKS]
 
 Most of these bullets are **replay's job, not offline work** — decoded textures, disassembly, the non-frame
 sections, uniform names — and `ROADMAP.md` keeps them out of the offline plan on purpose ("what is deliberately
-not on this list"). The ones that stay offline work items are tracked with an acceptance gate in
-`ROADMAP.md` §8. A bullet here is a known limitation, not a permanent design decision.
+not on this list"). The one that did stay offline work — chunk names needing the source tree — is closed: the
+enums are bundled (`chunk-names`, §4.1), so a machine without a tree still prints names. A further bullet here
+would be tracked the way `ROADMAP.md` tracks work: with an acceptance gate naming what closes it. A bullet
+here is a known limitation, not a permanent design decision.
 
-* **Chunk names need the RenderDoc source tree.** The tool fetches it into `<root>/rdc-tools/renderdoc-src/`
-  on first use (README §1.1) and says so; when the fetch cannot happen — no network, `$RDC_NO_BOOTSTRAP`, a
-  `$RENDERDOC_SRC` that holds no tree — names degrade to numeric IDs. The same happens when the tree's version
-  is older than the one that produced the capture, which the tool says when it names a chunk. The framing
-  itself is version-stable, so decoding still works; only the labels are missing.
 * **Only section 0 is decompressed.** Additional sections are listed but not parsed. Replay reads them for you
   (§9), so this is not planned as offline work.
 * **No name resolution for root parameters.** The serialised root signature carries no names, and neither do

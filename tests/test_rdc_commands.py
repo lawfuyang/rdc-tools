@@ -323,12 +323,13 @@ class TestCmdResources(CmdCase):
         self.assertIn('total resources: 5 (shown 5)', out)
 
     def test_missing_format_names_fall_back_to_numbers(self):
+        """Only when there is nothing to name them with: no tree *and* an empty bundled table."""
         path = self.cap(self.ch('Device_CreatePlacedResource',
                                 F.pl_placed_resource(3, F.pl_resource_desc(3, 64, 64, fmt=10))))
         with mock.patch.object(resources, 'load_format_names', lambda src_root=None: {}):
             out = self.out(R.cmd_resources, path)
         self.assertIn('fmt=10', out)
-        self.assertIn('note: DXGI format names need the RenderDoc source', out)
+        self.assertIn('note: no format names at all', out)
 
     def test_main_dispatches_resources(self):
         path = self.cap(self.ch('SetName', F.pl_set_name(1, 'SceneUniformBuffer')))
@@ -743,11 +744,16 @@ class TestCmdChunks(CmdCase):
         self.assertIn('total chunks: 3 (shown 0)',
                       self.out(R.cmd_chunks, self.capture(), 200, 'NotAChunkName'))
 
-    def test_missing_source_tree_warns_and_uses_numeric_ids(self):
+    def test_with_no_names_at_all_the_ids_are_numbers(self):
+        """The last-resort path: no tree *and* an empty bundled table, which is the only way to get here.
+
+        A tree that is merely absent is the case the bundled table exists for, and it prints names
+        (`tests/test_rdc_resources.py` pins that) with the version of those names on stderr.
+        """
         with mock.patch.object(chunkmap, 'load_chunk_names', lambda src_root=None, driver='D3D12': {}):
             out = self.out(R.cmd_chunks, self.capture())
         self.assertIn('known chunk names: 0', out)
-        self.assertIn('WARNING: RenderDoc source not found at', out)
+        self.assertIn('WARNING: no chunk names at all', out)
         self.assertIn('Chunk%d' % self.ids['PushMarker'], out)
 
 

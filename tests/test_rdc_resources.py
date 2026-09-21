@@ -31,6 +31,8 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
         sys.path.insert(0, _p)
 
 import rdc_analysis as R            # noqa: E402
+import rdc_chunkmap as chunkmap     # noqa: E402
+import rdc_chunknames as chunknames  # noqa: E402  (the bundled table)
 import rdc_fixtures as F            # noqa: E402
 
 from rdc_testcase import *          # noqa: E402,F401,F403
@@ -518,6 +520,15 @@ class TestRootParamLabel(unittest.TestCase):
         binds = {'all': {('srv', 0, 0): 'Textures'}}
         self.assertEqual(R._root_param_label(sig, binds, 0), 'rp0(table t0 n1 s0)')
 
+#: Chunk names the tool knows that neither the bundled table's release nor the tree on this machine has:
+#: `List_ClearStateObject` and `List_CopyRaytracingAccelerationStructureRegion` are chunks a *newer* RenderDoc
+#: names in its `D3D12Chunk` enum (checked: neither string appears anywhere in the 1.46 source). They stay in
+#: the tool's constants because those are about what the *stream* can contain -- a capture from that newer
+#: release has them -- and a tree from that release names them, which is what the table's fallback is for.
+#: The point of listing them is that a *third* one is a decision somebody has to make, not a typo.
+NEWER_THAN_THE_TABLES_RELEASE = ('List_ClearStateObject', 'List_CopyRaytracingAccelerationStructureRegion')
+
+
 class TestLoadFormatNames(TempDirCase):
     def test_parses_the_dxgi_format_enum(self):
         _root, _names = F.make_fake_src(self.tmp)
@@ -526,8 +537,12 @@ class TestLoadFormatNames(TempDirCase):
         self.assertEqual(formats[0], 'UNKNOWN')
         self.assertEqual(formats[90], 'BC4_UNORM')
 
-    def test_missing_source_returns_no_names(self):
-        self.assertEqual(R.load_format_names(os.path.join(self.tmp, 'nope')), {})
+    def test_no_source_tree_uses_the_bundled_names(self):
+        """A tree is preferred; the bundled table is what a machine without one prints formats from."""
+        formats = R.load_format_names(os.path.join(self.tmp, 'nope'))
+        self.assertEqual(formats[28], 'R8G8B8A8_UNORM')            # the prefix is stripped here, not there
+        self.assertEqual(len(formats), len(chunknames.FORMAT_NAMES))
+        self.assertEqual(sorted(formats), sorted(chunknames.FORMAT_NAMES))
 
     def test_a_plain_enum_is_parsed_like_an_enum_class(self):
         # `parse_chunk_enum` handles both spellings (the chunk enums are enum class, DXGI_FORMAT
@@ -662,37 +677,86 @@ class TestLoadChunkNames(TempDirCase):
         self.assertEqual(names[1001], 'PushMarker')
         self.assertEqual(names[1002], 'DrawIndexed')
 
-    def test_missing_source_warns_once_on_stderr(self):
+    def test_no_tree_names_its_version_and_warns_once(self):
+        """The fallback's whole point: names, not numbers -- and which RenderDoc those names are from.
+
+        The version matters: the capture may be another release, and a reader who cannot see which vocabulary
+        they are reading has no way to judge a chunk name that looks wrong (README §1.1).
+        """
         with mock.patch.object(chunkmap, '_SRC_WARNED', False):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 names = R.load_chunk_names(os.path.join(self.tmp, 'does-not-exist'))
-                self.assertEqual(names, {})
-                first = err.getvalue()
+            first = err.getvalue()
             err2 = io.StringIO()
             with contextlib.redirect_stderr(err2):
                 R.load_chunk_names(os.path.join(self.tmp, 'does-not-exist'))
-            self.assertIn('warning: RenderDoc source not found', first)
-            self.assertIn('renderdoc-src', first)
-            self.assertEqual(err2.getvalue(), '')
+        self.assertIn('using bundled names for RenderDoc %s' % chunknames.VERSION, first)
+        self.assertIn('no RenderDoc source tree', first)
+        self.assertEqual(err2.getvalue(), '')                     # once per process, not once per call
+        self.assertIn('PushMarker', names.values())
+        self.assertGreater(len(names), 100)
+        for cid, name in chunknames.DRIVER_CHUNKS['D3D12'].items():
+            self.assertEqual(names.get(cid), name)
 
-    def test_missing_driver_header_still_returns_system_chunks(self):
+    def test_a_tree_that_lacks_the_driver_header_names_those_chunks_from_the_table(self):
+        """A half-extracted tree is no longer half-named: the table covers what the tree does not have."""
         os.remove(os.path.join(self.src, 'renderdoc', 'driver', 'd3d12', 'd3d12_common.h'))
         with mock.patch.object(chunkmap, '_SRC_WARNED', False):
-            names = R.load_chunk_names(self.src)
-        self.assertEqual(names[1], 'DriverInit')
-        self.assertEqual(names[1000], 'FirstDriverChunk')
-        self.assertNotIn('PushMarker', names.values())
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                names = R.load_chunk_names(self.src)
+        self.assertEqual(names[1], 'DriverInit')                  # the system half, from this tree
+        self.assertIn('PushMarker', names.values())               # the driver half, from the table
+        self.assertIn('is incomplete', err.getvalue())
+        self.assertIn('d3d12_common.h', err.getvalue())
 
-    def test_missing_core_header_still_returns_driver_chunks(self):
+    def test_a_tree_that_lacks_the_system_header_names_those_chunks_from_the_table(self):
         os.remove(os.path.join(self.src, 'renderdoc', 'core', 'core.h'))
         with mock.patch.object(chunkmap, '_SRC_WARNED', False):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 names = R.load_chunk_names(self.src)
-        self.assertIn('warning', err.getvalue())
+        self.assertIn('using bundled names for RenderDoc %s' % chunknames.VERSION, err.getvalue())
+        self.assertIn('is incomplete', err.getvalue())
+        self.assertIn('core.h', err.getvalue())
+        self.assertIn('DriverInit', names.values())
         self.assertEqual(names[1001], 'PushMarker')
-        self.assertNotIn('DriverInit', names.values())
+
+    def test_the_tree_wins_over_the_bundled_table(self):
+        """The tree is the preferred source, so the spelling that wins is its own.
+
+        This is the order the merge has to have: the table is the floor, and a tree that is there is written
+        over it -- including a tree from a release whose enum renamed something.
+        """
+        header = os.path.join(self.src, 'renderdoc', 'driver', 'd3d12', 'd3d12_common.h')
+        with open(header, 'w', encoding='utf-8') as handle:
+            handle.write('enum class D3D12Chunk : uint32_t\n{\n'
+                         '  PushMarker = 1001,\n  List_FromTheTree = 1200,\n};\n')
+        with mock.patch.object(chunkmap, '_SRC_WARNED', False):
+            names = R.load_chunk_names(self.src)
+        self.assertEqual(names[1200], 'List_FromTheTree')
+        self.assertEqual(names[1001], 'PushMarker')
+        self.assertNotEqual(names[1200], chunknames.DRIVER_CHUNKS['D3D12'].get(1200))
+
+    def test_every_chunk_name_the_tool_uses_is_in_the_bundled_table(self):
+        """The table is the tool's own vocabulary as much as the tree's, and a gap in it is a quiet failure.
+
+        A chunk named nowhere is a chunk whose payload a decoder still reads while the finding that depends
+        on it silently stops firing -- which is why the constants in `rdc_chunkmap` are checked against the
+        table rather than against whatever tree this machine happens to have. The two names that are *not*
+        there are named as such: they exist in a newer RenderDoc's enum than the table's release, so on this
+        machine they print as numbers (and a tree from that release names them -- the tree wins).
+        """
+        named = set(chunkmap.MARKER_CHUNKS + chunkmap.PUSH_MARKER_CHUNKS + chunkmap.POP_MARKER_CHUNKS
+                    + chunkmap.DRAW_CHUNKS + chunkmap.COMPUTE_CHUNKS + chunkmap.STATE_CHUNKS
+                    + chunkmap.STATE_SETTERS + chunkmap.BARRIER_CHUNKS + chunkmap.TARGET_CHUNKS
+                    + chunkmap.CLEAR_CHUNKS + chunkmap.DISCARD_CHUNKS + chunkmap.COPY_CHUNKS
+                    + chunkmap.HEAP_CHUNKS + chunkmap.UNATTRIBUTED_CHUNKS
+                    + chunkmap.DESCRIPTOR_COPY_CHUNKS + tuple(chunkmap.EXPECTED_LENGTHS)
+                    + tuple(chunkmap.RESOURCE_CHUNKS) + tuple(chunkmap.DESCRIPTOR_KINDS))
+        in_table = set(chunknames.SYSTEM_CHUNKS.values()) | set(chunknames.DRIVER_CHUNKS['D3D12'].values())
+        self.assertEqual(sorted(named - in_table), list(NEWER_THAN_THE_TABLES_RELEASE))
 
 class TestFindRenderdocSrc(unittest.TestCase):
     #: The tool folder (src/py), the folder above it, and the repository root -- the search walks up from the

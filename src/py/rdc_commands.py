@@ -77,9 +77,21 @@ def cmd_cache(args: Optional[Sequence[str]] = None) -> int:
     if unusable:
         print('unusable  : %d (left over from another version or an interrupted write;'
               ' `cache clear` removes them)' % unusable)
+    derived = derived_names()
+    if derived:
+        print('derived   : %d, %.1f KB (answers about a stream, kept beside it; `cache clear` removes'
+              ' them too)' % (len(derived), sum(_file_size(os.path.join(rdc_cache.cache_dir(), name))
+                                               for name in derived) / 1024.0))
     if not entries:
         print('  (nothing cached yet -- any command that needs the stream fills it)')
     return 0
+
+def _file_size(path: str) -> int:
+    """A file's size, or 0 when it cannot be stat'ed -- a listing must not fail over a race."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
 
 def cmd_descriptors(path: str, limit: int = 200, heap_filter: Optional[str] = None,
                     fmt: str = 'table') -> None:

@@ -174,6 +174,23 @@ def stream_source(path: str, info: CaptureInfo, section_index: int = 0) -> Optio
     """
     return _cache_entry(path, info, section_index)
 
+#: Suffixes of *derived* cache files: a small file beside a stream named `<stream stem><suffix>`, holding
+#: an answer computed from that stream (`.bindnames.json` is the whole-stream DXBC search, REFERENCE 4.13).
+#: Listed here, with the streams they belong to, so `cache clear` reclaims them too -- and so `cache list`
+#: can say how much of the directory is an answer rather than a stream.
+DERIVED_SUFFIXES = ('.bindnames.json',)
+
+def sidecar_path(source: CacheEntry, suffix: str) -> str:
+    """Where a derived answer about `source`'s stream lives: the stream's own name, another suffix.
+
+    The identity is in the file name -- the stream cache's name is a hash of the capture's path, size,
+    mtime, section and cache version -- so a re-capture cannot read an answer computed from the file it
+    replaced: it has no sidecar under the new name and the next command writes one. A creator should
+    still stamp the stream it was computed from into the file (see `rdc_resources.shader_bind_names`),
+    because a name can only be as unique as what goes into it.
+    """
+    return os.path.splitext(source['file'])[0] + suffix
+
 @rdc_profile.timed('stream: cache write')
 def cache_store(path: str, info: CaptureInfo, section_index: int, stream: Buffer, method: int,
                 blocks: int) -> Optional[str]:
@@ -263,10 +280,10 @@ def _cache_prune_stale(abspath: str, section_index: int, keep: str) -> int:
     return removed
 
 def cache_clear() -> Tuple[int, int]:
-    """Delete every cache file; returns `(files removed, bytes freed)`."""
+    """Delete every cache file, derived answers included; returns `(files removed, bytes freed)`."""
     directory = cache_dir()
     count = freed = 0
-    for name in _cache_names():
+    for name in _cache_names() + derived_names():
         cfile = os.path.join(directory, name)
         try:
             freed += os.path.getsize(cfile)
@@ -275,6 +292,20 @@ def cache_clear() -> Tuple[int, int]:
         except OSError:
             pass
     return count, freed
+
+def derived_names() -> List[str]:
+    """Every derived (sidecar) file in the cache directory, complete or not.
+
+    Separate from `_cache_names` because these are not streams: `cache list` counts them on their own
+    line, and nothing that reads a cache header ever sees one. A half-written sidecar (`<name>.tmp`,
+    as `cache_store` writes streams) is included, so a killed command leaves nothing to sweep later.
+    """
+    directory = cache_dir()
+    if not os.path.isdir(directory):
+        return []
+    partial = tuple(suffix + '.tmp' for suffix in DERIVED_SUFFIXES)
+    return sorted(name for name in os.listdir(directory)
+                  if name.endswith(DERIVED_SUFFIXES) or name.endswith(partial))
 
 def _method_label(method: int, blocks: int, cached: bool = False) -> str:
     """The label `get_stream` returns for a decompression method, plus `, cached` on a hit."""
@@ -335,13 +366,16 @@ def load_stream(path: str, section_index: int = 0) -> Tuple[CaptureInfo, Buffer,
 
 __all__ = [
     'CACHE_ALIGN',
+    'CACHE_DIR_ENV',
     'CACHE_HEADER',
     'CACHE_MAGIC',
     'CACHE_SUFFIX',
     'CACHE_VERSION',
+    'DERIVED_SUFFIXES',
     'METHOD_LZ4',
     'METHOD_RAW',
     'METHOD_ZSTD',
+    'NO_CACHE_ENV',
     '_CACHE_WARNED',
     '_cache_enabled',
     '_cache_entry',
@@ -361,8 +395,10 @@ __all__ = [
     'cache_lookup',
     'cache_stats',
     'cache_store',
+    'derived_names',
     'get_stream',
     'load_stream',
+    'sidecar_path',
     'stream_source',
     'stream_stats',
 ]

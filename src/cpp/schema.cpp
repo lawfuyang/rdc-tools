@@ -460,10 +460,10 @@ const SchemaDoc kSchemas[] = {
 
     {"probe", "probe", R"sc({
   "title": "probe",
-  "description": "Which ids in a range have pipeline state. Rows are strings (`eid <n>  shaders=.. rootSig=.. params=..`), the same text the terminal prints.",
+  "description": "Which ids in a range have pipeline state. Rows are strings (`eid <n>  shaders=.. rootSig=.. params=..`), the same text the terminal prints. `scanned` is how far the range went (the frame's own last event unless a cap was asked for), `lastEvent` is that bound, and `cached` says whether the sweep happened in this run or was read from the probe cache.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "events",
-               "scanned", "withState"],
+               "scanned", "withState", "lastEvent", "cached"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -473,7 +473,9 @@ const SchemaDoc kSchemas[] = {
     "machine": {"type": "string"},
     "events": {"type": "array", "items": {"type": "string"}},
     "scanned": {"type": "integer"},
-    "withState": {"type": "integer"}
+    "withState": {"type": "integer"},
+    "lastEvent": {"type": "integer"},
+    "cached": {"type": "boolean"}
   },
   "additionalProperties": false
 })sc"},

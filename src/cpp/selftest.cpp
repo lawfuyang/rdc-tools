@@ -1069,6 +1069,85 @@ int CmdSelftest()
     }
   }
 
+  // ------------------------------------------------------------------ the probe's range and cache
+  //
+  // Also no device: `ProbeUntil` is arithmetic over two numbers, and the cache is a text file. What is
+  // being pinned is the pair of decisions a reader cannot check from a command line -- which ids a
+  // `probe` scans (the frame's own end, not a guess: a capped range on a five-figure frame answers
+  // "nothing has state", which is a fact about the range) and which cached answers are trusted
+  // (another capture's, another engine's, another bound's and a truncated one are all "sweep again").
+  {
+    t.Check(ProbeUntil(0, 1186) == 1186, "probe-until-no-cap-is-the-frame",
+            "a cap of 0 did not mean the frame's own last event");
+    t.Check(ProbeUntil(2000, 1186) == 1186, "probe-until-cap-past-the-frame-is-the-frame",
+            "a cap past the frame's end scanned past the frame");
+    t.Check(ProbeUntil(500, 1186) == 500, "probe-until-cap-below-the-frame-is-the-cap",
+            "a cap inside the frame was not honoured");
+    t.Check(ProbeUntil(500, 0) == 500, "probe-until-no-derivable-bound-falls-back-to-the-cap",
+            "a frame with no action list lost its cap");
+    t.Check(ProbeUntil(0, 0) == 0, "probe-until-nothing-to-scan", "nothing scanned as something");
+
+    const std::string cachePath = DefaultLogStem() + ".probe";
+    const std::string capturePath = DefaultLogStem() + ".probe.rdc";
+    FILE *captureFile = fopen(capturePath.c_str(), "wb");
+    if(captureFile == NULL)
+      return Fail(1, "cannot write %s for the selftest", capturePath.c_str());
+    fwrite("RDOC", 1, 4, captureFile);
+    fclose(captureFile);
+
+    ProbeRow one;
+    one.m_Eid = 12;
+    one.m_Shaders = 2;
+    one.m_RootSig = "1060";
+    one.m_Params = 3;
+    ProbeRow two;
+    two.m_Eid = 700;
+    two.m_Shaders = 1;
+    two.m_RootSig = "0";
+    two.m_Params = 0;
+    ProbeCache written;
+    written.m_Scanned = 900;
+    written.m_Rows.push_back(one);
+    written.m_Rows.push_back(two);
+    WriteProbeCache(cachePath, capturePath.c_str(), 1186, written);
+
+    ProbeCache read;
+    t.Check(ReadProbeCache(cachePath, capturePath.c_str(), 1186, read) && read.m_Scanned == 900 &&
+                read.m_Rows.size() == 2 && read.m_Rows[0].m_Eid == 12 &&
+                read.m_Rows[0].m_RootSig == "1060" && read.m_Rows[1].m_Eid == 700,
+            "probe-cache-round-trips", "the probe cache did not read back what was written");
+
+    ProbeCache other;
+    t.Check(!ReadProbeCache(cachePath, (capturePath + ".other").c_str(), 1186, other),
+            "probe-cache-refuses-another-capture", "another capture's path was accepted");
+    t.Check(!ReadProbeCache(cachePath, capturePath.c_str(), 1187, other),
+            "probe-cache-refuses-another-bound", "a different frame bound was accepted");
+    t.Check(!ReadProbeCache(cachePath + ".missing", capturePath.c_str(), 1186, other),
+            "probe-cache-refuses-a-missing-file", "a missing file produced an answer");
+
+    // A file cut short: the header is there, the rows are not. Refused rather than half-believed.
+    {
+      FILE *f = fopen(cachePath.c_str(), "rb");
+      std::string text;
+      char line[1024];
+      while(f != NULL && fgets(line, sizeof(line), f) != NULL)
+        text += line;
+      if(f != NULL)
+        fclose(f);
+      const size_t cut = text.size() / 2;
+      FILE *out = fopen(cachePath.c_str(), "wb");
+      if(out == NULL)
+        return Fail(1, "cannot rewrite %s for the selftest", cachePath.c_str());
+      fwrite(text.data(), 1, cut, out);
+      fclose(out);
+      t.Check(!ReadProbeCache(cachePath, capturePath.c_str(), 1186, other),
+              "probe-cache-refuses-a-truncated-file", "a truncated cache was believed");
+    }
+
+    remove(cachePath.c_str());
+    remove(capturePath.c_str());
+  }
+
   printf("\n%d passed, %d failed, %d skipped\n", t.passed, t.failed, t.skipped);
   if(t.failed == 0)
     printf(

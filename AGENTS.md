@@ -255,6 +255,11 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   count**, not by `--until` (the log prints `sweeping ids A..B for bound state, at most N id(s) (the file's
   chunk count)`). For "look at a few events' state or reflection", use **`batch`** instead: one open capture,
   many commands (~20 s for 26 commands) against minutes for a bundle sweep.
+- **A command moves the replay through `MoveToEvent(ctrl, eid)`, never `ctrl->SetFrameEvent` directly**
+  (`capture.cpp`; there is one call left in the program, inside it). It sets the one bit `AnyEventReplayed()`
+  reads, and `probe` is the command that needs it: its answer is only true on a *cold* engine, so a
+  non-first probe warns on stderr and its answer is deliberately **not** cached (REFERENCE §9). A new
+  command that calls `SetFrameEvent` itself silently breaks both.
 - Every `--json` document carries `schemaVersion` (REFERENCE §9, and §4.12 for the validator), and the schema for it lives in the
   driver's `kSchemas` table. A new document, or a new member on an existing one, updates that schema **and**
   the checked-in `schema/` folder in the same change (`replay_dump schema --out schema`, then

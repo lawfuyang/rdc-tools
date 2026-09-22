@@ -8,7 +8,10 @@ A third kind of scan is not a string run at all: the DXBC container search that 
 and `dump-shaders` each pay over the whole stream is a byte-pattern `find` (`find_all` below). The same shape
 of problem with different arithmetic -- `find` runs at ~1.2 GB/s where the `re` pass runs at ~100 MB/s -- so
 its pool has to save less before it pays, and it carries its own threshold (`FIND_MIN_BYTES`, a gigabyte,
-measured) rather than borrowing `MIN_BYTES`.
+measured) rather than borrowing `MIN_BYTES`. It carries its own worker cap too (`FIND_MAX_SLICES`, eight,
+against `MAX_SLICES`' 32): a `find` is bandwidth bound, so past a handful of workers the spawn is the whole
+cost of the extras. `find_all_many` is the same scan for a list of needles over one pool, which is what
+keeps `count <rdc> a b c` at one pool and one mapping per slice instead of one of each per pattern.
 
 Threads cannot help either: `re` holds the GIL for the length of the call, so the work is one core's.
 Processes can, and this module is that: the stream is cut into slices at boundaries no match can cross,
@@ -31,10 +34,12 @@ from rdc_stream import *  # noqa: F401,F403
 import rdc_profile
 
 import mmap
-import multiprocessing
 import os
 
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:       # `multiprocessing` is imported where a pool is made, not here: see `_pool`
+    import multiprocessing.pool
 
 #: Below this a pool costs more than it saves: the spawn is ~0.5 s, the scan of a smaller stream less.
 MIN_BYTES = 64 << 20
@@ -56,6 +61,14 @@ SERIAL_WINDOW = 128 << 20
 #: Hence a gigabyte -- sixteen times the string scan's threshold, because that scan is 14 s where this
 #: one is 1 s -- and the serial loop below it, which is what every caller got before this existed.
 FIND_MIN_BYTES = 1 << 30
+
+#: The byte find's own worker cap, and deliberately not `MAX_SLICES`. A `find` is memory-bandwidth
+#: bound where the `re` pass is CPU-bound, so past a handful of workers the only thing still growing is
+#: more interpreters: measured best-of-three on `desktop-2` (1.47 GB, `DXBC`, pages warm), 1 slice
+#: 0.678 s, 4 slices 0.702 s, **8 slices 0.554 s**, 16 slices 0.613 s, 32 slices 0.741 s -- the 32-group
+#: that used to be the default is the *worst* of the five, and 8 is 25% better than it. The string scan
+#: keeps `MAX_SLICES`: the same session measured 16 slices 2.50 s against 32 slices 2.21 s there.
+FIND_MAX_SLICES = 8
 
 #: text -> times seen in the slice, text -> first offset in the slice (offset relative to the stream).
 Counts = Dict[str, int]
@@ -181,8 +194,21 @@ def _find_serial(stream: Buffer, needle: bytes) -> List[int]:
     return hits
 
 
-def _find_worker(job: Tuple[str, int, int, int, bytes]) -> List[int]:
-    """One slice, in a worker process: the offsets of `needle` whose first byte is inside it.
+def _pool(workers: int) -> multiprocessing.pool.Pool:
+    """A worker pool, and the only place one is made.
+
+    `multiprocessing` is imported *here* rather than at the top of the module: it is 11 ms of startup
+    (measured with `python -X importtime`, which is 8% of a `summary`'s 0.13 s), and the commands that
+    import this module -- every one of them, since `rdc_analysis` re-exports it -- are mostly commands
+    that never start a pool: `summary`, `resources`, `descriptors`, `rootsig`, `vram`, `memory`. It is
+    also the seam the tests use, so "a pool that cannot start" stays testable without one.
+    """
+    import multiprocessing
+    return multiprocessing.Pool(workers)
+
+
+def _find_range(mapped: mmap.mmap, base: int, start: int, end: int, needle: bytes) -> List[int]:
+    """The offsets of `needle` whose *first byte* is inside `[start, end)`, read out of `mapped`.
 
     Two bounds matter, and both are off by `len(needle) - 1` in opposite directions. The search starts
     that far *before* the slice, so a needle beginning in the previous slice's tail is still findable
@@ -192,20 +218,59 @@ def _find_worker(job: Tuple[str, int, int, int, bytes]) -> List[int]:
     that second bound the needle is owned by nobody: measured by the test that plants one two bytes
     before each cut, which found 2 of 5 needles until the bound was fixed.
     """
+    hits: List[int] = []
+    limit = min(len(mapped), base + end + len(needle) - 1)
+    at = mapped.find(needle, base + max(0, start - (len(needle) - 1)), limit)
+    while at >= 0:
+        offset = at - base
+        if offset >= end:
+            break
+        if offset >= start:
+            hits.append(offset)
+        at = mapped.find(needle, at + 1, limit)
+    return hits
+
+
+def _find_worker(job: Tuple[str, int, int, int, bytes]) -> List[int]:
+    """One slice, in a worker process: map the cache file and find one needle in it."""
     path, base, start, end, needle = job
     with open(path, 'rb') as fh:
         with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
-            hits: List[int] = []
-            limit = min(len(mapped), base + end + len(needle) - 1)
-            at = mapped.find(needle, base + max(0, start - (len(needle) - 1)), limit)
-            while at >= 0:
-                offset = at - base
-                if offset >= end:
-                    break
-                if offset >= start:
-                    hits.append(offset)
-                at = mapped.find(needle, at + 1, limit)
-            return hits
+            return _find_range(mapped, base, start, end, needle)
+
+
+def _find_worker_many(job: Tuple[str, int, int, int, List[bytes]]) -> List[List[int]]:
+    """One slice, in a worker process: every needle, over one mapping and one pass each.
+
+    What this saves is the *pool*, not the passes: `count` with three patterns used to start three
+    pools (measured on `desktop-2`: 0.646 s for one pattern against 1.635 s for three), where the
+    mapping, the spawn and the slice arithmetic are the same work three times over.
+    """
+    path, base, start, end, needles = job
+    with open(path, 'rb') as fh:
+        with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            return [_find_range(mapped, base, start, end, needle) for needle in needles]
+
+
+def _find_ranges(stream: Buffer, source: Optional[CacheEntry],
+                 procs: Optional[int]) -> Optional[List[Tuple[int, int]]]:
+    """The slices a find should run in, or None when it has to be done in this process.
+
+    None is the serial loop, and it is what `procs=1`, a stream under `FIND_MIN_BYTES` (unless `procs`
+    forces the count) and a cache file that does not hold this stream all mean -- the three refusals
+    the parallel path has always made. The worker count is `FIND_MAX_SLICES`, not `MAX_SLICES`: see the
+    constant for why a byte find wants a handful of workers where the `re` pass wants every core.
+    """
+    total = len(stream)
+    workers = min(os.cpu_count() or 1, FIND_MAX_SLICES) if procs is None else max(1, procs)
+    if workers <= 1 or source is None:
+        return None
+    if procs is None and total < FIND_MIN_BYTES:
+        return None
+    if not _source_holds_stream(stream, source):
+        return None
+    cuts = [total * i // workers for i in range(workers + 1)]
+    return [(cuts[i], cuts[i + 1]) for i in range(workers)]
 
 
 def find_all(stream: Buffer, needle: bytes, source: Optional[CacheEntry] = None,
@@ -225,20 +290,15 @@ def find_all(stream: Buffer, needle: bytes, source: Optional[CacheEntry] = None,
     """
     if not needle:
         return []
-    total = len(stream)
-    workers = min(os.cpu_count() or 1, MAX_SLICES) if procs is None else max(1, procs)
-    parallel = (workers > 1 and source is not None
-                and (procs is not None or total >= FIND_MIN_BYTES)
-                and _source_holds_stream(stream, source))
-    if not parallel:
+    ranges = _find_ranges(stream, source, procs)
+    if ranges is None:
         return _find_serial(stream, needle)
 
-    assert source is not None    # narrowed by `parallel`
-    cuts = [total * i // workers for i in range(workers + 1)]
-    jobs = [(source['file'], source['hdrLen'], cuts[i], cuts[i + 1], needle) for i in range(workers)]
+    assert source is not None    # narrowed by `_find_ranges`
+    jobs = [(source['file'], source['hdrLen'], start, end, needle) for start, end in ranges]
     try:
         with rdc_profile.phase('byte find (parallel)'):
-            with multiprocessing.Pool(len(jobs)) as pool:
+            with _pool(len(jobs)) as pool:
                 parts = pool.map(_find_worker, jobs)
     except Exception:    # noqa: BLE001 - any pool failure just means "do it here instead"
         return _find_serial(stream, needle)
@@ -246,6 +306,52 @@ def find_all(stream: Buffer, needle: bytes, source: Optional[CacheEntry] = None,
     hits: List[int] = []
     for part in parts:
         hits.extend(part)
+    return hits
+
+
+def find_all_many(stream: Buffer, needles: Sequence[bytes],
+                  source: Optional[CacheEntry] = None,
+                  procs: Optional[int] = None) -> List[List[int]]:
+    """`find_all` for several needles over one stream: the offsets of each, in the order asked for.
+
+    The answer is the same as calling `find_all` once per needle -- the offsets of each needle are
+    ascending and the needles are independent -- and the serial path *is* that loop, so nothing about
+    the answer depends on how many needles there are. What changes is the parallel path: one pool, one
+    mapping per slice, one pass per needle inside it (`_find_worker_many`), instead of a whole pool and
+    a fresh mapping per pattern. That is `count`'s case (REFERENCE 4.13), and an empty needle keeps
+    `find_all`'s answer for it: no offsets, because a zero-length pattern is not a `find` question.
+    """
+    if not needles:
+        return []
+    hits: List[List[int]] = [[] for _ in needles]
+    # An empty needle is dropped before anything scans: `find_all` answers it with no offsets, and a
+    # `find` loop cannot (an empty pattern matches at every offset). One list of the live needles and
+    # the slots they came from keeps the answers where the caller asked for them.
+    wanted = [index for index, needle in enumerate(needles) if needle]
+    if not wanted:
+        return hits
+    active = [needles[index] for index in wanted]
+
+    ranges = _find_ranges(stream, source, procs)
+    if ranges is None:
+        for index, needle in zip(wanted, active):
+            hits[index] = _find_serial(stream, needle)
+        return hits
+
+    assert source is not None    # narrowed by `_find_ranges`
+    jobs = [(source['file'], source['hdrLen'], start, end, active) for start, end in ranges]
+    try:
+        with rdc_profile.phase('byte find (parallel)'):
+            with _pool(len(jobs)) as pool:
+                parts = pool.map(_find_worker_many, jobs)
+    except Exception:    # noqa: BLE001 - any pool failure just means "do it here instead"
+        for index, needle in zip(wanted, active):
+            hits[index] = _find_serial(stream, needle)
+        return hits
+
+    for part in parts:
+        for slot, index in enumerate(wanted):
+            hits[index].extend(part[slot])
     return hits
 
 
@@ -277,7 +383,7 @@ def scan_runs(stream: Buffer, minlen: int, source: Optional[CacheEntry] = None,
         slice_bytes = [end - start for start, end in ranges]
         try:
             with rdc_profile.phase('string scan (parallel)'):
-                with multiprocessing.Pool(len(jobs)) as pool:
+                with _pool(len(jobs)) as pool:
                     for index, (part_counts, part_firsts) in enumerate(pool.imap(_worker, jobs)):
                         if counts:
                             _merge_counts(seen, part_counts)
@@ -299,11 +405,13 @@ def scan_runs(stream: Buffer, minlen: int, source: Optional[CacheEntry] = None,
 
 __all__ = [
     'CUT_SEARCH',
+    'FIND_MAX_SLICES',
     'FIND_MIN_BYTES',
     'MAX_SLICES',
     'MIN_BYTES',
     'SERIAL_WINDOW',
     'find_all',
+    'find_all_many',
     'scan_runs',
     'split_ranges',
 ]

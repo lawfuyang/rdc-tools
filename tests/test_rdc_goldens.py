@@ -448,6 +448,32 @@ class TestTranscripts(GoldenCase):
         self.assertIn('not compared (no path in %s)' % goldens.LOCAL_NAME, out)
         self.assertEqual(self.run_goldens_code('--check', '--corpus', path)[0], 2)
 
+    def test_a_limited_run_does_not_check_the_pair(self):
+        """`--capture` means one capture, so the pair's two-bundle A/B is not this run's business.
+
+        The pair here names bundles that are not on disk, which is *reported* when the pair is checked
+        (the corpus says where they are and this machine has none) -- so a run that ignored the filter
+        would say so, and this test would see it.
+        """
+        self.run_goldens('--write', '--corpus', self.corpus_path)
+        path = self.corpus([self.capture_entry()],
+                           pair={'a': 'fixture', 'b': 'fixture', 'expect': {'passes': 1}})
+        code, out = self.run_goldens_code('--check', '--capture', 'fixture', '--corpus', path)
+        self.assertIn('pair    : not compared (--capture fixture limits this run to one capture)', out)
+        self.assertIn('the pair is not compared', out)
+        self.assertNotIn('dump it', out)
+        self.assertEqual(code, 0)
+
+    def test_the_whole_corpus_run_checks_the_pair_and_reports_what_it_cannot(self):
+        """The other half of the rule: without the filter, a pair that cannot be checked says so."""
+        self.run_goldens('--write', '--corpus', self.corpus_path)
+        path = self.corpus([self.capture_entry()],
+                           pair={'a': 'fixture', 'b': 'fixture', 'expect': {'passes': 1}})
+        code, out = self.run_goldens_code('--check', '--corpus', path)
+        self.assertIn('the pair fixture/fixture: fixture, fixture not here (dump it)', out)
+        self.assertIn('the pair is not compared', out)
+        self.assertEqual(code, 0)      # "not here" is not a mismatch, and the captures still compared
+
     def test_a_capture_that_is_not_the_file_the_goldens_were_written_for_is_a_mismatch(self):
         entry = self.capture_entry(sha256='00' * 32, bytes=4)
         path = self.corpus([entry])

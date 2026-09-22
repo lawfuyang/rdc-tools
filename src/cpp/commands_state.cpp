@@ -7,7 +7,7 @@
 
 int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid)
 {
-  ctrl->SetFrameEvent(eid, true);
+  MoveToEvent(ctrl, eid);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -277,8 +277,8 @@ static void StateDiffRows(const D3D12Pipe::State *st, std::map<std::string, std:
 //: the last event is read the same way as any other.
 static const D3D12Pipe::State *StateAtComplete(IReplayController *ctrl, int eid)
 {
-  ctrl->SetFrameEvent((uint32_t)(eid + 1), true);
-  ctrl->SetFrameEvent((uint32_t)eid, true);
+  MoveToEvent(ctrl, eid + 1);
+  MoveToEvent(ctrl, eid);
   return ctrl->GetD3D12PipelineState();
 }
 
@@ -543,7 +543,7 @@ int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, con
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                bool bWantDisasm)
 {
-  ctrl->SetFrameEvent(eid, true);
+  MoveToEvent(ctrl, eid);
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   if(d3d12 == NULL)
     return Fail(1, "no D3D12 pipeline state at eid %d", eid);
@@ -664,7 +664,7 @@ int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, in
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                ShaderStage stage, int slot)
 {
-  ctrl->SetFrameEvent(eid, true);
+  MoveToEvent(ctrl, eid);
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   const D3D12Pipe::Shader *sh = StageShader(d3d12, stage);
   if(sh == NULL || sh->resourceId == ResourceId::Null())
@@ -1023,7 +1023,7 @@ int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *pat
   // The replay is positioned at the scope event before the engine is asked: the history covers
   // every write *up to* the event the replay is on, so this is what makes the answer the frame's
   // (eid = the last event) rather than wherever the replay happened to be.
-  ctrl->SetFrameEvent((uint32_t)eid, true);
+  MoveToEvent(ctrl, eid);
 
   // One engine call, and not a cheap one: the driver re-runs the frame's draws with instrumented
   // shaders to catch this pixel's fragments, which is seconds rather than milliseconds.
@@ -1609,7 +1609,7 @@ int CmdCrosscheck(IReplayController *ctrl, ICaptureFile *file, const char *path,
     const ULONGLONG sinceEvent = Millis();
     // `force` so a repeated id is not skipped: the answer has to be the state at *this* id, not
     // "already there".
-    ctrl->SetFrameEvent((uint32_t)id, true);
+    MoveToEvent(ctrl, id);
     ProfileAdd(kProfileSetFrameEvent, sinceEvent);
 
     const ULONGLONG sinceChecks = Millis();

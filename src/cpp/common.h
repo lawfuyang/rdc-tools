@@ -411,6 +411,16 @@ std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 //: than "the frame has no events" -- the caller falls back to a coarser bound.
 int LastEventId(IReplayController *ctrl);
 
+//: Move the replay to `eid`, refreshing even if that id is already current. Every command moves the
+//: engine through here, and the reason it is a function rather than 18 calls to
+//: `ctrl->SetFrameEvent` is `AnyEventReplayed` below: `probe`'s answer is only trustworthy on a
+//: *cold* engine (commands_frame.cpp says why), and a cached answer must only be written when it was.
+void MoveToEvent(IReplayController *ctrl, int eid);
+
+//: True once any command has moved the replay. A process that has not moved it yet is the state
+//: `probe`'s answer requires -- and the state a probe cache may be written from (see `MoveToEvent`).
+bool AnyEventReplayed();
+
 // --------------------------------------------------------------------------- the commands
 
 int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path);
@@ -534,6 +544,45 @@ struct SweepRules
 int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
             const std::vector<std::string> &args, bool bWantDisasm);
 int CmdBundleVerify(const char *dir);
+
+//: One row of `probe`'s answer: an id with pipeline state, and the three things the row prints.
+//: Kept as data rather than as a formatted line so the cache can hold it and reprint it unchanged.
+struct ProbeRow
+{
+  int m_Eid = 0;
+  int m_Shaders = 0;
+  std::string m_RootSig;
+  int m_Params = 0;
+};
+
+//: Every id with state over a scanned prefix, in id order. `m_Scanned` is how far that prefix
+//: reaches: ids 1..`m_Scanned` were swept *in order*, which is what makes the rows an answer to
+//: `probe <m_Scanned>` and not merely to the ids they name (see bundle.cpp's probe cache).
+struct ProbeCache
+{
+  std::vector<ProbeRow> m_Rows;
+  int m_Scanned = 0;
+};
+
+//: How often a probe's scan is flushed to its cache file, in ids: a sweep of a five-figure frame is
+//: minutes of `SetFrameEvent`, and a run killed at minute twenty should keep what it established
+//: (bundle.cpp's probe cache says why that prefix is still a valid answer).
+const int kProbeFlushEvery = 1024;
+
+//: The id `probe` should scan to: the caller's cap, the frame's own last event when that is
+//: smaller, or the whole frame for `probe <rdc> last` (a cap of 0 means "the bound, whatever it
+//: is"). Declared here because the device-free selftest pins the arithmetic -- the difference
+//: between "the frame" and "two thousand ids" is the difference between an answer and a silently
+//: empty one on a five-figure frame.
+int ProbeUntil(int cap, int lastEvent);
+
+//: The probe cache's file path for this capture, or an empty string when caching is off or the
+//: engine version is not known. Lives with the sweep cache (bundle.cpp) because it is the same
+//: idea, the same directory and the same text format.
+std::string ProbeCachePath(const char *path);
+bool ReadProbeCache(const std::string &cachePath, const char *path, int lastEvent, ProbeCache &out);
+void WriteProbeCache(const std::string &cachePath, const char *path, int lastEvent,
+                     const ProbeCache &cache);
 
 //: The small file helpers the bundle (and the self-check reading a schema off disk) share.
 std::string Sha256File(const char *path);

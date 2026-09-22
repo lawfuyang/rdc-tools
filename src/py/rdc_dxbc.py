@@ -112,22 +112,25 @@ def count_in(buf: Buffer, needle: bytes) -> int:
 def cmd_count(path: str, pats: Sequence[str]) -> None:
     """Print the occurrence count and first offset of each pattern (verbatim, `-1` included).
 
-    The count comes from `rdc_scan.find_all` -- the same `find`-loop answer, split across processes
-    when the stream is big enough to pay for them -- because each pattern is otherwise a full serial
-    pass. Measured on `desktop-2`'s 1.47 GB stream: ~1.0 s per pattern end to end serial against ~0.7 s
-    with the split (the interpreter's own 0.2 s is under both). An empty pattern keeps the in-file
-    loop: its `len(stream) + 1` is `bytes.count`'s answer for `b''`, and not something a find has an
-    opinion about.
+    The counts come from `rdc_scan.find_all_many` -- the same `find`-loop answer, split across
+    processes when the stream is big enough to pay for them -- because each pattern is otherwise a full
+    serial pass. One call for all the patterns, not one each: the pool, the mapping and the slice
+    arithmetic are the same work every time, and only the passes multiply. Measured on `desktop-2`'s
+    1.47 GB stream, three patterns, one session: 2.247 s one `find_all` at a time against 0.758 s here
+    (the interpreter's own 0.13 s is under both). An empty pattern keeps the in-file loop: its
+    `len(stream) + 1` is `bytes.count`'s answer for `b''`, and not something a find has an opinion
+    about.
     """
     info, stream, how = load_stream(path)
     source = rdc_cache.stream_source(path, info)
     print('stream %d bytes [%s]' % (len(stream), how))
-    for p in pats:
-        b = p.encode()
+    needles = [p.encode() for p in pats]
+    found = iter(rdc_scan.find_all_many(stream, [b for b in needles if b], source))
+    for p, b in zip(pats, needles):
         if not b:
             print('  %-30s count=%-8d first=0x%x' % (p, count_in(stream, b), stream.find(b)))
             continue
-        hits = rdc_scan.find_all(stream, b, source)
+        hits = next(found)
         print('  %-30s count=%-8d first=0x%x' % (p, len(hits), hits[0] if hits else -1))
 
 def cmd_hex(path: str, start: str, length: str) -> None:

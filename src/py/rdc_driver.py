@@ -25,9 +25,11 @@ rather than a mistake.
 from __future__ import annotations
 
 import os
-import subprocess
 import time
 from typing import List, Optional, Sequence, Tuple, TypedDict
+
+# `subprocess` is imported inside `rebuild`, the one function that runs a program: it costs ~15 ms of
+# startup (measured with `python -X importtime`) and every command imports this module.
 
 #: The directory the driver's sources live in, relative to the repository root.
 SOURCE_DIR = os.path.join('src', 'cpp')
@@ -179,6 +181,7 @@ def rebuild(root: Optional[str] = None) -> int:
     Returns the build's exit code, or 1 when `cmake` itself could not be started -- a missing `cmake` is a
     failure of this command, and the message says so rather than being swallowed as a bad build.
     """
+    import subprocess
     base = root or repo_root()
     try:
         return subprocess.run(list(BUILD_COMMAND), cwd=base, check=False).returncode

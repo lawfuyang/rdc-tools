@@ -324,7 +324,7 @@ badly (REFERENCE §9).
 | Command | What it answers | Example |
 |---|---|---|
 | `info` | renderdoc version, driver, GPU, API properties, feature flags (`pixelHistory`, `shaderDebugging`) and counts — the cheapest sanity check there is | `info 'capture.rdc'` |
-| `probe` | which event ids actually have pipeline state; a wrong eid returns an *empty* state rather than an error, so this is what runs before "nothing is bound" is believed | `probe 'capture.rdc' 3000` |
+| `probe` | which event ids actually have pipeline state; a wrong eid returns an *empty* state rather than an error, so this is what runs before "nothing is bound" is believed. The whole frame by default (a number caps the range, `last` spells the default), it must be the session's **first** command, and the answer is cached — a repeat costs the session's startup | `probe 'capture.rdc'`, `probe 'capture.rdc' 3000` |
 | `debug` | the API's own complaints (validation layer, etc.) — they outrank any self-made hypothesis; `--group` folds each distinct message into one row with its count and eid range, and `--fail-on` exits **1** when anything at or above that severity was reported (a pass/fail line for a script) | `debug 'capture.rdc' --group --fail-on medium` |
 | `draws` | the action tree with event ids: markers and calls, optionally filtered | `draws 'capture.rdc' 200 Shadow` |
 | `find` | events whose call name or marker path matches, and resources whose name matches (case-insensitive) | `find 'capture.rdc' SkyViewLut` |
@@ -654,7 +654,9 @@ shown.
   second went, but it also means the file is locked against writing while the command runs — you cannot
   replace a capture mid-analysis, and `cache clear` in another process reports the file in use. The stream
   cache's format is versioned: after an upgrade the first run decompresses once more, and the old files show
-  up in `cache list` as unusable until `cache clear` removes them.
+  up in `cache list` as unusable until `cache clear` removes them. Beside a stream the cache may hold a
+  **derived** file instead — a small answer *about* that stream, like the DXBC container search (§4.13) — and
+  `cache list` counts those on their own line, with `cache clear` taking them too.
 
 ### 2.7 What "best analysis" means here
 

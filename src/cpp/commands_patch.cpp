@@ -171,7 +171,7 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
         2, "'%s' is not an encoding this tool names (hlsl, dxbc, dxil, glsl, spirv, spirv-asm)",
         encName.c_str());
 
-  ctrl->SetFrameEvent((uint32_t)eid, true);
+  MoveToEvent(ctrl, eid);
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   const D3D12Pipe::Shader *shader = StageShader(d3d12, stage);
   if(shader == NULL || shader->resourceId == ResourceId::Null())
@@ -276,7 +276,7 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
     // that discards every pixel rendered byte-identically to the original, which is a change no
     // bookkeeping could fake and the reason this call is here rather than discovered later.
     ctrl->ClearReplayCache();
-    ctrl->SetFrameEvent((uint32_t)eid, true);
+    MoveToEvent(ctrl, eid);
     Flag("replaced", true);
 
     if(bCompare)

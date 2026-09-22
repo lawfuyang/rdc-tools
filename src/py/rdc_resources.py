@@ -6,9 +6,12 @@ from rdc_types import *  # noqa: F401,F403
 from rdc_chunkmap import *  # noqa: F401,F403
 from rdc_stream import *  # noqa: F401,F403
 from rdc_dxbc import *  # noqa: F401,F403
+import rdc_cache       # noqa: F401  (used qualified: a sidecar is the cache's file naming, not ours)
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_chunknames  # noqa: F401  (the bundled format names, when no tree is there)
 import rdc_profile
+
+import os
 
 from typing import Dict, List, Optional, Tuple
 
@@ -359,8 +362,17 @@ def shader_bind_names(stream: Buffer,
     `_root_param_label` refuses to pick one when they disagree.
 
     `source` is the stream-cache entry, passed down to the container search so its whole-stream `find`
-    can be split across processes (`rdc_scan.find_all`); without it the search is the serial loop.
+    can be split across processes (`rdc_scan.find_all`); without it the search is the serial loop, and
+    nothing is cached. With it the answer is written beside the stream cache entry (`_load_bind_names`)
+    and reused, because the question is about the *stream* and not about the command: the find is 0.30 s
+    of `desktop-1`'s 0.51 s `draws` and 0.52 s of `desktop-2`'s 0.85 s, it is paid again by `rootsig`,
+    `dxbc` and both sides of `diff`, and on all three real captures the answer is the same empty dict --
+    their DXIL has no `RDEF` left. The empty answer is worth caching for exactly that reason.
     """
+    if source is not None:
+        cached = _load_bind_names(stream, source)
+        if cached is not None:
+            return cached
     out: Dict[str, Dict[Tuple[str, int, int], str]] = {}
     for _off, _size, _hash, parts in parse_dxil_containers(stream, source):
         part = next((p for p in parts if p[0] == 'RDEF'), None)
@@ -370,7 +382,84 @@ def shader_bind_names(stream: Buffer,
         stage = RDEF_STAGES.get(u16(data, 18), '?') if len(data) >= 20 else '?'
         for bind in parse_rdef(data):
             out.setdefault(stage, {})[(bind['kind'], bind['register'], bind['space'])] = bind['name']
+    if source is not None:
+        _store_bind_names(stream, source, out)
     return out
+
+#: The sidecar's name: the stream cache file's stem with this suffix (`rdc_cache.sidecar_path`), and it
+#: must be one of `rdc_cache.DERIVED_SUFFIXES` -- a test says so -- or `cache clear` would leave it.
+BIND_NAMES_SUFFIX = '.bindnames.json'
+#: The sidecar's own version: bumped when what is stored (or how it is keyed) changes, so an older file
+#: is ignored rather than half-read. The cache-version rule of the stream cache, one level down.
+BIND_NAMES_VERSION = 1
+#: How much of a stream a sidecar's identity covers, at each end. Hashing 1.5 GB per command would cost
+#: more than the scan it saves; 64 KB at each end plus the stream cache's own name (path, size, mtime,
+#: section and cache version hashed into it, REFERENCE 4.8) is what makes a stale answer unreadable.
+BIND_NAMES_SAMPLE = 64 << 10
+
+def _stream_digest(stream: Buffer) -> str:
+    """`sha256` of the stream's first and last `BIND_NAMES_SAMPLE` bytes (the whole stream if shorter)."""
+    import hashlib
+    if len(stream) <= 2 * BIND_NAMES_SAMPLE:
+        return hashlib.sha256(bytes(stream)).hexdigest()
+    digest = hashlib.sha256(bytes(stream[:BIND_NAMES_SAMPLE]))
+    digest.update(bytes(stream[len(stream) - BIND_NAMES_SAMPLE:]))
+    return digest.hexdigest()
+
+def _load_bind_names(stream: Buffer,
+                     source: CacheEntry) -> Optional[Dict[str, Dict[Tuple[str, int, int], str]]]:
+    """The names from `source`'s sidecar, or None when there is none for *this* stream.
+
+    Every refusal falls back to the scan: no file (`$RDC_NO_CACHE`, a first run, a cache directory that
+    cannot be written), a version or a stream digest that is not this one, or a file that is not the
+    document this writes. A cache can only ever save work, so a broken one is never an error.
+    """
+    import json
+    try:
+        with open(rdc_cache.sidecar_path(source, BIND_NAMES_SUFFIX), encoding='utf-8') as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict) or document.get('version') != BIND_NAMES_VERSION:
+        return None
+    if document.get('streamLen') != len(stream) or document.get('digest') != _stream_digest(stream):
+        return None
+    rows = document.get('names')
+    if not isinstance(rows, list):
+        return None
+    out: Dict[str, Dict[Tuple[str, int, int], str]] = {}
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 5:
+            return None
+        stage, kind, register, space, name = row
+        out.setdefault(str(stage), {})[(str(kind), int(register), int(space))] = str(name)
+    return out
+
+def _store_bind_names(stream: Buffer, source: CacheEntry,
+                      names: Dict[str, Dict[Tuple[str, int, int], str]]) -> None:
+    """Write the sidecar: a temporary name renamed into place, and never an error if it fails.
+
+    The rows are `[stage, kind, register, space, name]`, because a JSON object cannot key on the tuple
+    the lookup uses and a joined string key would be one more thing to get wrong. Sorted, so two runs of
+    two different commands write byte-identical files.
+    """
+    import json
+    path = rdc_cache.sidecar_path(source, BIND_NAMES_SUFFIX)
+    rows = [[stage, kind, register, space, name]
+            for stage, binds in sorted(names.items())
+            for (kind, register, space), name in sorted(binds.items())]
+    document = {'version': BIND_NAMES_VERSION, 'streamLen': len(stream),
+                'digest': _stream_digest(stream), 'names': rows}
+    tmp = path + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(document, fh, separators=(',', ':'), sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 def _bind_name(binds: Dict[str, Dict[Tuple[str, int, int], str]], param: RootParam) -> str:
     """The name `RDEF` reflection gives this root parameter, or '' when there is none to trust.
@@ -441,6 +530,9 @@ def _name_suffix(table: Dict[int, ResourceInfo], rid: int, width: int = 24) -> s
     return '[%s]' % entry['name'][:width]
 
 __all__ = [
+    'BIND_NAMES_SAMPLE',
+    'BIND_NAMES_SUFFIX',
+    'BIND_NAMES_VERSION',
     'PARAM_KINDS',
     'RANGE_KINDS',
     'RDEF_KINDS',

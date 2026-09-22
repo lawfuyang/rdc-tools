@@ -567,6 +567,17 @@ class TestCmdCount(CmdCase):
         path = self.cap(self.ch('PushMarker', b'X'))
         self.assertIn('stream %d bytes' % 64, self.out(R.cmd_count, path, []))
 
+    def test_several_patterns_and_an_empty_one_keep_their_own_lines(self):
+        # The patterns are found by one `find_all_many` call, so the risk is a line being answered by
+        # the next pattern's hits -- and the empty pattern is the one that is not a find question at
+        # all (`count_in`'s `len(stream) + 1` for `b''`).
+        path = self.cap(self.ch('PushMarker', b'NEEDLE\x00NUAGE\x00NEEDLE\x00NUAGE\x00NUAGE'))
+        out = self.out(R.cmd_count, path, ['NEEDLE', '', 'NUAGE', 'ABSENT'])
+        counts = [int(line.split('count=')[1].split()[0])
+                  for line in out.splitlines() if 'count=' in line]
+        self.assertEqual(counts, [2, 65, 3, 0])
+        self.assertIn('first=0x8', self.line_with(out, 'NEEDLE'))
+
 
 class TestCmdHex(CmdCase):
     def test_hex_and_ascii_dump(self):

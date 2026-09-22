@@ -467,6 +467,172 @@ void WriteSweepCache(const std::string &cachePath, const char *path, const DumpO
   rename(temp.c_str(), cachePath.c_str());
 }
 
+// --------------------------------------------------------------------------- the probe cache
+//
+// `probe` sweeps the same ids the bundle's sweep does -- one `SetFrameEvent` per id, 12 ms on the
+// `desktop-1` frame and 47 on the 1.4 GB one -- and it had no cache at all: 39 s on `desktop-1`,
+// every run, and on a frame whose ids run to five figures the old default range answered "nothing
+// has state" after a minute of sweeping. Its answer is a pure function of the capture, the engine
+// and the ids scanned, so it is cached beside the sweep's: same directory, same `# key: value`
+// header and one row per line, same two environment variables, and no JSON parser anywhere.
+//
+// Two things differ from the sweep's, and both are about `probe` being a *range* query rather than
+// a pass over the frame:
+//
+//  * the key is the capture and the engine alone. A probe's answer is a prefix -- a file whose
+//    `# scanned: N` line says ids 1..N were swept *in order* answers `probe N` and every smaller
+//    request -- and a request for more is a fresh sweep from id 1 rather than an extension of what
+//    is cached. Extending would mean arriving at 501 by a cold jump instead of through 500, and the
+//    ids just after such a jump lose their state: that is what the parallel sweep measured (further
+//    down) and why no id is ever skipped here;
+//  * it is flushed every `kProbeFlushEvery` ids, so a sweep killed at minute twenty keeps the
+//  prefix
+//    it had established -- which the paragraph above says is still a correct answer to a smaller
+//    request.
+//
+// Rows are `eid shaders rootSig params`: the four fields the row prints, so the cache reprints the
+// line the scan would have. `rootSig` is `IdText`'s decimal, and holds no space.
+
+//: The cache file for this capture, or an empty string when caching is off. Keyed like the sweep's
+//: -- path, size, write time and engine -- because a capture edited in place is a different capture
+//: whose ids mean something else, and the size and write time are what say so.
+std::string ProbeCachePath(const char *path)
+{
+  if(CacheDisabled())
+    return std::string();
+  const std::string identity = AbsolutePath(path);
+  std::string lower = identity;
+  for(size_t i = 0; i < lower.size(); i++)
+    lower[i] = (char)tolower((unsigned char)lower[i]);
+  WIN32_FILE_ATTRIBUTE_DATA info;
+  unsigned long long bytes = 0, written = 0;
+  if(GetFileAttributesExA(identity.c_str(), GetFileExInfoStandard, &info))
+  {
+    bytes = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+    written = ((unsigned long long)info.ftLastWriteTime.dwHighDateTime << 32) |
+              info.ftLastWriteTime.dwLowDateTime;
+  }
+  const std::string material = Fmt("%s|%llu|%llu|%s", lower.c_str(), bytes, written,
+                                   g_GetVersionString != NULL ? g_GetVersionString() : "?");
+  unsigned long long hash = 1469598103934665603ULL;
+  for(size_t i = 0; i < material.size(); i++)
+  {
+    hash ^= (unsigned char)material[i];
+    hash *= 1099511628211ULL;
+  }
+  return CacheDir() + "\\probe-" + Fmt("%016llx", hash) + ".txt";
+}
+
+//: Reads the cache, refusing anything that is not this capture's answer. A missing file, another
+//: capture's, another engine's, a truncated one and one with no rows are all the same answer -- sweep
+//: -- which is always correct and only slow.
+bool ReadProbeCache(const std::string &cachePath, const char *path, int lastEvent, ProbeCache &out)
+{
+  out.m_Rows.clear();
+  out.m_Scanned = 0;
+  if(cachePath.empty())
+    return false;
+  FILE *f = fopen(cachePath.c_str(), "rb");
+  if(f == NULL)
+    return false;
+  const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).c_str());
+  const std::string wantEngine =
+      Fmt("# engine: %s", g_GetVersionString != NULL ? g_GetVersionString() : "?");
+  // The frame's own extent is part of the answer's meaning (`probe` stops at it), so a file swept
+  // against a different bound is refused rather than reinterpreted.
+  const std::string wantBound = Fmt("# bound: %d", lastEvent);
+  bool bCapture = false, bEngine = false, bBound = false, bScanned = false;
+  char line[1024];
+  while(fgets(line, sizeof(line), f) != NULL)
+  {
+    std::string text(line);
+    while(!text.empty() && (text[text.size() - 1] == '\n' || text[text.size() - 1] == '\r'))
+      text.erase(text.size() - 1);
+    if(text.compare(0, 2, "# ") == 0)
+    {
+      if(text == wantCapture)
+        bCapture = true;
+      else if(text == wantEngine)
+        bEngine = true;
+      else if(text == wantBound)
+        bBound = true;
+      else if(text.compare(0, 10, "# scanned:") == 0)
+      {
+        const char *tail = text.c_str() + 10;
+        while(*tail == ' ')    // `ParseInt` takes the whole text, so the space is the reader's job
+          tail++;
+        int scanned = 0;
+        if(ParseInt(tail, scanned) && scanned > 0)
+        {
+          out.m_Scanned = scanned;
+          bScanned = true;
+        }
+      }
+      continue;
+    }
+    if(text.empty())
+      continue;
+    ProbeRow row;
+    char rootSig[64] = {0};
+    if(sscanf(text.c_str(), "%d %d %63s %d", &row.m_Eid, &row.m_Shaders, rootSig, &row.m_Params) != 4)
+    {
+      fclose(f);
+      out.m_Rows.clear();
+      out.m_Scanned = 0;
+      return false;    // a row that is not a row: refuse the whole file
+    }
+    row.m_RootSig = rootSig;
+    out.m_Rows.push_back(row);
+  }
+  fclose(f);
+  const bool bOk = bCapture && bEngine && bBound && bScanned;
+  if(!bOk)
+  {
+    out.m_Rows.clear();
+    out.m_Scanned = 0;
+  }
+  return bOk;
+}
+
+//: Writes the cache, best effort: one that cannot be written is a run that sweeps again next time.
+//: Temporary name, then rename, so an interrupted write cannot leave a half file behind.
+void WriteProbeCache(const std::string &cachePath, const char *path, int lastEvent,
+                     const ProbeCache &cache)
+{
+  if(cachePath.empty() || cache.m_Scanned <= 0)
+    return;
+  MakeDir(CacheDir());
+  const std::string temp = cachePath + ".part";
+  FILE *f = fopen(temp.c_str(), "wb");
+  if(f == NULL)
+    return;
+  fprintf(f, "# rdc-tools probe cache v1\n");
+  fprintf(f, "# capture: %s\n", AbsolutePath(path).c_str());
+  fprintf(f, "# engine: %s\n", g_GetVersionString != NULL ? g_GetVersionString() : "?");
+  fprintf(f, "# bound: %d\n", lastEvent);
+  fprintf(f, "# scanned: %d\n", cache.m_Scanned);
+  for(size_t i = 0; i < cache.m_Rows.size(); i++)
+  {
+    const ProbeRow &row = cache.m_Rows[i];
+    fprintf(f, "%d %d %s %d\n", row.m_Eid, row.m_Shaders, row.m_RootSig.c_str(), row.m_Params);
+  }
+  fclose(f);
+  remove(cachePath.c_str());
+  rename(temp.c_str(), cachePath.c_str());
+}
+
+//: The ids `probe` should scan: the caller's cap, the frame's own last event when that is smaller,
+//: and the whole frame when the cap is 0 (`probe <rdc> last`). A frame with no derivable bound
+//: scans the cap: fewer ids than the frame is a fact the caller can see in `scanned`.
+int ProbeUntil(int cap, int lastEvent)
+{
+  if(cap <= 0)
+    return lastEvent > 0 ? lastEvent : 0;
+  if(lastEvent <= 0)
+    return cap;
+  return cap < lastEvent ? cap : lastEvent;
+}
+
 //: Defined with the CLI helpers further down; `dump`'s options take integers, and `atoi` would turn
 //: a typo into a plausible number (`--since` becoming 0) instead of saying that it is not a number.
 
@@ -510,7 +676,7 @@ void SweepForEvents(IReplayController *ctrl, const DumpOptions &opts, int until,
   for(int eid = opts.m_Since; eid <= until; eid++)
   {
     const ULONGLONG tMove = Millis();
-    ctrl->SetFrameEvent(eid, true);
+    MoveToEvent(ctrl, eid);
     ProfileAdd(kProfileSetFrameEvent, tMove);
     const ULONGLONG tState = Millis();
     const D3D12Pipe::State *st = ctrl->GetD3D12PipelineState();
@@ -717,7 +883,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     // the whole cost of a cache hit: 47 ms instead of the scan. Measured: without it, the warm
     // bundle differed from the cold one in five files.
     const ULONGLONG tWarm = Millis();
-    ctrl->SetFrameEvent(lastEid, true);
+    MoveToEvent(ctrl, lastEid);
     ProfileAdd(kProfileSetFrameEvent, tWarm);
   }
   else
@@ -811,7 +977,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     {
       const int eid = ids[index];
       const ULONGLONG tMove = Millis();
-      ctrl->SetFrameEvent(eid, true);
+      MoveToEvent(ctrl, eid);
       ProfileAdd(kProfileSetFrameEvent, tMove);
       const ULONGLONG tState = Millis();
       const D3D12Pipe::State *st = ctrl->GetD3D12PipelineState();

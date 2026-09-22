@@ -7,7 +7,7 @@ from rdc_detect_common import *  # noqa: F401,F403
 
 import re
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 def detect_messages(bundle: BundleData) -> List[RedFlag]:
     """The API's own complaints (`debug`), grouped by severity and text (certain).
@@ -40,6 +40,45 @@ def detect_messages(bundle: BundleData) -> List[RedFlag]:
         })
     return flags
 
+#: A number, for counting one document's values when it *is* all zeros. The question "is every value
+#: zero?" is not asked this way any more -- see `ZERO_VALUES` -- but "how many values were there?" still
+#: is, in the finding's own text, and it is asked of a handful of documents rather than of every row.
+NUMBER = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
+#: A row's value side that holds numbers and no non-zero one: a digit is there at all, and the whole
+#: side is separators and *zero* numbers. A zero prints as `0`, `0.0`, `-0.0`, `.0`, `0e-9` -- so the
+#: number this accepts is `0+(\.0+)?([eE][-+]?\d+)?`, and everything that is not a digit (a comma, a
+#: brace, a sign, a point that did not start a zero) is skipped. Written as one pattern so the question
+#: is one `match` per row: the `float()`-per-token comparison it replaces measured 0.234 s of
+#: `desktop-1`'s 0.277 s of detector time -- 64,246 `findall` calls and 579,154 `float()` calls to
+#: answer a yes/no question about 6 flags. **The exponent is the trap**, and why the rule cannot be
+#: "no digit but `0`": `0.000e-9` is zero and carries a `9`, which the equivalence test below found the
+#: day this was written.
+ZERO_VALUES = re.compile(r'\A(?=[^0-9]*[0-9])(?:[^0-9]|0+(?:\.0+)?(?:[eE][-+]?\d+)?)*\Z')
+#: Any digit that makes a number non-zero. A side that fails `ZERO_VALUES` is non-zero only when the
+#: reason is one of these; otherwise it held no number at all.
+NONZERO_DIGIT = re.compile(r'[1-9]')
+
+def _zero_sides(variables: Sequence[object]) -> Tuple[List[str], bool]:
+    """One document's variable rows, read for the all-zero question.
+
+    Returns the value sides that hold *numbers* -- a row with no number in it (a struct's opening brace,
+    a string, a `nan`) is not evidence either way, which is what the old `if values` meant -- and whether
+    every number in them is zero. The two together are the old rule: the block is all zeros when there
+    was at least one number and none of them was non-zero.
+    """
+    sides: List[str] = []
+    zero = True
+    for row in variables:
+        text = str(row)
+        if '=' not in text:              # the value side only: a name can hold a digit
+            continue
+        side = text.split('=', 1)[1]
+        if ZERO_VALUES.match(side) is not None:
+            sides.append(side)
+        elif NONZERO_DIGIT.search(side) is not None:
+            zero = False
+    return sides, bool(sides) and zero
+
 def detect_zero_constant_blocks(bundle: BundleData) -> List[RedFlag]:
     """A constant block whose every numeric value is zero (certain).
 
@@ -49,23 +88,24 @@ def detect_zero_constant_blocks(bundle: BundleData) -> List[RedFlag]:
     how many of the events it was dumped at were all-zero, because "zero at 120" and "zero everywhere" are
     different findings. Rows with no number in them (a struct's opening brace, a string) are not evidence
     either way.
+
+    "Every value is zero" is decided on the *text* (`ZERO_VALUES`): a value side whose whole content is
+    separators and zero numbers. The float conversions it replaces never disagreed with it -- there is a test
+    that walks the awkward shapes, `-0.0` to `1e-320` to `0.000e-9` -- and they were the whole cost of this
+    detector.
     """
-    number = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
     blocks: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     for name in sorted(bundle['cbuffers']):
         document = bundle['cbuffers'][name]
-        values: List[float] = []
-        for row in document.get('variables', []):
-            text = str(row)
-            if '=' in text:                          # the value side only: a name can hold a digit
-                values.extend(float(token) for token in number.findall(text.split('=', 1)[1]))
+        zeros, all_zero = _zero_sides(document.get('variables', []))
         key = (str(document.get('stage', '?')), str(document.get('slot', '?')),
                str(document.get('buffer', '?')))
         entry = blocks.setdefault(key, {'zero': [], 'all': [], 'values': 0})
         entry['all'].append(int(document.get('eid', 0) or 0))
-        if values and all(value == 0.0 for value in values):
+        if all_zero:
             entry['zero'].append(int(document.get('eid', 0) or 0))
-            entry['values'] = max(entry['values'], len(values))
+            entry['values'] = max(entry['values'],
+                                  sum(len(NUMBER.findall(side)) for side in zeros))
 
     flags: List[RedFlag] = []
     for key in sorted(blocks, key=lambda k: (k[0], str(k[1]), k[2])):

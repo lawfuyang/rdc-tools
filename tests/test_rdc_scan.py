@@ -127,7 +127,7 @@ class TestScanRuns(TempDirCase):
 
     def test_a_pool_that_cannot_start_still_gives_the_same_answer(self):
         stream = sample_stream()
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=OSError('no processes here')):
             counts, firsts = R.scan_runs(stream, 6, self.source_for(stream), procs=4)
         self.assertEqual((counts, firsts), serial_runs(stream, 6))
@@ -135,21 +135,21 @@ class TestScanRuns(TempDirCase):
     def test_a_small_stream_does_not_start_a_pool(self):
         # `procs=None` means "use a pool only if the stream is big enough and there is a file to map"
         stream = sample_stream(20)
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=AssertionError('a pool was started for a small stream')):
             counts, firsts = R.scan_runs(stream, 6, self.source_for(stream))
         self.assertEqual((counts, firsts), serial_runs(stream, 6))
 
     def test_no_source_means_no_pool(self):
         stream = sample_stream()
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=AssertionError('a pool was started without a source')):
             counts, firsts = R.scan_runs(stream, 6, None)
         self.assertEqual((counts, firsts), serial_runs(stream, 6))
 
     def test_a_stream_shorter_than_the_file_check_needs_is_not_mapped(self):
         stream = b'\x00abcdefgh\x00' * 8        # under 128 bytes: the file check cannot compare ends
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=AssertionError('mapped a stream too short to check')):
             counts, firsts = R.scan_runs(stream, 6, self.source_for(stream, 'short.bin'))
         self.assertEqual((counts, firsts), serial_runs(stream, 6))
@@ -206,7 +206,7 @@ class TestFindAll(TempDirCase):
 
     def test_no_source_means_no_pool(self):
         stream, expected = self.planted([100, 2000])
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=AssertionError('a pool was started without a source')):
             self.assertEqual(R.find_all(stream, b'DXBC'), expected)
 
@@ -214,13 +214,13 @@ class TestFindAll(TempDirCase):
         # `procs=None` is "only if the stream is big enough to pay for the start", which a 4 KB
         # fixture never is: `FIND_MIN_BYTES` is a gigabyte, measured (a pool costs 0.48 s here).
         stream, expected = self.planted([100, 2000])
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=AssertionError('a pool was started for a small stream')):
             self.assertEqual(R.find_all(stream, b'DXBC', self.source_for(stream)), expected)
 
     def test_a_pool_that_cannot_start_still_answers(self):
         stream, expected = self.planted([0, 1998, 2999, 3996])
-        with mock.patch.object(rdc_scan.multiprocessing, 'Pool',
+        with mock.patch.object(rdc_scan, '_pool',
                                side_effect=OSError('no processes here')):
             self.assertEqual(R.find_all(stream, b'DXBC', self.source_for(stream), procs=4), expected)
 
@@ -236,6 +236,52 @@ class TestFindAll(TempDirCase):
         stream, _expected = self.planted([100])
         self.assertEqual(R.find_all(stream, b''), [])
         self.assertEqual(R.find_all(stream, b'', self.source_for(stream), procs=4), [])
+
+    def test_the_default_worker_count_is_the_byte_find_cap(self):
+        """`procs=None` uses `FIND_MAX_SLICES`, which is deliberately below the string scan's 32.
+
+        Read through `_find_ranges`, which is the whole decision: a byte find is memory-bandwidth
+        bound, so every worker past a handful costs a fresh interpreter and buys nothing (the curve is
+        in the constant's own comment).
+        """
+        self.assertLess(rdc_scan.FIND_MAX_SLICES, rdc_scan.MAX_SLICES)
+        stream, _expected = self.planted([100, 2000])
+        with mock.patch.object(rdc_scan, 'FIND_MIN_BYTES', 1):     # "big enough to pay for a pool"
+            ranges = rdc_scan._find_ranges(stream, self.source_for(stream), None)
+        self.assertIsNotNone(ranges)
+        self.assertEqual(len(ranges or []), min(os.cpu_count() or 1, rdc_scan.FIND_MAX_SLICES))
+
+    def test_the_multi_needle_find_agrees_with_one_call_per_needle(self):
+        stream = sample_stream()
+        needles = [b'Name_00', b'\x00\xff', b'Wide0007']
+        one_each = [R.find_all(stream, n) for n in needles]
+        self.assertGreater(len(one_each[0]), 10)
+        self.assertEqual(R.find_all_many(stream, needles), one_each)
+        self.assertEqual(R.find_all_many(stream, needles, self.source_for(stream), procs=4), one_each)
+
+    def test_the_multi_needle_find_keeps_each_needle_in_its_own_slice(self):
+        # The failure a shared pool invites: the second needle's hits reported under the first. Both
+        # plantings straddle a cut, and the second needle never occurs at all.
+        stream, expected = self.planted([0, 1998, 3996])
+        got = R.find_all_many(stream, [b'DXBC', b'CDXB', b'XBCD'],
+                              self.source_for(stream), procs=4)
+        self.assertEqual(got, [expected, [], []])
+
+    def test_no_needles_is_no_answer(self):
+        stream, _expected = self.planted([100])
+        self.assertEqual(R.find_all_many(stream, []), [])
+
+    def test_an_empty_needle_in_a_list_matches_nothing(self):
+        stream, expected = self.planted([100, 2000])
+        self.assertEqual(R.find_all_many(stream, [b'', b'DXBC'], self.source_for(stream), procs=4),
+                         [[], expected])
+
+    def test_the_multi_needle_find_falls_back_to_this_process(self):
+        stream = sample_stream()
+        needles = [b'Name_00', b'\x00\xff']
+        with mock.patch.object(rdc_scan, '_pool', side_effect=OSError('no processes here')):
+            self.assertEqual(R.find_all_many(stream, needles, self.source_for(stream), procs=4),
+                             [R.find_all(stream, n) for n in needles])
 
 # =========================================================================== profiling and progress
 class TestProfile(unittest.TestCase):

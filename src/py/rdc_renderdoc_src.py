@@ -33,13 +33,15 @@ import io
 import json
 import os
 import re
-import shutil
 import sys
-import tarfile
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
-# `urllib.request` is imported inside `_fetch`: it costs ~90 ms (with `http.client` behind it) and the
-# tree is usually already there, so every command would pay for a download it never makes.
+if TYPE_CHECKING:       # `_extract`'s parameter is a tarfile; the import itself is in `download`
+    import tarfile
+
+# `urllib.request` is imported inside `_fetch`, `tarfile` inside `download` and `shutil` inside `_extract`:
+# they cost ~90 ms together with everything they drag in (`http.client`, `tempfile`, `bz2`, `lzma`) and
+# the tree is usually already there, so every command would pay for a download it never makes.
 
 #: The files the tool cannot work without, relative to the tree's root: the `SystemChunk` enum and the D3D12
 #: chunk enum. A tree that has these two is "populated" for this tool's purposes -- deliberately a *content*
@@ -167,6 +169,7 @@ def _safe_parts(name: str) -> Optional[List[str]]:
 
 def _extract(archive: tarfile.TarFile, root: str, log: Callable[[str], None]) -> Tuple[int, int]:
     """Write an opened archive's regular files under `root`; return `(files written, entries refused)`."""
+    import shutil
     written = 0
     refused = 0
     for member in archive:
@@ -208,6 +211,7 @@ def download(tag: str, root: str, log: Callable[[str], None] = lambda _text: Non
     payload = _fetch(tarball_url(tag), timeout)
     log('  %d byte(s) of archive; extracting into %s' % (len(payload), root))
     os.makedirs(root, exist_ok=True)
+    import tarfile
     with tarfile.open(fileobj=io.BytesIO(payload), mode='r:gz') as archive:
         written, refused = _extract(archive, root, log)
     if refused:
@@ -279,7 +283,8 @@ def ensure(root: Optional[str] = None, tag: Optional[str] = None,
             raise BootstrapError(note)
         return target
 
-    try:
+    import tarfile      # a *local* import: the `except` below names `tarfile.TarError`, and a function's
+    try:                # own names are what its handlers resolve (the import is what a fetch pays for)
         wanted = tag or latest_tag()
         log('renderdoc-src is not populated (%s): fetching RenderDoc %s from GitHub'
             % (', '.join(missing_parts(target)), wanted))

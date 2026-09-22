@@ -363,9 +363,9 @@ Measured on the 61 MB PC capture in this repo: `sections` 3.56 s → 0.27 s, `ve
 
 | Command | Effect |
 |---|---|
-| `python src\py\rdc_analysis.py cache` | list the entries: stream size, method, build time, source capture |
+| `python src\py\rdc_analysis.py cache` | list the entries: stream size, method, build time, source capture — and, on its own line, any *derived* files (an answer about a stream rather than a stream: `derived_names`) |
 | `python src\py\rdc_analysis.py cache dir` | print the cache directory |
-| `python src\py\rdc_analysis.py cache clear` | delete every entry (prints files removed and MB freed) |
+| `python src\py\rdc_analysis.py cache clear` | delete every entry **and every derived file** (prints files removed and MB freed) |
 
 The cache is pure optimisation and cannot change what a command prints apart from that label. An entry is used
 only when it was built from exactly this file (same absolute path, size and mtime), for this section, and holds
@@ -727,6 +727,75 @@ For the driver half of the same question, see §9: `dump` is one `SetFrameEvent`
 bounded by the frame's last event id, and the sweep cache is what makes a re-run affordable (measured on a
 full `desktop-1` frame: 68 s cold, 45 s with the sweep answered from the cache).
 
+**A fourth look** (2026-09-22) went after what the three above left, and found that the *editing* half of the
+tool had already been optimised while the *scanning* half had one lever nobody had pulled: the worker count
+was 32 for both scans, and for a byte find that is four times too many. Measured on `desktop-2` (1.47 GB),
+best of three in one session, `find_all(b'DXBC')`:
+
+| workers | 1 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|
+| seconds | 0.678 | 0.702 | **0.554** | 0.613 | 0.741 |
+
+32 is the **worst** of the five. A `find` is memory-bandwidth bound where the `re` pass is CPU-bound, so past
+a handful of workers the only thing still growing is fresh interpreters; the string scan keeps its 32 (16
+slices 2.50 s against 32 slices 2.21 s in the same session). `FIND_MAX_SLICES` is now 8 for `find_all`, and
+`FIND_MIN_BYTES` still keeps the pool off `desktop-1` altogether (serial 0.255 s against 8 slices 0.383 s
+there: a pool that saves 25% on a gigabyte costs 50% on 631 MB). A second session's A/B, same capture, old
+against new: **0.637 s → 0.547 s** for one find, and **2.217 s → 0.746 s** for three.
+
+The three patterns are `count`'s case, and they were three *pools* -- `cmd_count` called `find_all` once per
+pattern, so the spawn, the mapping and the slice arithmetic were paid again for each. `find_all_many` scans
+for a list of needles over one pool and one mapping per slice, one `find` loop each: the offsets it returns
+are `find_all`'s, needle for needle and in the same order (an empty pattern still answers nothing, because a
+`find` has no opinion about it). `count <rdc> a b c` on `desktop-2`: **2.247 s → 0.758 s**.
+
+**The whole-stream DXBC search is now cached** (`<stream>.bindnames.json`, `rdc_resources.shader_bind_names`).
+It is the one scan whose answer is a property of the *stream* rather than of the command -- where the
+containers are, and what their `RDEF` parts name -- and it was being paid by `draws`, `rootsig`, `dxbc` and
+both sides of `diff`: 0.60 s of `desktop-1`'s 1.15 s `draws` and 0.72 s of `desktop-2`'s 1.33 s, with
+**zero names at the end of it on every capture in the corpus** (their DXIL has no `RDEF` left), which is
+exactly why the empty answer is cached too. The sidecar is named after the stream cache entry
+(`rdc_cache.sidecar_path`) and stamped with the stream's length and a digest of its first and last 64 KB, so
+another stream's file is refused rather than half-believed; a version, a corrupted document, a missing file
+and `$RDC_NO_CACHE` all fall back to the scan, which is why `$RDC_NO_CACHE` remains the transcripts' setting:
+a golden cannot depend on what this machine has already scanned. Measured: `shader bind names` **0.60 s →
+0.01 s** on `desktop-1` (`draws` 1.15 s → 0.35 s) and **0.72 s → 0.01 s** on `desktop-2` (`draws` 1.33 s →
+0.62 s); the two files this machine wrote are 0.2 KB together. This reopens the artefact §4.13 declined
+twice -- and the difference is what is being stored: not a container/name index over the whole stream, but
+one small answer about a stream that already has a cache file beside it, with the same identity and the same
+`cache clear`.
+
+**A detector was answering a yes/no question with 579,154 `float()` calls.**
+`detect_zero_constant_blocks` asked "is every value in this block zero?" by parsing every number out of
+every row: 64,246 `findall` calls and a conversion per token, **0.234 s of `desktop-1`'s 0.277 s of detector
+time** (0.098 of 0.109 on the mobile bundle). A decimal literal is zero exactly when its digits are: the rule
+is now one `match` per row against `0+(\.0+)?([eE][-+]?\d+)?` with everything that is not a digit skipped,
+and the token *count* that the finding's text carries is computed only for a document that is all zeros.
+Measured: **0.234 s → 0.129 s** (`desktop-1`, same 6 flags) and **0.098 s → 0.048 s** (mobile, same 7). The
+equivalence is pinned by a test that walks the awkward shapes against the old rule written out --
+`-0.0`, `.0`, `1e-320`, `0x1F`, `nan`, a row with no number in it -- and it earned its keep on the first run:
+`0.000e-9` is zero and carries a `9`, which the first version of the rule (and a naive "no digit but `0`")
+called non-zero.
+
+**The startup floor is the environment, not the tool.** `import rdc_analysis` costs ~135 ms here, of which
+~90-125 ms is `site` plus the `sitecustomize` an IDE installs -- a bare `python -c pass` is 88-167 ms on this
+machine, and the tool's own tree is 50-80 ms of that, most of which (`json`, `hashlib`, `tempfile`,
+`subprocess`, `bz2`/`lzma`/`zlib`) *the environment loaded first*: with `-S`, the tool adds only `zlib`,
+`json` and `hashlib`. What the tool was loading for nothing is now deferred to where it is used:
+`multiprocessing` (**18.1 ms** of every command process, and most commands never start a pool -- `_pool` is
+the one place one is made, and the tests' seam for "a pool that cannot start"), `tarfile`+`shutil` (4.8 ms,
+the fetch), `subprocess` (the build, the harness). A *pool worker* still pays `multiprocessing`, because a
+worker is what the import is for. There is nothing else here worth having: `-S` would take the optional
+`zstandard` with it, and the interpreter's own share is not the tool's to spend.
+
+**`goldens --check --capture <name>` no longer pays the pair's A/B.** The pair is a check about two captures,
+and `check_pair` ran it whichever capture the filter named: 17.8 s of a 32.8 s single-capture run (measured
+with `cProfile`: 35.3 s of `_thread.lock.acquire`, i.e. waiting for the A/B, against 3.6 s of that capture's
+own transcripts and 3.9 s of its driver session). With `--capture` given, the pair is reported as **not
+compared** -- "`--capture mobile-1` limits this run to one capture" -- and the whole-corpus run is unchanged.
+The same session's numbers for the run itself: 33 s → 22.5 s for `--capture mobile-1`.
+
+
 ### 4.14 Reading the file: mapped, not copied
 
 Every command used to pay two full reads before doing anything: the container (601 MB for `desktop-2`,
@@ -766,8 +835,12 @@ walks all 29,212 chunks in Python and slices every payload; `summary` and `marke
 0.8 s), the `re` pass `strings` and `names` are built on (14.5 s, split across processes -- §4.13), and the
 report's detectors (1.4 s of a 2.5 s `report`). The walk itself is 0.038 s, so splitting those loop bodies
 across processes would mean handing each worker the chunk index for its slice -- a real change, for about a
-second. Nothing derived is cached for the same reason §4.13 gives: a table or index cache is a new class of
-artefact on disk to avoid work that is already sub-second.
+second. The line on derived artefacts has moved exactly once since, and §4.13's fourth look is where: the
+whole-stream DXBC search is cached *beside* a stream the cache already holds (`rdc_cache.sidecar_path`),
+because that answer is a property of the stream, is asked for by four commands and by both halves of `diff`,
+and costs 0.3-0.5 s each time. A general container or name index over a capture is still declined, for the
+reason that paragraph gives: it is a new class of artefact with its own invalidation, which one small answer
+about a file that already has a cache entry is not.
 
 ### 4.15 The frame's uses and its memory: `deps` and `memory`
 
@@ -1408,7 +1481,7 @@ the answers look like answers, and only the source says what the library should 
 | `crosscheck <rdc> [eid] [--since N] [--until N] [--max-events N] [--max N]` | what the reflections say a shader wants against what the state says it was given: the vs output signature against the ps input signature, each stage's bindings against the root signature's declared ranges, and the render targets' formats against the ps output signature. Every finding names an event and quotes both sides. `linksChecked`, `bindingsChecked`, `bindingsUnmapped`, `targetsChecked` and `noRootParameters` say how much was actually compared — a capture whose shaders were stripped has no reflection, and then an empty findings list means *nothing was checked*, not that the frame is clean |
 | `debug <rdc> [--group] [--fail-on high\|medium\|low\|info]` | the engine's own messages (validation layers, driver complaints). One row per message; `--group` folds each *distinct* message — the engine's own `messageID` plus severity, category and source — into one row with its count and its first/last eid, which is what makes ten thousand messages a table. `--fail-on` is the pass/fail line: the run exits **1** when anything at or above that severity was reported, and `high` is the *most* severe, so `--fail-on medium` means High or Medium. Nothing else in the driver fails on a *finding* rather than on a failure, and the exit code is the point — "did the engine complain about this frame" becomes a line in a script instead of a paragraph someone has to judge |
 | `usage <rdc> <resId or name>` | every event that touches a resource |
-| `probe <rdc> [maxEid]` | which event ids the engine actually has — see below |
+| `probe <rdc> [maxEid\|last]` | which event ids the engine actually has: the whole frame by default, the first `maxEid` ids when one is given, and the answer is cached — see below |
 | `dump <rdc> [outDir=bundle]` | the whole frame to disk as a *bundle* for the offline tool — see below |
 | `bundle-verify <dir>` | re-hash a bundle's files against its manifest (no device, no DLL) |
 | `schema [<name>] [--out <dir>]` | the JSON Schema for each `--json` document (no capture, no DLL) |
@@ -1511,6 +1584,25 @@ two Windows findings behind: a spawned child must be given a stdin it can use (a
 cannot takes its whole stdio down -- three "successful" workers once left three empty logs), and
 simultaneous replay-device creations can leave one hung at zero CPU with no error, so any such design
 needs a deadline and a serial fallback rather than an unbounded wait.
+
+**The probe is cached too, and bounded by the frame** (`probe-<key>.txt`: the same directory, header and
+one-row-per-line format as the sweep's, and the same two environment variables). `probe` sweeps the same ids
+for the same reason -- one `SetFrameEvent` each, 12 ms on `desktop-1` and 47 on `desktop-2` -- and it had no
+cache at all: **39 s per run** on the PC capture, every run. Its old default also swept 695 ids *past* the
+frame's end (the frame's last event is 1,305, the default was 2,000), which is harmless there and was the
+whole answer on `desktop-2`: a five-figure frame, ids 1..2000 with nothing bound, and a minute of sweeping to
+say so. Three changes, each measured on the PC capture: the range is the frame's own last event unless a cap
+says otherwise (`ProbeUntil`; a cap past it is the frame, `last`/`all` spells the default, and a number is the
+old capped behaviour), the answer is cached (a repeat is the session's standup -- **7.7 s against 110.9 s** in
+one loaded session, same command line, the two outputs identical line for line), and a run that is not the
+session's first command says so on stderr: `AnyEventReplayed()` is the rule this file has always documented
+("probe must be the first thing the process asks") made checkable, and only a first run's answer is written,
+because a cached answer is somebody's first run. Two limits are deliberate. A request *wider* than the cached
+prefix sweeps from id 1 again rather than extending it -- arriving at 501 by a cold jump instead of through
+500 is the paragraph above, and it is why the key is the capture rather than the range: the file's
+`# scanned: N` is a claim that ids 1..N were walked in order, which answers `probe N` and every smaller
+request. And the key holds the capture's path, size and write time, so a capture edited in place cannot read
+an answer about the file it replaced.
 
 **Three things a replay host must do**, and the reason this file has a long comment about them: put
 `REPLAY_PROGRAM_MARKER()` at file scope, call `RENDERDOC_InitialiseReplay()` before opening anything,
@@ -1729,7 +1821,10 @@ call it is -- and only then treat a `patch` render as evidence. Reporting this i
 
 * **`probe` runs alone.** It forces non-events on purpose, and a forced non-event keeps the last real
   event's state, so mixing it with other commands makes *one* of the two answers wrong whichever order
-  they run in. The driver warns when a batch does it.
+  they run in. The driver warns when a batch does it, and a probe that is not the first command of its
+  session says so on stderr as well — the same fact, reported by the run that knows it rather than by one
+  that predicted it. That warning is also what decides whether the answer is *cached*: only a first run's
+  is, because a cached answer is somebody's first run (see "the probe is cached too", above).
 * **Progress goes to stderr and to one log file per run**, `<exe name>_<date>_<time>.log.txt` beside the
   executable — never a shared file, so a run that hung stays readable after the next one starts, and two
   runs at once cannot write into each other's log (a second run in the same second takes `-2`). It

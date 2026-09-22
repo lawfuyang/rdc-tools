@@ -740,6 +740,30 @@ class TestCacheEntries(CacheCase):
         self.assertEqual(count, 2)
         self.assertEqual(R._cache_names(), [])
 
+    def test_a_derived_file_is_not_a_stream_and_is_cleared_with_one(self):
+        # A sidecar is an *answer* about a stream (`.bindnames.json`), named after the stream's own
+        # file: it is never listed as an entry, it is counted on its own, and `cache clear` -- the one
+        # thing that reclaims the streams -- takes it too, so no orphan is left behind.
+        self.store()
+        entry = R.cache_entries()[0]
+        sidecar = R.sidecar_path(entry, '.bindnames.json')
+        with open(sidecar, 'w', encoding='utf-8') as fh:
+            fh.write('{"version": 1}')
+        self.assertEqual(len(R.cache_entries()), 1)
+        self.assertEqual(R.derived_names(), [os.path.basename(sidecar)])
+        expected = os.path.getsize(self.cache_file()) + len('{"version": 1}')
+        count, freed = R.cache_clear()
+        self.assertEqual(count, 2)
+        self.assertEqual(freed, expected)
+        self.assertEqual(R.derived_names(), [])
+        self.assertEqual(R._cache_names(), [])
+
+    def test_a_half_written_sidecar_is_named_too(self):
+        self.touch('x.bindnames.json.tmp', b'{')
+        self.assertEqual(R.derived_names(), ['x.bindnames.json.tmp'])
+        self.assertEqual(R.cache_entries(), [])
+        self.assertEqual(len(R._cache_names()), 0)
+
 class TestStreamCaching(CacheCase):
     def test_first_call_decompresses_and_the_second_comes_from_the_cache(self):
         _, first, how_first = R.load_stream(self.capture)

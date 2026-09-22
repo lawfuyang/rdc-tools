@@ -17,6 +17,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -30,7 +31,8 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
         sys.path.insert(0, _p)
 
 import rdc_analysis as R          # noqa: E402
-import rdc_chunkmap as chunkmap   # noqa: E402  (the detectors name chunks through this module, so the
+import rdc_chunkmap as chunkmap   # noqa: E402  (the detectors name chunks through this module, so t
+import rdc_detect_bundle          # noqa: E402  (the all-zero rule lives there: `_zero_sides` is it)he
 import rdc_report                 # noqa: E402  (patched by name: the corpus lookup is its global, not R's)
 import rdc_fixtures as F          # noqa: E402   #   capture fixture must be built with the same map)
 from rdc_testcase import CmdCase as _CmdCase   # noqa: E402
@@ -702,6 +704,39 @@ class TestReportDetectors(BundleCase):
         write_bundle(clean, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])],
                      cbuffers={'1_ps_0.json': cbuffer(1, variables=['Light = {', '  intensity = 1'])})
         self.assertEqual(self.flags(clean, 'all-zero-constant-block'), [])
+
+    def test_the_zero_test_agrees_with_the_float_comparison_it_replaced(self):
+        """The text rule and the `float()`-per-token rule answer every awkward shape the same way.
+
+        That equivalence *is* the justification for not converting (0.234 s of `desktop-1`'s 0.277 s of
+        detector time was this conversion and nothing else), so it is pinned here rather than assumed:
+        the reference below is the rule the detector used to run, written out.
+        """
+        number = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
+        cases = [
+            (['Scalar = 0'], True),
+            (['Vec = 0, 0, 0, 0', 'Neg = -0.0', 'Exp = 0.000e-9', 'Point = .0'], True),
+            (['Atmosphere = {', '  Factor = 0', '}', 'Name = SceneCB'], True),
+            (['Tiny = 1e-320'], False),          # subnormal, and not zero to a float either
+            (['Small = 0.0001'], False),
+            (['One = 1'], False),
+            (['Hex = 0x0'], True),               # both findall tokens are `0` -- a hex case, and honest
+            (['Hex = 0x1F'], False),
+            (['Nan = nan', 'True = true'], False),      # no number at all: not evidence either way
+            (['Mixed = 0, 1', 'Zero = 0'], False),
+            (['Blank = '], False),
+            ([], False),
+        ]
+        for rows, expected in cases:
+            floats = [float(token) for row in rows if '=' in row
+                      for token in number.findall(row.split('=', 1)[1])]
+            reference = bool(floats) and all(value == 0.0 for value in floats)
+            self.assertEqual(reference, expected, rows)         # the fixture says what the rule says
+            sides, all_zero = rdc_detect_bundle._zero_sides(rows)
+            self.assertEqual(all_zero, reference, rows)
+            if reference:                                       # the count is only read for a zero block
+                self.assertEqual(sum(len(number.findall(side)) for side in sides),
+                                 len(floats), rows)
 
     def test_a_dead_allocation_is_a_finding(self):
         bundle = self.path('b')

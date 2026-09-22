@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import sys
 import unittest
-from typing import Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,9 +32,11 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
         sys.path.insert(0, _p)
 
 import rdc_analysis as R            # noqa: E402
+import rdc_cache                    # noqa: E402  (the sidecar naming, and the suffix list)
 import rdc_chunkmap as chunkmap     # noqa: E402
 import rdc_chunknames as chunknames  # noqa: E402  (the bundled table)
 import rdc_fixtures as F            # noqa: E402
+import rdc_resources                # noqa: E402  (patched by name: `shader_bind_names` scans through it)
 
 from rdc_testcase import *          # noqa: E402,F401,F403
 
@@ -444,12 +447,42 @@ class TestParseRdef(unittest.TestCase):
         self.assertEqual(R.parse_rdef(bytes(data)), [])
 
 class TestShaderBindNames(RootSigCase):
-    """`shader_bind_names`: `RDEF` parts of the shaders a capture still carries, by stage."""
+    """`shader_bind_names`: `RDEF` parts of the shaders a capture still carries, by stage.
+
+    The answer is a property of the *stream* -- which is what lets it be cached beside the stream cache
+    entry (`rdc_cache.sidecar_path`) -- and the whole-stream `find` behind it is the largest single cost
+    of `draws`. What is pinned below is that the cache can only ever answer with the same names, and
+    that every way of being stale falls back to the scan rather than to a wrong answer.
+    """
 
     def stream_of(self, *chunks: bytes) -> R.Buffer:
         path = self.cap(*chunks)
         _info, stream, _how = R.load_stream(path)
         return stream
+
+    def source_for(self, stream: R.Buffer, name: str = 'bind.bin') -> R.CacheEntry:
+        """A cache-file stand-in beside the stream: the sidecar lands next to it, in this test's root."""
+        path = os.path.join(self.tmp, name)
+        with open(path, 'wb') as fh:
+            fh.write(b'RDCCACHE' + b'\x00' * 8)
+            fh.write(stream)
+        return {'file': path, 'hdrLen': 16, 'streamLen': len(stream), 'section': 0, 'method': 1,
+                'blocks': 1, 'srcPath': 'test', 'srcSize': len(stream), 'srcMtime': 1}
+
+    def named_stream(self, *binds: object) -> R.Buffer:
+        return self.stream_of(self.ch('Device_CreatePipelineState',
+                                      F.dxbc([('RDEF', F.rdef(list(binds)))])))    # type: ignore[arg-type]
+
+    def sidecar_document(self, source: R.CacheEntry) -> Dict[str, Any]:
+        path = rdc_cache.sidecar_path(source, R.BIND_NAMES_SUFFIX)
+        self.assertTrue(os.path.exists(path), 'no sidecar was written at %s' % path)
+        with open(path, encoding='utf-8') as fh:
+            document: Dict[str, Any] = json.load(fh)
+        return document
+
+    def rewrite_sidecar(self, source: R.CacheEntry, document: Dict[str, Any]) -> None:
+        with open(rdc_cache.sidecar_path(source, R.BIND_NAMES_SUFFIX), 'w', encoding='utf-8') as fh:
+            json.dump(document, fh)
 
     def test_bindings_are_keyed_by_stage_and_slot(self):
         stream = self.stream_of(self.ch('Device_CreatePipelineState',
@@ -459,6 +492,78 @@ class TestShaderBindNames(RootSigCase):
     def test_a_capture_without_rdef_has_no_names(self):
         stream = self.stream_of(self.ch('Device_CreatePipelineState', F.dxbc([('STAT', b'x')])))
         self.assertEqual(R.shader_bind_names(stream), {})
+
+    def test_the_answer_is_written_beside_the_stream_and_reused(self):
+        stream = self.named_stream(('SceneCB', 'cbv', 0, 1))
+        source = self.source_for(stream)
+        names = {'cs': {('cbv', 0, 1): 'SceneCB'}}
+        self.assertEqual(R.shader_bind_names(stream, source), names)
+        document = self.sidecar_document(source)
+        self.assertEqual(document['version'], R.BIND_NAMES_VERSION)
+        self.assertEqual(document['streamLen'], len(stream))
+        self.assertEqual(document['names'], [['cs', 'cbv', 0, 1, 'SceneCB']])
+        with mock.patch.object(rdc_resources, 'parse_dxil_containers',
+                               side_effect=AssertionError('scanned the stream again')):
+            self.assertEqual(R.shader_bind_names(stream, source), names)
+
+    def test_an_empty_answer_is_cached_too(self):
+        # The case the real captures are: 0.30-0.52 s of find per command, and nothing at the end of it.
+        stream = self.stream_of(self.ch('Device_CreatePipelineState', F.dxbc([('STAT', b'x')])))
+        source = self.source_for(stream)
+        self.assertEqual(R.shader_bind_names(stream, source), {})
+        self.assertEqual(self.sidecar_document(source)['names'], [])
+        with mock.patch.object(rdc_resources, 'parse_dxil_containers',
+                               side_effect=AssertionError('scanned the stream again')):
+            self.assertEqual(R.shader_bind_names(stream, source), {})
+
+    def test_no_source_means_no_sidecar(self):
+        # Nothing is written without a stream-cache entry to name the file after -- and that is the
+        # `$RDC_NO_CACHE` path and the goldens harness's path too.
+        before = rdc_cache.derived_names()
+        stream = self.named_stream(('SceneCB', 'cbv', 0, 1))
+        self.assertEqual(R.shader_bind_names(stream), {'cs': {('cbv', 0, 1): 'SceneCB'}})
+        self.assertEqual(rdc_cache.derived_names(), before)
+
+    def test_a_sidecar_from_another_stream_is_ignored(self):
+        stream = self.named_stream(('SceneCB', 'cbv', 0, 1))
+        source = self.source_for(stream)
+        R.shader_bind_names(stream, source)
+        document = self.sidecar_document(source)
+        document['digest'] = 'not this stream'
+        self.rewrite_sidecar(source, document)
+        with mock.patch.object(rdc_resources, 'parse_dxil_containers',
+                               wraps=rdc_resources.parse_dxil_containers) as scan:
+            self.assertEqual(R.shader_bind_names(stream, source), {'cs': {('cbv', 0, 1): 'SceneCB'}})
+        self.assertTrue(scan.called, 'a sidecar for another stream was trusted')
+
+    def test_a_sidecar_from_another_version_is_ignored(self):
+        stream = self.named_stream(('SceneCB', 'cbv', 0, 1))
+        source = self.source_for(stream)
+        R.shader_bind_names(stream, source)
+        document = self.sidecar_document(source)
+        document['version'] = R.BIND_NAMES_VERSION + 1
+        self.rewrite_sidecar(source, document)
+        with mock.patch.object(rdc_resources, 'parse_dxil_containers',
+                               wraps=rdc_resources.parse_dxil_containers) as scan:
+            self.assertEqual(R.shader_bind_names(stream, source), {'cs': {('cbv', 0, 1): 'SceneCB'}})
+        self.assertTrue(scan.called, 'a sidecar from another version was trusted')
+
+    def test_a_corrupt_sidecar_falls_back_to_the_scan(self):
+        stream = self.named_stream(('SceneCB', 'cbv', 0, 1))
+        source = self.source_for(stream)
+        R.shader_bind_names(stream, source)
+        path = rdc_cache.sidecar_path(source, R.BIND_NAMES_SUFFIX)
+        for junk in ('not json at all', '[]', '{"version": 1, "names": "nope"}',
+                     '{"version": 1, "streamLen": 0, "digest": "", "names": [[1, 2]]}'):
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(junk)
+            self.assertEqual(R.shader_bind_names(stream, source),
+                             {'cs': {('cbv', 0, 1): 'SceneCB'}}, junk)
+
+    def test_the_sidecar_suffix_is_one_the_cache_clears(self):
+        # `cache clear` sweeps the suffixes `rdc_cache` knows; a sidecar outside that list would be an
+        # orphan the moment the stream it describes was reclaimed.
+        self.assertIn(R.BIND_NAMES_SUFFIX, rdc_cache.DERIVED_SUFFIXES)
 
 class TestRootParamLabel(unittest.TestCase):
     """`_root_param_label`: what `draws` prints for a root parameter index."""

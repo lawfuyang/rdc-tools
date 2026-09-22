@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
 
@@ -45,6 +44,9 @@ import rdc_cache
 import rdc_driver
 import rdc_profile
 import rdc_schemas
+
+# `subprocess` is imported inside `_run`, the one function that starts a child: it costs ~15 ms of startup
+# (measured with `python -X importtime`) and every command imports this module through `rdc_analysis`.
 
 #: The folder the corpus lives in, relative to the repository root: `captures.json`, one
 #: `<name>.expect.json` per capture, and a `<name>/` folder of transcripts per capture.
@@ -474,6 +476,7 @@ def _run(program: str, argv: Sequence[str], cwd: str) -> Tuple[int, str, str]:
     of reading the cache costs the capture's decode time per command, which is the price of the
     comparison meaning the same thing everywhere.
     """
+    import subprocess
     env = dict(os.environ)
     for name in (rdc_profile.PROFILE_ENV, rdc_profile.PROGRESS_ENV):
         env.pop(name, None)
@@ -1129,7 +1132,17 @@ def cmd_goldens(argv: Sequence[str] = ()) -> int:
         mismatched += failed
         notes.extend('%s: %s' % (name, problem) for problem in problems)
 
-    pair_checked, failed, problems = (False, 0, []) if write else check_pair(root, corpus)
+    # The pair is a check about *two* captures, so it belongs to the whole-corpus run: `--capture`
+    # limits the run to one capture, and the pair is then reported as not compared rather than run
+    # (18 s of A/B against a filter that said "only this one") or silently dropped. `--write` is the
+    # same answer for another reason: it writes transcripts, and the pair's document is not one.
+    if write:
+        pair_checked, failed, problems = False, 0, []
+    elif only:
+        pair_checked, failed, problems = False, 0, []
+        _print('pair    : not compared (--capture %s limits this run to one capture)' % only)
+    else:
+        pair_checked, failed, problems = check_pair(root, corpus)
     mismatched += failed + schema_failed
     notes.extend(problems)
     if schema_failed:

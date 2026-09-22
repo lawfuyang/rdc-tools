@@ -13,6 +13,11 @@ namespace
 //: Off until a command says every engine call is behind it (`SetDocumentBuffering`); `common.h` and
 //: REFERENCE 9 have what turning it on too early costs.
 bool g_bBufferDocuments = false;
+
+//: Whether this process has moved the replay yet. One bit, set by the one function that moves it,
+//: and the whole of `AnyEventReplayed`: `probe` is the one command whose answer depends on the
+//: engine being cold, and this is how it knows (commands_frame.cpp).
+bool g_bReplayed = false;
 }    // namespace
 
 void SetDocumentBuffering(bool bOn)
@@ -23,6 +28,17 @@ void SetDocumentBuffering(bool bOn)
 bool DocumentBuffering()
 {
   return g_bBufferDocuments;
+}
+
+void MoveToEvent(IReplayController *ctrl, int eid)
+{
+  g_bReplayed = true;
+  ctrl->SetFrameEvent((uint32_t)eid, true);    // the one `SetFrameEvent` left in the program
+}
+
+bool AnyEventReplayed()
+{
+  return g_bReplayed;
 }
 
 ULONGLONG Millis()

@@ -196,7 +196,7 @@ int CmdSheet(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     for(size_t back = 0; back < passCalls.size() && (int)back < kMaxWalkBack; back++)
     {
       const int eid = passCalls[passCalls.size() - 1 - back];
-      ctrl->SetFrameEvent((uint32_t)eid, true);
+      MoveToEvent(ctrl, eid);
       const D3D12Pipe::State *st = ctrl->GetD3D12PipelineState();
       const ResourceId rt = FirstRenderTarget(st);
       if(rt != ResourceId::Null())

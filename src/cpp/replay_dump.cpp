@@ -112,7 +112,11 @@ void Usage()
       "that\n"
       "                                    severity was reported\n"
       "  usage   <rdc> <resId>             every event that touches a resource\n"
-      "  probe   <rdc> [maxEid=2000]       which event ids actually have pipeline state\n"
+      "  probe   <rdc> [maxEid|last]       which event ids actually have pipeline state; the "
+      "whole\n"
+      "                                    frame by default, or the first <maxEid> ids, and the\n"
+      "                                    answer is cached beside the stream (a repeat is "
+      "seconds)\n"
       "  dump    <rdc> [outDir=bundle]     the whole frame to disk, for the offline tool (ROADMAP "
       "§1)\n"
       "  bundle-verify <dir>               check a bundle's hashes and sizes (no device, no DLL)\n"
@@ -238,6 +242,15 @@ void Usage()
       "what to read when a run looks stuck. Event ids are the engine's, and they are not the "
       "offline\n"
       "tool's chunk indices: `probe` lists the ids that actually have pipeline state.\n"
+      "`probe` must still be the *first* command of a session -- it is the one answer the engine "
+      "cannot\n"
+      "give after another command has replayed, because a forced non-event keeps the state of the "
+      "last\n"
+      "real one -- and a session that breaks that rule is told so on stderr. What the cache does "
+      "change:\n"
+      "a *second* `probe` reads the first one's answer (seconds instead of the sweep), and a probe "
+      "that\n"
+      "is not first reads it too, where before it would have answered from its own warm engine.\n"
       "--dll <path> (or $RDC_RENDERDOC_DLL) names the renderdoc.dll to replay with -- the flag "
       "first,\n"
       "then the environment, then the installed engine -- and a capture recorded by a *newer* "
@@ -568,7 +581,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     else
     {
       // A command with no id argument (`buffer`) reads at the current event: this chooses it.
-      ctrl->SetFrameEvent((uint32_t)eid, true);
+      MoveToEvent(ctrl, eid);
     }
   }
   // `args` may have been rewritten just above -- a positional erased, an id inserted -- and that
@@ -683,7 +696,18 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   if(!strcmp(cmd, "usage") && args.size() > 1)
     return CmdUsage(ctrl, file, path, args[1].c_str());
   if(!strcmp(cmd, "probe"))
-    return CmdProbe(ctrl, file, path, args.size() > 1 ? ToInt(args[1], 2000) : 2000);
+  {
+    // No argument means the whole frame (0 = "to the frame's own last event", commands_frame.cpp),
+    // and a number caps the scan where it always did. The word is accepted as well as the default
+    // because "the whole frame" is a thing a reader asks for by name after reading that a capped
+    // range can come back empty on a big capture.
+    if(args.size() <= 1 || args[1] == "last" || args[1] == "all")
+      return CmdProbe(ctrl, file, path, 0);
+    int cap = 0;
+    if(!ParseInt(args[1].c_str(), cap) || cap <= 0)
+      return Fail(2, "probe: '%s' is not an event id or 'last'", args[1].c_str());
+    return CmdProbe(ctrl, file, path, cap);
+  }
   if(!strcmp(cmd, "dump"))
     return CmdDump(ctrl, file, path, args, bWantDisasm);
   if(!strcmp(cmd, "bundle-verify") && args.size() > 1)

@@ -276,7 +276,7 @@ int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, c
 int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int instance,
             int maxRows)
 {
-  ctrl->SetFrameEvent(eid, true);
+  MoveToEvent(ctrl, eid);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -355,7 +355,7 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
 int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
              const char *outPath)
 {
-  ctrl->SetFrameEvent(eid, true);
+  MoveToEvent(ctrl, eid);
 
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   ResourceId rt = d3d12 && !d3d12->outputMerger.renderTargets.empty()
@@ -1027,6 +1027,38 @@ int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
   return 0;
 }
 
+//: The three fields of one probe row, from the engine's state at that id: how many stages have a
+//: shader, the root signature, and how many parameters it declares. Extracted so the same reading
+//: produces a row, a cache line and a JSON row.
+bool ProbeRowAt(IReplayController *ctrl, int eid, ProbeRow &row)
+{
+  const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
+  if(d3d12 == NULL)
+    return false;
+
+  int shaders = 0;
+  for(int i = 0; i < (int)ShaderStage::Count; i++)
+  {
+    const D3D12Pipe::Shader *sh = StageShader(d3d12, (ShaderStage)i);
+    if(sh != NULL && sh->resourceId != ResourceId::Null())
+      shaders++;
+  }
+  if(shaders == 0 && d3d12->rootSignature.resourceId == ResourceId::Null())
+    return false;
+
+  row.m_Eid = eid;
+  row.m_Shaders = shaders;
+  row.m_RootSig = IdText(d3d12->rootSignature.resourceId);
+  row.m_Params = (int)d3d12->rootSignature.parameters.size();
+  return true;
+}
+
+void ProbePrintRow(const ProbeRow &row)
+{
+  Row(Fmt("eid %-7d shaders=%d rootSig=%s params=%d", row.m_Eid, row.m_Shaders,
+          row.m_RootSig.c_str(), row.m_Params));
+}
+
 //: Scan a range of event ids and report the ones that actually have pipeline state. This exists
 //: because the event numbering is *not* guaranteed to be the chunk index the offline tool prints: it
 //: matched exactly on one capture and did not on another, and `SetFrameEvent` accepts any number
@@ -1038,37 +1070,82 @@ int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
 //: after any other command a forced non-event looks like it has state. Measured on the Android
 //: capture: `probe 120` alone reports 25-32 ids, and the same `probe 120` after eight other commands
 //: reports ~120. The first answer is the true one; a batch file should therefore put `probe` first.
+//: `AnyEventReplayed()` is that rule made checkable: a run that is not first says so on stderr, and
+//: only a first run's answer is written to the cache (a cached answer is someone's *first* run).
+//:
+//: The scan is bounded by the frame's own last event as well as by the caller's cap (`ProbeUntil`),
+//: because a cap alone is a guess: on the 1.4 GB capture, whose frame runs to five figures, the old
+//: default of 2000 ids swept for a minute and then answered "nothing has state", which is a property
+//: of the range and not of the frame. `probe <rdc> last` asks for the whole frame, and the answer is
+//: cached (bundle.cpp's probe cache) -- a repeat is then seconds, and a scan killed part-way keeps the
+//: prefix it had established.
 int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid)
 {
   PrintCaptureHeader(file, path);
-  int found = 0;
-  ArrayOpen("events");
-  for(int eid = 1; eid <= maxEid; eid++)
+  const int lastEvent = LastEventId(ctrl);
+  const int until = ProbeUntil(maxEid, lastEvent);
+  const bool bCold = !AnyEventReplayed();
+  if(!bCold)
+    Log("warning: `probe` is not the first command in this session; the state it reads is the "
+        "leftover "
+        "of the last event another command replayed, which is why the ids below can name events "
+        "that "
+        "have nothing bound (run `probe` first)");
+
+  const std::string cachePath = ProbeCachePath(path);
+  ProbeCache cache;
+  const bool bHit = ReadProbeCache(cachePath, path, lastEvent, cache);
+  if(bHit && cache.m_Scanned < until)
   {
-    ctrl->SetFrameEvent(eid, true);
-    const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
-    if(d3d12 == NULL)
-      continue;
+    // A longer range than the cache holds means sweeping from id 1 again: arriving at the cache's
+    // prefix end by a cold jump instead of through it loses the state just after it (bundle.cpp).
+    Log("probe: the cache holds ids 1..%d and this run asks for 1..%d, so the range is swept again",
+        cache.m_Scanned, until);
+    cache.m_Rows.clear();
+    cache.m_Scanned = 0;
+  }
 
-    int shaders = 0;
-    for(int i = 0; i < (int)ShaderStage::Count; i++)
+  if(cache.m_Scanned < until)
+  {
+    Progress sweep;
+    sweep.Begin("probe: sweep", until);
+    for(int eid = cache.m_Scanned + 1; eid <= until; eid++)
     {
-      const D3D12Pipe::Shader *sh = StageShader(d3d12, (ShaderStage)i);
-      if(sh != NULL && sh->resourceId != ResourceId::Null())
-        shaders++;
+      MoveToEvent(ctrl, eid);
+      ProbeRow row;
+      if(ProbeRowAt(ctrl, eid, row))
+        cache.m_Rows.push_back(row);
+      sweep.Tick(eid);
+      // Only a cold engine's answer is worth keeping: warm, the state left over from another
+      // command's replay is what these rows would record.
+      if(bCold && eid % kProbeFlushEvery == 0)
+      {
+        cache.m_Scanned = eid;
+        WriteProbeCache(cachePath, path, lastEvent, cache);
+      }
     }
-    if(shaders == 0 && d3d12->rootSignature.resourceId == ResourceId::Null())
-      continue;
+    cache.m_Scanned = until;
+    if(bCold)
+      WriteProbeCache(cachePath, path, lastEvent, cache);
+    sweep.Done(until);
+  }
 
-    Row(Fmt("eid %-7d shaders=%d rootSig=%s params=%d", eid, shaders,
-            IdText(d3d12->rootSignature.resourceId).c_str(),
-            (int)d3d12->rootSignature.parameters.size()));
-    found++;
+  // The rows the cache holds may reach past what this run asked for (`probe 200` against a cached
+  // whole frame): the file keeps them -- that is what makes it reusable -- and the *answer* stops
+  // at the range this run was asked about.
+  ArrayOpen("events");
+  int shown = 0;
+  for(size_t i = 0; i < cache.m_Rows.size() && cache.m_Rows[i].m_Eid <= until; i++)
+  {
+    ProbePrintRow(cache.m_Rows[i]);
+    shown++;
   }
   ArrayClose(false);    // scanned/withState follow
   g_Indent = g_bJson ? 1 : 0;
-  Field("scanned", (long long)maxEid);
-  Field("withState", found, true);
+  Field("scanned", (long long)until);
+  Field("withState", (long long)shown);
+  Field("lastEvent", (long long)lastEvent);
+  Field("cached", bHit, true);
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");

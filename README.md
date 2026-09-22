@@ -201,6 +201,7 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | What does the frame's memory add up to, and what could share it? | `memory`, `vram` (REFERENCE §4.15, §4.20) |
 | Is what the root signatures declare what the stream binds? | `rootsig-check` (REFERENCE §4.19) |
 | What is `res342`, and which buffers/textures exist at all? | `resources` |
+| Which formats does this frame use, and what did the parse miss? | `formats` |
 | What does the descriptor heap hold that this binding points into? | `descriptors` |
 | What does this root signature declare? | `rootsig` |
 | What exactly is in chunk N (payload hex + decoded fields)? | `chunk <N>`, `dump-chunk <N> <file>` |
@@ -244,9 +245,17 @@ python src\py\rdc_analysis.py draws    'capture.rdc' 40   # the stream's own acc
 `python src\py\rdc_analysis.py <command> <capture.rdc> [args…]`; no arguments prints the list (§1). It reads the
 **file** — no device, no `renderdoc.dll`, no GPU — so it is the half that works anywhere, that costs
 sub-seconds once the stream is cached (REFERENCE §4.8), and that the hermetic test suite covers. Each table
-below gives the tool's own usage with one concrete capture. The five row commands (`resources`,
-`descriptors`, `summary`, `draws`, `rootsig`) also take `--format csv|markdown`, which prints the same rows
-as a spreadsheet or an issue wants them and moves the prose around them to stderr (REFERENCE §4).
+below gives the tool's own usage with one concrete capture.
+
+Three things shape every command rather than just one. `--format table|csv|markdown` is taken by the nine that
+print rows — `resources`, `descriptors`, `summary`, `draws`, `rootsig`, `formats`, `vram`, `rootsig-check` and
+`diff` — where `table` is the default rendering and `csv`/`markdown` print the same rows as a spreadsheet or an
+issue wants them while moving the prose around them to stderr, so stdout stays a table (REFERENCE §4).
+`--driver D3D11|D3D12|Vulkan|OpenGL|GLES` (or `$RDC_DRIVER`; the flag wins) names the capture's API for every
+command's chunk names — the bundled table is D3D12's, so another driver needs the source tree `bootstrap`
+fetches (§1.1). And the run has `$RDC_PROFILE=1` for a per-phase cost table, `$RDC_PROGRESS=1` for live
+progress lines and `$RDC_NO_CACHE` to read the stream from scratch, none of which ever touch stdout
+(REFERENCE §4.13).
 
 #### The container and the stream
 
@@ -271,6 +280,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 |---|---|---|
 | `resources` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it — the filter is a substring, and a limit of `0` means no limit | `resources 'capture.rdc' 0 Sky` |
 | `descriptors` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at — the filter matches a heap's id or its name | `descriptors 'capture.rdc' 200 0` |
+| `formats` | the format audit of the resource table: every format the file holds, how many resources use each, and what each is made of (component widths, component type, sRGB, block/packed layout, whether a picture of it needs a cast) — plus what the **parse** did, from the same ledger `deps` and `memory` read: events walked, distinct payload kinds, the kinds not attributed as uses, and the descriptor bindings pointing into slots the capture never wrote. "Which formats does this frame really use, and what did my parse miss?" | `formats 'capture.rdc'` |
 | `rootsig` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter's type, register, space and descriptor ranges | `rootsig 'capture.rdc' 8` |
 | `deps` | who writes what and who reads it, from the stream itself: per resource, writes and reads with their first and last event, with `read-before-write` and `write-never-read` flagged; `table` (default), `dot` or `mermaid` | `deps 'capture.rdc' 40 mermaid` |
 | `memory` | what the frame's memory adds up to: placement and kind with byte totals, capture-relative lifetimes, the aliasing barriers memory is handed over with, heaps ranked by size, never-read bytes | `memory 'capture.rdc' 40` |
@@ -302,8 +312,8 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | `passdiff` | the two captures' marker trees side by side, aligned by path — the free first half of "why do these two differ" | `passdiff ab\mobile.rdc ab\desktop.rdc --all` |
 | `replaydiff` | the A/B of two bundles: structure, state rows, every named constant member by member, each shader's hash, and with `--with-images` the renders, per pixel up to `--image-detail` | `replaydiff ab\mobile ab\desktop --with-images --out ab\diff` |
 | `validate` | documents against the schemas the driver publishes (plus the report's own): a whole bundle, or one saved `--json` file with the `kind` it is | `validate bundle schema`, `validate t.json schema textures` |
-| `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts, the A/B documents and the **driver's own text** for that capture byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare). It also carries what is *known* about each capture — notes, and the **causes** the report matches findings against (REFERENCE §4.17) | `goldens --check`, `goldens --write` |
-| `sweep` | a folder of captures, swept: one bundle per `.rdc` and an index of what they are (key, size, SHA-256, what each bundle holds). One process, one replay session per capture — the driver as a library (REFERENCE §4.21, §9) — and a capture whose bundle is already there is reported `present` rather than replayed, so it is resumable | `sweep captures --out bundles`, `sweep captures --commands driver.txt` |
+| `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts, the A/B documents and the **driver's own text** for that capture byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare). It also carries what is *known* about each capture — notes, and the **causes** the report matches findings against (REFERENCE §4.17). `--capture <name>` limits the run to one capture (the two-capture pair is then reported as *not compared* rather than dropped quietly), `--corpus <file>` uses another corpus and `--verbose` prints each comparison | `goldens --check`, `goldens --write`, `goldens --capture mobile-1` |
+| `sweep` | a folder of captures, swept: one bundle per `.rdc` and an index of what they are (key, size, SHA-256, what each bundle holds). One replay session per capture through the driver *as a library* (REFERENCE §4.21, §9) — or one process per capture through the exe with `--exe`, where the default is the library whenever it is built and `--library` forces it. A capture whose bundle is already there is reported `present` rather than replayed, so a sweep over a folder is resumable and a second run is cheap; `--overwrite` replays it anyway, `--limit N` sweeps the first N, `--min-bytes N` skips captures below a size, and `--commands <file>` adds extra lines to every capture's session | `sweep captures --out bundles`, `sweep captures --commands driver.txt` |
 
 #### Upkeep
 

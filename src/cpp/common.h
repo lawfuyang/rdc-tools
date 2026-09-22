@@ -395,7 +395,7 @@ int ResolveMarkerPath(IReplayController *ctrl, const char *text, std::string &ma
 
 //: One pass, as a range of event ids with the marker path its events sit inside.
 //:
-//: `FetchCounters` answers per event and there is no event-range parameter (ROADMAP 2), so folding
+//: `FetchCounters` answers per event and there is no event-range parameter (REFERENCE §9), so folding
 //: a counter over a pass means folding it over `[first, last]` here. Two ways to get the ranges:
 //:
 //: * `PassesFromActions`: the engine's own action tree, grouped into maximal runs of consecutive
@@ -479,6 +479,53 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
 //: wrong answer that reading the code does not reveal.
 bool CastFromName(std::string_view name, CompType &type);
 const char *CastText(CompType type);
+
+//: The `--overlay` vocabulary: RenderDoc's `DebugOverlay`, one spelling per member and the list in the
+//: engine's own order (`none` first). The overlay is drawn *into* the picture by the engine's display
+//: path, which is the point of it being here rather than in our own image code -- `wireframe` is the
+//: topology the frame actually rasterised, and the `quad`/`triangle-size` pairs are the cost hunches
+//: (`...Pass` measures over a pass, `...Draw` over one draw, and the difference is why both exist).
+bool OverlayFromName(std::string_view name, DebugOverlay &overlay);
+const char *OverlayText(DebugOverlay overlay);
+std::string OverlayNames(const char *separator);
+
+//: How a picture is asked for, shared by the commands that produce one. One struct rather than six
+//: parameters, and one place fills it from the command line (`replay_dump.cpp`), so `main`, a batch
+//: file and a library session cannot disagree about what `--mip 2` means -- the same reason
+//: `dump`'s options are a struct (bundle.cpp).
+//:
+//: The display fields (`m_Overlay`, `m_HdrMultiplier`, `m_bGamma`) and the save fields
+//: (`m_BlackPoint`, `m_WhitePoint`, `m_bRaw`) are used by the two different paths; a caller sets
+//: the ones its path reads.
+struct PictureOptions
+{
+  //: Which subresource to show or save. `mip`/`slice`/`sample` are positions, so a negative one is
+  //: a typo, and the parsing refuses it before this struct exists.
+  Subresource m_Sub;
+  //: What the numbers are read as: the texture's own format unless `--cast` said otherwise. A typeless
+  //: texture needs one -- the display path has nothing to show without a type to read it as.
+  CompType m_Cast = CompType::Typeless;
+  bool m_bCastGiven = false;
+  //: The overlay, and whether one was asked for at all (`NoOverlay` is also a valid answer).
+  DebugOverlay m_Overlay = DebugOverlay::NoOverlay;
+  bool m_bOverlayGiven = false;
+  //: The display path's tonemapping, both of them `TextureDisplay` fields rather than ours: a multiplier
+  //: for float/HDR content, and whether to read the values as linear and display them as gamma.
+  float m_HdrMultiplier = 1.0f;
+  bool m_bGamma = false;
+  //: The save path's black/white point mapping (`TextureComponentMapping`): the range that becomes
+  //: 0..255, which is how a float/HDR texture turns into a file a person can look at.
+  float m_BlackPoint = 0.0f;
+  float m_WhitePoint = 1.0f;
+  //: `--raw`: write the undecoded bytes the engine hands back, not a decoded picture.
+  bool m_bRaw = false;
+};
+
+//: Set a `TextureSave` from the options the save path shares: the cast (only when one was asked for
+//: -- the engine reads the texture's own format otherwise), the subresource, and the black/white
+//: point range. One place, so a texture saved by `textures --save`, one saved by `cubemap` and the
+//: fallback inside `SaveTargetImage` cannot be three opinions about the same command line.
+void ApplySaveOptions(TextureSave &save, const PictureOptions &opts);
 std::string PixelValueText(const PixelValue &value, CompType type);
 std::string ModificationColorText(const ModificationValue &value, CompType type);
 std::string ModificationDepthText(const ModificationValue &value);
@@ -525,14 +572,72 @@ bool WatchSameName(const std::string &a, const std::string &b);
 bool WatchNameMatches(const std::string &path, const std::string &want);
 std::vector<std::string> WatchPaths(const rdcarray<ShaderVariable> &vars, const std::string &want);
 int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *filter,
-                const char *saveDir);
+                const char *saveDir, const PictureOptions &opts);
+//: A `resId|name` argument, resolved: `<id>` is taken as an id and anything else is matched against
+//: the engine's names (case-insensitively, both directions -- `state` and `pixelhistory` have
+//: always done it this way, and `cubemap` needs the same answer). `name` receives what it resolved
+//: to, for the output, and `why` the refusal when it does not: a caller has to name the resource it
+//: could not find, and a wrong id is otherwise indistinguishable from an empty frame.
+ResourceId ResolveResourceArg(IReplayController *ctrl, const char *what, std::string &name,
+                              std::string &why);
+//: The `--stage` vocabulary for `mesh`: `MeshDataStage`, in the engine's own order. The engine
+//: aliases `AmpOut` to `TaskOut` (an older name for the same stage), so the text says `taskout` for
+//: both and the parse takes either spelling -- one stage, two names, and the document prints the
+//: one the enum means.
+bool MeshStageFromName(std::string_view name, MeshDataStage &stage);
+const char *MeshStageText(MeshDataStage stage);
+std::string MeshStageNames(const char *separator);
+//: How many primitives a draw covers, from its topology and its vertex (or index) count. 0 means
+//: *not derived* rather than none: a strip's primitive count depends on where the strip breaks, and
+//: a meshlet list's on the meshlets, so a number there would be a claim this cannot make -- the
+//: caller says so in its own words instead (`primitivesNote`). Free of the controller so the
+//: arithmetic can be checked.
+long long PrimitiveCount(Topology topology, long long count);
+//: The per-component extremes of an interleaved vertex stream, over its first three components: `x
+//: y z` of the position, whatever else the stride carries. A sanity line, not a claim about the
+//: mesh -- a stage whose data is not what a reader assumed shows it here (a meshlet list read as
+//: positions is off by orders of magnitude). A vertex whose three components are not all finite is
+//: dropped *whole*: one `NaN` would poison every later comparison, and mixing two finite components
+//: of a vertex the shader never emitted into a box would be a smaller lie of the same kind.
+//: `m_bAny` says whether any vertex was usable at all.
+struct Bounds3
+{
+  float m_Min[3] = {0.0f, 0.0f, 0.0f};
+  float m_Max[3] = {0.0f, 0.0f, 0.0f};
+  bool m_bAny = false;    // false when no vertex had three finite components
+};
+Bounds3 VertexBounds(const bytebuf &data, size_t stride, size_t count);
+//: `--obj <file>`: the vertices and indices as a Wavefront OBJ, which is what an external viewer
+//: reads. `positions` is the interleaved vertex stream and `stride` is its bytes per vertex -- the
+//: first three floats of each vertex are taken as its position, because that is the one convention
+//: the file format and the post-VS stream share. Returns the number of vertices written, or -1 when
+//: the file cannot be written; `indices` may be empty (a non-indexed draw, whose faces are the
+//: vertices in order).
+long long WriteObj(const std::filesystem::path &path, const bytebuf &positions, size_t stride,
+                   size_t count, const std::vector<uint32_t> &indices, Topology topology,
+                   std::string &why);
 int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int instance,
-            int maxRows);
+            int maxRows, MeshDataStage stage, const char *objPath);
 int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-             const char *outPath);
+             const char *outPath, const PictureOptions &opts);
+//: A cubemap as six pictures plus the engine's own cruciform: `<outDir>/face0.png` .. `face5.png`
+//: (the D3D order: +X, -X, +Y, -Y, +Z, -Z) and `<outDir>/cross.png`. The cruciform is
+//: `TextureSliceMapping`'s `cubeCruciform`, which is the engine drawing the classic unfolded cross
+//: into transparent black -- so there is no layout code here to get the rotations wrong.
+int CmdCubemap(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
+               const char *outDir, const PictureOptions &opts);
+//: The format coverage audit: every format in the frame's texture list, how many resources use it, what it
+//: is made of, and whether the engine can decode it -- with the reason when it cannot (REFERENCE §9).
+int CmdFormats(IReplayController *ctrl, ICaptureFile *file, const char *path);
+//: The two halves of that audit, free of the controller (a `ResourceFormat` is a value): what a
+//: format is made of, as one line, and whether the engine can make a picture of it -- with
+//: `bNeedsCast` for the typeless case, where the answer is "not without being told how", and `why`
+//: for the reason either way.
+std::string FormatShape(const ResourceFormat &format);
+bool FormatPicture(const ResourceFormat &format, bool &bNeedsCast, std::string &why);
 int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPerPass,
                 const char *passesPath, int topN);
-//: The cross-checks (ROADMAP 1): what the reflections say a shader wants against what the state says
+//: The cross-checks (REFERENCE §9): what the reflections say a shader wants against what the state says
 //: it was given. Deterministic, because both sides are in the capture -- no heuristic and no guess.
 //:
 //: `SignatureLinkText` is declared here because the device-free selftest checks it directly: an
@@ -596,7 +701,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
 void WarnIfRenderdocSrcMissing();
 
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
-                     std::string &written, int32_t &width, int32_t &height);
+                     const PictureOptions &opts, std::string &written, int32_t &width,
+                     int32_t &height);
 
 // --------------------------------------------------------------------------- the bundle (bundle.cpp)
 
@@ -739,7 +845,8 @@ ImageData MakeMontage(const std::vector<ImageData> &tiles, int columns, int tile
 uint64_t DifferenceHash(const ImageData &img);
 long long ImagePixelDelta(const ImageData &a, const ImageData &b, int &maxDelta,
                           long long &sumDelta, ImageData *heat);
-bool ReadTargetImage(IReplayController *ctrl, ResourceId target, ImageData &img, std::string &why);
+bool ReadTargetImage(IReplayController *ctrl, ResourceId target, const PictureOptions &opts,
+                     ImageData &img, std::string &why);
 ResourceId FirstRenderTarget(const D3D12Pipe::State *st);
 
 // --------------------------------------------------------------------------- self-check (selftest.cpp)

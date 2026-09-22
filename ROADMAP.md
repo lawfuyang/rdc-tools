@@ -46,7 +46,7 @@ presentation on top (landed — REFERENCE §4.11). That is the shape any future 
 a bundle of engine answers, testable from fixtures and diffable between runs (REFERENCE §4.11), with its tests landed in the
 same change.
 
-The **D3D12 harness** (§3.5) absorbs nothing: it exists for the one question replay cannot answer — what a
+The **D3D12 harness** (§2.5) absorbs nothing: it exists for the one question replay cannot answer — what a
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
@@ -60,7 +60,9 @@ the resource table
 DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
 rendered image, the cross-checks between a shader's reflection and the state it is given (`crosscheck`), the
-per-pass counter fold (`counters --per-pass`), and the bundle the report generator reads (`dump` +
+per-pass counter fold (`counters --per-pass`), the picture commands with their subresources and overlays
+(`image`, `textures --save`, `cubemap`, `sheet`), the format coverage audit (`formats`), and the bundle the
+report generator reads (`dump` +
 `bundle-verify`). The offline tool has a
 hermetic unittest suite (`python src\py\rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
@@ -113,30 +115,8 @@ say so explicitly, and should degrade gracefully when it is missing.
   per-step variables and the outputs of one invocation. Only works for shaders built with debug info
   (`-Zi -Od`), which most captures do not have — the item is to *say that clearly* rather than fail obscurely,
   and to document how to re-capture with it. (~2 d)
-* **Overlays as images** — `TextureDisplay` renders one texture; the overlay enum (`DebugOverlay`: `Drawcall`,
-  `Wireframe`, `Depth`, `Stencil`, `BackfaceCull`, `ViewportScissor`, and the triangle-size / quad-overdraw
-  overlays) annotates the targets themselves. A `--overlay wireframe|quad` switch on `image` gives the classic
-  pictures for free — wireframe for topology, quad overdraw for a fragment-cost hunch. (~half a day once the
-  display path is shared, which it nearly is)
 
-## 2. P1/P2 — Replay driver: the frame's pictures, counters and geometry
-
-* **Geometry beyond the vertex shader's output** — `mesh` currently reads `MeshDataStage::VSOut`. The enum also
-  has `VSIn`, `GSOut`, `TaskOut`/`AmpOut` and `MeshOut` (there is no separate HS/DS output stage), so a mesh
-  shader's or GS's actual output is reachable — plus `--obj <file>` to export the vertices and indices for an
-  external viewer, and a bounding box / vertex count sanity line per draw. (~1–2 d)
-* **Texture subresources and formats** — `SaveTexture`'s `TextureSave` has no mip/slice/sample fields, but
-  `GetTextureData(tex, Subresource{mip, slice, sample})` does, so the driver can read exactly one subresource
-  (including a cubemap face or one MSAA sample) and write it with its own PNG/BMP writer; the extras worth having
-  are `--mip`, `--slice`, `--sample`, `--raw` (undecoded bytes), and a tonemapping option for float/HDR formats
-  (with `RENDERDOC_HalfToFloat` already in use). A cubemap → 6 faces + a cross layout is what makes an
-  environment map reviewable. (~1–2 d)
-* **Format coverage audit** — list every format present with how many resources use it and whether the format can
-  be decoded; a summary that silently skips a texture is worse than one that says "12 textures use ASTC, not
-  decoded". Also the RT-format audit the summary needs: which targets are UNORM/sRGB/float, and what the shader
-  wrote into them. (~half a day)
-
-## 3. P2/P3 — Beyond the local desktop
+## 2. P2/P3 — Beyond the local desktop
 
 * **Remote replay** — capture on a phone, replay where the driver lives: RenderDoc's remote server plus
   `ReplayOptions`, so a mobile capture is replayed by the mobile driver on the device (real counters, real driver
@@ -151,12 +131,12 @@ say so explicitly, and should degrade gracefully when it is missing.
 * **Other APIs' names** — the offline tool's chunk-name loader already takes a driver (`load_chunk_names(driver=...)`);
   expose it, and accept that a Vulkan capture's chunks will be read by the same code with different enums. The
   replay driver is API-agnostic already; the analysis is where the D3D12 assumptions live. (~1 d, plus evidence)
-* **D3D12 harness** (kept for completeness) — see §3.5 below.
+* **D3D12 harness** (kept for completeness) — see §2.5 below.
 * **Upstream** — the chunk-level findings (event ids vs chunk indices, what `InitialContents` really holds, the
   crash-handle server, the `TextureSave`/`GetTextureData` subresource split) are the kind of thing RenderDoc's
   own docs and tools benefit from. Not a work item, a standing intention: file them as they are confirmed.
 
-### 3.5 The D3D12 harness (only for *synthetic inputs*)
+### 2.5 The D3D12 harness (only for *synthetic inputs*)
 
 **What.** A minimal standalone D3D12 program that creates its own device/PSO/buffers and runs a shader (the
 DXIL extracted by `dump-shaders`) with constants that we choose.
@@ -193,56 +173,44 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 
 **Effort.** ~2–3 days for a single-purpose harness; scope it to one shader at a time.
 
-## 4. P3 — Robustness and scope
+## 3. P3 — Robustness and scope
 
 * **Zstd without the dependency** — either vendor a decoder or fail with a clear message (today it needs
   `pip install zstandard`). (~4 h)
 * **Memory-mapped stream access** — avoid holding ~1.5 GB in RAM for the largest captures. (~4 h)
 * **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
   (~1 h)
-* **Format coverage in the offline view** — the same audit §2's format coverage does for the engine's textures,
-  for the file's payloads: what was decoded, what was skipped, and why. (~2 h)
+* **Format coverage in the offline view** — the same audit `formats` does for the engine's textures (REFERENCE
+  §9), for the file's payloads: what was decoded, what was skipped, and why. (~2 h)
 
-## 5. Suggested order
+## 4. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
-item of §1–§4 appears exactly once, so this is the whole list in one place rather than a selection of it; each
+item of §1–§3 appears exactly once, so this is the whole list in one place rather than a selection of it; each
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**Phase 1 — the pictures, and what was skipped (~4 days).** Everything a person needs to look at, plus the two
-audits that keep a summary honest about its own gaps:
-
-1. **Format coverage audit (§2, half a day)** and **Format coverage in the offline view (§4, ~2 h)** — the
-   same question on the engine's side and on the file's: what was decoded, what was skipped, and why. A
-   summary that silently skips a texture is worse than one that says "12 textures use ASTC, not decoded".
-2. **Texture subresources and formats (§2, ~1–2 d)** — one subresource at a time (mip, slice, sample, raw
-   bytes), tonemapping for float/HDR formats, and a cubemap's six faces, which is what makes an environment
-   map reviewable at all.
-3. **Overlays as images (§1, half a day)** — wireframe for topology, quad overdraw for a fragment-cost hunch,
-   once the display path is shared (which it nearly is).
-4. **Geometry beyond the vertex shader's output (§2, ~1–2 d)** — `mesh` reads `VSOut` today; a mesh shader's
-   or a GS's actual output, plus `--obj` to export it, is what makes a mesh-heavy capture inspectable.
-
-**Phase 2 — robustness, when a capture asks for it (~half a day each).** Small, independent, and none of them
+**Phase 1 — robustness, when a capture asks for it (~half a day each).** Small, independent, and none of them
 blocks anything above:
 
-1. **Zstd without the dependency (§4, ~4 h)** — vendor a decoder or refuse with a clear message, instead of
+1. **Zstd without the dependency (§3, ~4 h)** — vendor a decoder or refuse with a clear message, instead of
    needing `pip install zstandard`.
-2. **Memory-mapped stream access (§4, ~4 h)** — the largest capture is ~1.5 GB held in RAM today.
-3. **Non-D3D12 driver names (§4, ~1 h)** — the loader already takes `driver=`; the CLI does not expose it.
+2. **Memory-mapped stream access (§3, ~4 h)** — the largest capture is ~1.5 GB held in RAM today.
+3. **Non-D3D12 driver names (§3, ~1 h)** — the loader already takes `driver=`; the CLI does not expose it.
+4. **Format coverage in the offline view (§3, ~2 h)** — the engine-side half landed with `formats` (REFERENCE
+   §9); the file-side half is what is left.
 
-**Phase 3 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
+**Phase 2 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
 list — a device, a debug-info capture, evidence, or a decision:
 
-1. **Remote replay (§3, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
+1. **Remote replay (§2, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
    honest fix for the desktop-GPU caveat every report carries.
 2. **Shader debugging (§1, ~2 d)** — only for shaders built with debug info (`-Zi -Od`), which most captures
    do not have: the first half of the item is to say that clearly and document how to re-capture.
-3. **D3D12 harness (§3.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
+3. **D3D12 harness (§2.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
    settling whether a patched shader changes a render (REFERENCE §9 has the measurement), not by writing the
    program.
-4. **A capture-side annotation layer (§3, ~2–3 d)** — needs an installed DLL, and a scenario where our own
+4. **A capture-side annotation layer (§2, ~2–3 d)** — needs an installed DLL, and a scenario where our own
    markers beat the engine's names.
-5. **Other APIs' names (§3, ~1 d + evidence)** — needs a capture from another API in hand.
-6. **Upstream (§3)** — not a work item and not a phase: a standing intention to file what gets confirmed.
+5. **Other APIs' names (§2, ~1 d + evidence)** — needs a capture from another API in hand.
+6. **Upstream (§2)** — not a work item and not a phase: a standing intention to file what gets confirmed.

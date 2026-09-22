@@ -1,9 +1,10 @@
 {
   "title": "mesh",
-  "description": "One draw's mesh: the state that feeds it, and -- when the capture has post-VS data -- the vertices the vertex shader emitted.",
+  "description": "One draw's geometry at one mesh stage: the stream the engine has for it, the vertices, and -- when they can be derived -- the primitive count and the position bounds. `stage` is what the data is (vsin is what the draw read, vsout what the vertex shader wrote), `primitives` is absent with `primitivesNote` in its place when the topology does not fix a count, and `obj`/`objVertices` are the --obj export (an empty `obj` means none was asked for).",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "instance",
-               "topology", "vertexResource", "vertexStride", "vertexBytes", "indexResource", "indexBytes"],
+               "stage", "topology", "vertexResource", "vertexStride", "vertexBytes", "indexResource",
+               "indexBytes", "indexCount", "obj", "objVertices"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -13,16 +14,25 @@
     "machine": {"type": "string"},
     "eid": {"type": "integer"},
     "instance": {"type": "integer"},
+    "stage": {"type": "string"},
     "topology": {"type": "integer"},
     "vertexResource": {"type": "string"},
     "vertexStride": {"type": "integer"},
     "vertexBytes": {"type": "integer"},
     "indexResource": {"type": "string"},
     "indexBytes": {"type": "integer"},
+    "indexCount": {"type": "integer"},
     "baseVertex": {"type": "integer"},
     "vertices": {"type": "array", "items": {"type": "string"}},
     "vertexCount": {"type": "integer"},
-    "componentsPerVertex": {"type": "integer"}
+    "componentsPerVertex": {"type": "integer"},
+    "primitives": {"type": "integer"},
+    "primitivesNote": {"type": "string"},
+    "boundsMin": {"type": "string"},
+    "boundsMax": {"type": "string"},
+    "boundsNote": {"type": "string"},
+    "obj": {"type": "string"},
+    "objVertices": {"type": "integer"}
   },
   "additionalProperties": false
 }

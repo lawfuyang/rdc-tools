@@ -382,7 +382,22 @@ long long ImagePixelDelta(const ImageData &a, const ImageData &b, int &maxDelta,
 //: `ReadbackOutputTexture`), so a contact sheet shows what those commands show rather than a second
 //: interpretation of the texture: the display mapping is what makes a UNORM, float or sRGB target
 //: viewable at all.
-bool ReadTargetImage(IReplayController *ctrl, ResourceId target, ImageData &img, std::string &why)
+void ApplySaveOptions(TextureSave &save, const PictureOptions &opts)
+{
+  // The cast only when one was asked for: `typeCast = Typeless` is not "no cast" to the engine the
+  // way it is to the display path, it is a *request* to read a typeless texture as whatever the
+  // format ignores -- so leaving it alone is what says "the texture's own format".
+  if(opts.m_bCastGiven)
+    save.typeCast = opts.m_Cast;
+  save.mip = (int32_t)opts.m_Sub.mip;
+  save.slice.sliceIndex = (int32_t)opts.m_Sub.slice;
+  save.sample.sampleIndex = (int32_t)opts.m_Sub.sample;
+  save.comp.blackPoint = opts.m_BlackPoint;
+  save.comp.whitePoint = opts.m_WhitePoint;
+}
+
+bool ReadTargetImage(IReplayController *ctrl, ResourceId target, const PictureOptions &opts,
+                     ImageData &img, std::string &why)
 {
   if(target == ResourceId::Null())
   {
@@ -397,11 +412,18 @@ bool ReadTargetImage(IReplayController *ctrl, ResourceId target, ImageData &img,
     return false;
   }
 
+  // Everything the two paths share comes from the options; the rest is the display path's own
+  // defaults (the 0..1 range, a typeless read). The overlay is drawn by the engine *into* this
+  // readback, which is why `image --overlay wireframe` needs nothing but this line.
   TextureDisplay disp;
   disp.resourceId = target;
-  disp.typeCast = CompType::Typeless;
+  disp.typeCast = opts.m_bCastGiven ? opts.m_Cast : CompType::Typeless;
   disp.rangeMin = 0.0f;
   disp.rangeMax = 1.0f;
+  disp.subresource = opts.m_Sub;
+  disp.overlay = opts.m_Overlay;
+  disp.hdrMultiplier = opts.m_HdrMultiplier;
+  disp.linearDisplayAsGamma = opts.m_bGamma;
   out->SetTextureDisplay(disp);
   out->Display();
 

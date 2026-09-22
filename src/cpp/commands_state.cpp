@@ -345,8 +345,8 @@ int CmdStateDiff(IReplayController *ctrl, ICaptureFile *file, const char *path, 
 
 //: The resource an argument names: `res123`, a bare `123`, or a name -- exact, then a case-insensitive
 //: substring, the same way `usage` matches. `why` receives what went wrong when nothing matched.
-static ResourceId ResolveResourceArg(IReplayController *ctrl, const char *what, std::string &name,
-                                     std::string &why)
+ResourceId ResolveResourceArg(IReplayController *ctrl, const char *what, std::string &name,
+                              std::string &why)
 {
   std::string want(what == NULL ? "" : what);
   // The tool writes ids as `res1234` and `IdText` returns the bare number, so both spellings are
@@ -1210,8 +1210,8 @@ int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *pat
 //   bindings    what a stage's reflection says it binds, against what the root signature declares
 //   rt-format   the bound render targets' formats, against what the pixel shader writes
 //
-// Deterministic by construction, which is the point (ROADMAP 1): every finding names an event and
-// quotes both sides, so `state <eid>` and `shaders <eid>` show the reader the same two things.
+// Deterministic by construction, which is the point (REFERENCE §9): every finding names an event
+// and quotes both sides, so `state <eid>` and `shaders <eid>` show the reader the same two things.
 //
 // All three need shader reflection, and a capture whose shaders were stripped has none -- on those
 // the three `...Checked` counts are 0 and an empty `findings` means *nothing was checked*, not

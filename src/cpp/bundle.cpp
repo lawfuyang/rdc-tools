@@ -785,7 +785,7 @@ void ComputeSweepBounds(IReplayController *ctrl, DumpOptions &opts, int &until, 
 // function of every replay pass before it, so the last worker would pay the entire range. And
 // splitting at command-list boundaries, where a cold jump lands on a list's own first bindings,
 // needs a mapping from the engine's event ids to the file's chunk stream, which is the `Upstream`
-// item in ROADMAP §3. Two incidental findings from the attempt are in REFERENCE §9: a spawned child
+// item in ROADMAP §2. Two incidental findings from the attempt are in REFERENCE §9: a spawned child
 // must be given a stdin it can use (an inherited slot it cannot takes its whole stdio down -- three
 // "successful" workers once left three empty logs), and simultaneous replay-device creations can
 // leave one hung at zero CPU with no error, which is why any such design needs a deadline and a

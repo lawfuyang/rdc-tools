@@ -289,7 +289,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
-| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §3.5) | `dump-shaders 'capture.rdc' .\shaders` |
+| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §2.5) | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
 
 #### The report, the A/B and the corpus
@@ -479,7 +479,9 @@ python src\py\rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name 
 ```
 
 Three things to check, in this order: is the *content* right (the decoded PNG), is the *format* right for how
-it is sampled (the RT-format audit, *ROADMAP §2*), and was it *written* before it was read (`deps` *(REFERENCE §4.15)*:
+it is sampled (the format audit — `formats` names every format's components, type and sRGB flag, `crosscheck`
+compares the targets with what the shader writes, *REFERENCE §9*), and was it *written* before it was read
+(`deps` *(REFERENCE §4.15)*:
 the write→read chain). To prove its contribution rather than argue about it, substitute a flat texture for it and
 diff the renders (`imgdiff`, or `replaydiff --with-images` for a whole frame — REFERENCE §4.16) — if the picture
 does not change, the texture is not the problem.
@@ -501,7 +503,9 @@ bytes when the reflection is not enough (structured buffers, index data, hand-bu
 ```powershell
 .\bin\replay_dump.exe shaders 'capture.rdc' <eid> --disasm   # the code, with the reflection next to it
 python src\py\rdc_analysis.py dxbc 'capture.rdc' verbose              # which containers exist, and their hashes
-.\bin\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP §2, the rest)
+.\bin\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted: counts, bounds, and
+.\bin\replay_dump.exe mesh 'capture.rdc' <eid> --stage gsout --obj out.obj   # ... or any other stage,
+                                                             # exported for a viewer
 ```
 
 Cross-check the signatures before reading the maths: VS output vs PS input (same semantic, index and width —
@@ -572,7 +576,7 @@ self-A/B in that same run: `replaydiff` of one bundle against *itself* must find
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
 with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §3.5):
+this is the one case for the standalone harness (ROADMAP §2.5):
 
 ```powershell
 python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers

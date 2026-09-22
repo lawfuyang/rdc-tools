@@ -1,0 +1,44 @@
+{
+  "title": "formats",
+  "description": "The format coverage audit: every format in the frame's texture list, how many resources use it, what it is made of, and whether the engine can make a picture of it. `picture` is 'yes', 'with a cast' or 'no', and `why` carries the reason when it is not a plain yes -- so a format nothing can show is a row rather than a silent skip.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "formats",
+               "textures", "bytes", "formatCount", "needCast", "noLayout"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "formats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["format", "textures", "bytes", "components", "componentBits", "type", "srgb",
+                     "blockCompressed", "special", "elementBytes", "picture", "why"],
+        "properties": {
+          "format": {"type": "string"},
+          "textures": {"type": "integer"},
+          "bytes": {"type": "integer"},
+          "components": {"type": "integer"},
+          "componentBits": {"type": "integer"},
+          "type": {"type": "string"},
+          "srgb": {"type": "integer"},
+          "blockCompressed": {"type": "integer"},
+          "special": {"type": "integer"},
+          "elementBytes": {"type": "integer"},
+          "picture": {"type": "string"},
+          "why": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "textures": {"type": "integer"},
+    "bytes": {"type": "integer"},
+    "formatCount": {"type": "integer"},
+    "needCast": {"type": "integer"},
+    "noLayout": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

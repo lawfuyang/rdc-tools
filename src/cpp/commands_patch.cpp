@@ -222,7 +222,7 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
   if(bCompare)
   {
     target = FirstRenderTarget(d3d12);
-    if(!ReadTargetImage(ctrl, target, before, beforeWhy))
+    if(!ReadTargetImage(ctrl, target, PictureOptions(), before, beforeWhy))
       return Fail(1, "cannot read the render target to compare: %s", beforeWhy.c_str());
   }
 
@@ -283,7 +283,7 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
     {
       ImageData after;
       std::string why;
-      if(!ReadTargetImage(ctrl, target, after, why))
+      if(!ReadTargetImage(ctrl, target, PictureOptions(), after, why))
         return Fail(1, "the frame replayed but its render target cannot be read: %s", why.c_str());
 
       const std::string dir = outDir.empty() ? std::string("patch") : outDir;

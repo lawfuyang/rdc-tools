@@ -204,7 +204,7 @@ const char *VarTypeText(VarType t)
 //: assembler, the outputs, and -- for D3D12 -- the root signature and every root parameter that is
 //: set. This is the "what is bound, exactly" answer the offline tool can only approximate.
 int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *filter,
-                const char *saveDir)
+                const char *saveDir, const PictureOptions &opts)
 {
   // Before the header, so a failure to make the destination prints nothing rather than half a
   // document. The folder is one the tool makes for the same reason `dump`'s, `sheet`'s and
@@ -248,24 +248,70 @@ int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, c
 
     if(saveDir && *saveDir)
     {
-      TextureSave save;
-      save.resourceId = t.resourceId;
-      save.destType = FileType::PNG;
-      const std::string out = Fmt("%s\\tex_%s.png", saveDir, id.c_str());
-      const ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
-      if(!res.OK())
+      // The name carries the subresource when one was asked for, so a directory of pictures says
+      // which mip and which slice each file is: `tex_270.png` is mip 0 slice 0, and `--mip 2`
+      // writes `tex_270_m2.png` rather than quietly overwriting it. A cubemap face is slice 0..5,
+      // so `--slice 3` is a face.
+      std::string stem = Fmt("tex_%s", id.c_str());
+      if(opts.m_Sub.mip != 0)
+        stem += Fmt("_m%u", opts.m_Sub.mip);
+      if(opts.m_Sub.slice != 0)
+        stem += Fmt("_s%u", opts.m_Sub.slice);
+      if(opts.m_Sub.sample != 0)
+        stem += Fmt("_x%u", opts.m_Sub.sample);
+
+      if(opts.m_bRaw)
       {
-        fprintf(stderr, "  warning: could not save res%s: %s\n", id.c_str(), ResultText(res).c_str());
-      }
-      else if(IsJson())
-      {
-        // Progress belongs on stderr in JSON mode: a bare line inside the object would make the
-        // document unparseable, which is what used to happen here.
-        fprintf(stderr, "  -> %s\n", out.c_str());
+        // The engine's own bytes for one subresource, undecoded: the answer for a format the
+        // display path will not take, and the only way to have exactly what the capture holds
+        // rather than a picture of it. What the bytes *are* is a fact about the format, so the line
+        // names the format and the size -- a `.bin` nobody can interpret would be a file that only
+        // looks like data.
+        const bytebuf raw = ctrl->GetTextureData(t.resourceId, opts.m_Sub);
+        const std::string out = (std::filesystem::path(saveDir) / (stem + ".bin")).string();
+        FILE *f = FileOpen(std::filesystem::path(out), "wb");
+        const bool bWritten =
+            f != NULL &&
+            (raw.size() == 0 || fwrite(raw.data(), 1, (size_t)raw.size(), f) == raw.size());
+        if(f != NULL)
+          fclose(f);
+        if(!bWritten)
+        {
+          fprintf(stderr, "  warning: could not write %s\n", out.c_str());
+        }
+        else
+        {
+          const std::string summary = Fmt("  -> %s (%llu B of %s)", out.c_str(),
+                                          (unsigned long long)raw.size(), t.format.Name().c_str());
+          if(IsJson())
+            fprintf(stderr, "%s\n", summary.c_str());
+          else
+            printf("%s\n", summary.c_str());
+        }
       }
       else
       {
-        printf("  -> %s\n", out.c_str());
+        TextureSave save;
+        save.resourceId = t.resourceId;
+        save.destType = FileType::PNG;
+        ApplySaveOptions(save, opts);
+        const std::string out = (std::filesystem::path(saveDir) / (stem + ".png")).string();
+        const ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
+        if(!res.OK())
+        {
+          fprintf(stderr, "  warning: could not save res%s: %s\n", id.c_str(),
+                  ResultText(res).c_str());
+        }
+        else if(IsJson())
+        {
+          // Progress belongs on stderr in JSON mode: a bare line inside the object would make the
+          // document unparseable, which is what used to happen here.
+          fprintf(stderr, "  -> %s\n", out.c_str());
+        }
+        else
+        {
+          printf("  -> %s\n", out.c_str());
+        }
       }
     }
   }
@@ -281,16 +327,154 @@ int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, c
 
 //: Post-VS geometry for one instance: what the vertex shader actually emitted, per vertex. This is
 //: the "which instance SH reached the pixel shader" question the offline tool cannot answer.
+// --------------------------------------------------------------------------- mesh, and its stages
+
+long long PrimitiveCount(Topology topology, long long count)
+{
+  if(count <= 0)
+    return 0;
+  switch(topology)
+  {
+    case Topology::PointList: return count;
+    case Topology::LineList: return count / 2;
+    case Topology::LineStrip: return count - 1;
+    case Topology::LineLoop: return count;    // the closing segment draws no vertex of its own
+    case Topology::TriangleList: return count / 3;
+    case Topology::TriangleStrip: return count > 1 ? count - 2 : 0;
+    case Topology::TriangleFan: return count > 1 ? count - 2 : 0;
+    case Topology::LineList_Adj: return count / 4;    // four per segment, two of them adjacency
+    case Topology::TriangleList_Adj:
+      return count / 6;    // six per triangle, three of them adjacency
+    default: break;
+  }
+
+  // `PatchList_1CPs` is where the patch list starts and each following value adds a control point,
+  // so a patch's vertex count is the difference from that base. `Topology::Count` and the meshlet
+  // list sit above the last patch size and fall out of the range on purpose: 0 is this function's
+  // "not derived".
+  const int patchBase = (int)Topology::PatchList_1CPs;
+  const int perPatch = (int)topology - patchBase + 1;
+  if((int)topology >= patchBase && perPatch <= 16)
+    return count / perPatch;
+
+  // A strip with adjacency, and a meshlet list: the pattern is in the index buffer or in the
+  // meshlets, and the count alone does not say how many primitives there are. The command prints
+  // that in words rather than printing this zero as a count.
+  return 0;
+}
+
+Bounds3 VertexBounds(const bytebuf &data, size_t stride, size_t count)
+{
+  Bounds3 bounds;
+  for(size_t v = 0; v < count; v++)
+  {
+    // The offset is computed in `size_t` and checked before it is used: `v * stride` can wrap, and
+    // a wrapped offset would read outside the buffer ([expr.add]).
+    const size_t offset = v * stride;
+    if(stride == 0 || offset + 3u * sizeof(float) > data.size())
+      break;
+    float xyz[3];
+    memcpy(xyz, data.data() + offset, sizeof(xyz));
+    // A `NaN` or an infinity is skipped rather than compared: one of them in the stream poisons
+    // every later min and max, and `nan nan nan` is not a bounds line. `m_bAny` then says whether
+    // anything was finite.
+    if(!std::isfinite(xyz[0]) || !std::isfinite(xyz[1]) || !std::isfinite(xyz[2]))
+      continue;
+    if(!bounds.m_bAny)
+    {
+      for(size_t c = 0; c < 3; c++)
+        bounds.m_Min[c] = bounds.m_Max[c] = xyz[c];
+      bounds.m_bAny = true;
+      continue;
+    }
+    for(size_t c = 0; c < 3; c++)
+    {
+      if(xyz[c] < bounds.m_Min[c])
+        bounds.m_Min[c] = xyz[c];
+      if(xyz[c] > bounds.m_Max[c])
+        bounds.m_Max[c] = xyz[c];
+    }
+  }
+  return bounds;
+}
+
+long long WriteObj(const std::filesystem::path &path, const bytebuf &positions, size_t stride,
+                   size_t count, const std::vector<uint32_t> &indices, Topology topology,
+                   std::string &why)
+{
+  FILE *f = FileOpen(path, "wb");
+  if(f == NULL)
+  {
+    why = Fmt("cannot write %s", path.string().c_str());
+    return -1;
+  }
+
+  // What an OBJ carries, and what it cannot: the `v` lines are positions only (the rest of an
+  // interleaved vertex has nowhere to go in the format), and faces are spelled out only where the
+  // vertex order *is* the primitive's. A triangle list is that case; a strip's order is not a
+  // face's, and an index buffer's values are not vertex numbers when the draw has a `baseVertex`
+  // (the caller leaves the indices out then). The header says which of the two this file is -- a
+  // file that silently loses its faces is worse than one that says why, because it still opens.
+  const bool bFaces = topology == Topology::TriangleList;
+  fprintf(f, "# replay_dump mesh --obj: %llu vertex/vertices, topology %d\n",
+          (unsigned long long)count, (int)topology);
+  if(!bFaces)
+    fprintf(
+        f,
+        "# no faces: this writer spells them out for a triangle list, and this draw is not one\n");
+
+  long long written = 0;
+  for(size_t v = 0; v < count; v++)
+  {
+    const size_t offset = v * stride;
+    if(stride == 0 || offset + 3u * sizeof(float) > positions.size())
+      break;
+    float xyz[3];
+    memcpy(xyz, positions.data() + offset, sizeof(xyz));
+    fprintf(f, "v %g %g %g\n", (double)xyz[0], (double)xyz[1], (double)xyz[2]);
+    written++;
+  }
+
+  if(bFaces && written > 0)
+  {
+    if(indices.empty())
+    {
+      // No index buffer: the vertices are the triangles, in threes.
+      for(long long i = 0; i + 2 < written; i += 3)
+        fprintf(f, "f %lld %lld %lld\n", i + 1, i + 2, i + 3);
+    }
+    else
+    {
+      for(size_t i = 0; i + 2 < indices.size(); i += 3)
+      {
+        // One-based, and only when all three are inside the stream that was read: an index past the end is a
+        // hole in the buffer, and a face naming it would claim a vertex this file does not have.
+        if((long long)indices[i] >= written || (long long)indices[i + 1] >= written ||
+           (long long)indices[i + 2] >= written)
+          continue;
+        fprintf(f, "f %u %u %u\n", (unsigned)indices[i] + 1u, (unsigned)indices[i + 1] + 1u,
+                (unsigned)indices[i + 2] + 1u);
+      }
+    }
+  }
+  fclose(f);
+  return written;
+}
+
 int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int instance,
-            int maxRows)
+            int maxRows, MeshDataStage stage, const char *objPath)
 {
   MoveToEvent(ctrl, eid);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
   Field("instance", (long long)instance);
+  // Which stage this is, in words: `vsout` is the default and `vsin` is the stream the draw *read*,
+  // and the two differ by the shader -- a reader comparing two runs has to know which one produced
+  // the numbers.
+  Field("stage", std::string(MeshStageText(stage)));
 
-  const MeshFormat mesh = ctrl->GetPostVSData((uint32_t)instance, 0, MeshDataStage::VSOut);
+  const MeshFormat mesh = ctrl->GetPostVSData((uint32_t)instance, 0, stage);
   const bool bHasData = mesh.vertexResourceId != ResourceId::Null() && mesh.vertexByteStride != 0;
 
   Field("topology", (long long)mesh.topology);
@@ -308,7 +492,8 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
     if(IsJson())
       printf("}\n");
     else
-      printf("(no post-VS data for this event)\n");
+      printf("(no %s data for this event: nothing was recorded for that stage)\n",
+             MeshStageText(stage));
     return 0;
   }
 
@@ -345,10 +530,254 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
     }
     Row(line);
   }
-  ArrayClose(false);    // vertexCount/componentsPerVertex follow
+  ArrayClose(false);    // the counts, the bounds and the export follow
   g_Indent = g_bJson ? 1 : 0;
   Field("vertexCount", (long long)count);
-  Field("componentsPerVertex", (long long)comps, true);
+  Field("componentsPerVertex", (long long)comps);
+
+  // The index stream, read for its *count*: how many primitives the draw covered is the sanity line
+  // a mesh shader's output needs (a meshlet list read as positions gives a count that is right and
+  // bounds that are not), and the count is what `PrimitiveCount` folds the topology over.
+  std::vector<uint32_t> indices;
+  long long indexCount = 0;
+  if(mesh.indexResourceId != ResourceId::Null() && mesh.indexByteStride != 0)
+  {
+    indexCount = (long long)(mesh.indexByteSize / mesh.indexByteStride);
+    Field("indexCount", indexCount);
+    // Kept for `--obj` only, and only when the values are vertex numbers: with a `baseVertex` the fetched
+    // vertex is `baseVertex + index`, so those numbers name nothing in the stream this reads.
+    if(objPath != NULL && mesh.baseVertex == 0)
+    {
+      const bytebuf raw =
+          ctrl->GetBufferData(mesh.indexResourceId, mesh.indexByteOffset, mesh.indexByteSize);
+      const size_t element = mesh.indexByteStride;
+      for(size_t i = 0; i + element <= raw.size(); i += element)
+      {
+        uint32_t value = 0;
+        if(element == 2)
+        {
+          uint16_t small = 0;
+          memcpy(&small, raw.data() + i, sizeof(small));
+          value = small;
+        }
+        else
+        {
+          memcpy(&value, raw.data() + i, sizeof(value));
+        }
+        indices.push_back(value);
+      }
+    }
+  }
+  else
+  {
+    Field("indexCount", 0);
+  }
+
+  const long long primitives =
+      PrimitiveCount(mesh.topology, indexCount > 0 ? indexCount : (long long)count);
+  if(primitives > 0)
+  {
+    Field("primitives", primitives);
+  }
+  else
+  {
+    // Not derived, and said so: a strip with adjacency and a meshlet list do not say their primitive count
+    // in the vertex count, and a `0` in this field would read as "nothing was drawn".
+    Field("primitivesNote",
+          Fmt("not derived: topology %d does not fix a primitive count from %lld %s",
+              (int)mesh.topology, indexCount > 0 ? indexCount : (long long)count,
+              indexCount > 0 ? "index/indices" : "vertex/vertices"));
+  }
+
+  const Bounds3 bounds = VertexBounds(data, stride, count);
+  if(bounds.m_bAny)
+  {
+    Field("boundsMin", Fmt("%g %g %g", (double)bounds.m_Min[0], (double)bounds.m_Min[1],
+                           (double)bounds.m_Min[2]));
+    Field("boundsMax", Fmt("%g %g %g", (double)bounds.m_Max[0], (double)bounds.m_Max[1],
+                           (double)bounds.m_Max[2]));
+  }
+  else
+  {
+    Field("boundsNote",
+          std::string("no finite position in the stream: every vertex had a NaN or an "
+                      "infinity in its first three components"));
+  }
+
+  // The export is the last member whether or not `--obj` was given: a document whose *shape*
+  // depends on a flag is one every consumer has to special-case, and an empty `obj` is the "not
+  // asked for" answer that keeps one schema for one command. `last` is the one thing the writer
+  // cannot work out for itself.
+  long long objVertices = 0;
+  std::string objWhy;
+  if(objPath != NULL)
+    objVertices = WriteObj(std::filesystem::path(objPath), data, stride, count, indices,
+                           mesh.topology, objWhy);
+  Field("obj", std::string(objPath != NULL ? objPath : ""));
+  if(objVertices < 0)
+  {
+    fprintf(stderr, "warning: %s\n", objWhy.c_str());
+    objVertices = 0;
+  }
+  Field("objVertices", objVertices, true);
+  g_Indent = 0;
+  if(g_bJson)
+    printf("}\n");
+  return objWhy.empty() ? 0 : 1;
+}
+
+// ------------------------------------------------------------------- the format coverage audit
+
+//: What one format is made of, as one line: the components and their width, the type the engine
+//: reads them as (`CastText` -- the same vocabulary `--cast` takes, so `formats` and `image --cast`
+//: cannot disagree about what a type is called), and the two flags that change what a picture of it
+//: means.
+std::string FormatShape(const ResourceFormat &format)
+{
+  return Fmt("%u x %u-bit %s%s%s", (unsigned)format.compCount, (unsigned)format.compByteWidth * 8u,
+             CastText(format.compType), format.SRGBCorrected() ? " srgb" : "",
+             format.BlockFormat() ? " block" : "");
+}
+
+//: The engine's own answer to "can this be a picture?", with the reason when the answer is not a
+//: plain yes. It is a *rule* about the format, not a promise about the frame: the display path is
+//: what actually decodes one, and it has a measured failure the caller covers with
+//: `SaveTargetImage`'s engine-encoder fallback (one texture in the Android capture comes back empty
+//: through the display path).
+//:
+//: Three answers, and the middle one is why this is not a bool: a **typeless** format has no type
+//: of its own to read the bits as, so a picture needs `--cast` -- and `compType == Typeless` is
+//: exactly the case `TextureDisplay::typeCast` exists for. A format the engine has no layout for
+//: (`Special`, or no components at all) cannot be shown at all, and that is worth a row rather than
+//: a silent skip.
+bool FormatPicture(const ResourceFormat &format, bool &bNeedsCast, std::string &why)
+{
+  bNeedsCast = false;
+  why.clear();
+  if(format.compCount == 0 || format.compByteWidth == 0)
+  {
+    why = "the engine's format table has no layout for it (no components)";
+    return false;
+  }
+  if(format.compType == CompType::Typeless)
+  {
+    bNeedsCast = true;
+    why = "typeless: `--cast <type>` says how to read the bits";
+    return false;
+  }
+  if(format.Special())
+    why = "a special layout (multi-plane or packed): the display path does not take it";
+  return !format.Special();
+}
+
+int CmdFormats(IReplayController *ctrl, ICaptureFile *file, const char *path)
+{
+  PrintCaptureHeader(file, path);
+
+  const rdcarray<TextureDescription> &texs = ctrl->GetTextures();
+
+  // Grouped by the format's own *name*, which is what one format is: the enum has one value per
+  // layout and the engine names each. A name is also what a reader can match against the capture's
+  // own tables, and it is what `--cast` is phrased in -- the numeric id never appears in a picture
+  // command, so it is not the grouping key here.
+  struct Group
+  {
+    std::string m_Key;
+    ResourceFormat m_Format;
+    long long m_Count = 0;
+    unsigned long long m_Bytes = 0;
+    long long m_NeedCast = 0;
+  };
+  std::vector<Group> groups;
+  unsigned long long bytes = 0;
+
+  for(size_t i = 0; i < texs.size(); i++)
+  {
+    const TextureDescription &t = texs[i];
+    const std::string key(t.format.Name().c_str());
+    Group *group = NULL;
+    for(size_t g = 0; g < groups.size(); g++)
+    {
+      if(groups[g].m_Key == key)
+      {
+        group = &groups[g];
+        break;
+      }
+    }
+    if(group == NULL)
+    {
+      groups.push_back(Group());
+      group = &groups.back();
+      group->m_Key = key;
+      group->m_Format = t.format;
+    }
+    group->m_Count++;
+    group->m_Bytes += (unsigned long long)t.byteSize;
+    bytes += (unsigned long long)t.byteSize;
+  }
+
+  // The classes the totals are about, counted once: how many *textures* need a cast, and how many the engine
+  // has no layout for. A total is what a summary can say without listing every row again.
+  long long needsCast = 0, noLayout = 0, total = 0;
+  for(size_t g = 0; g < groups.size(); g++)
+  {
+    bool bNeedsCast = false;
+    std::string why;
+    if(!FormatPicture(groups[g].m_Format, bNeedsCast, why))
+    {
+      if(bNeedsCast)
+        needsCast += groups[g].m_Count;
+      else
+        noLayout += groups[g].m_Count;
+    }
+    total += groups[g].m_Count;
+  }
+
+  if(!IsJson())
+  {
+    printf("%-28s %5s %13s  %-26s %-12s %s\n", "format", "count", "bytes", "shape", "picture",
+           "why");
+  }
+
+  ArrayOpen("formats");
+  for(size_t g = 0; g < groups.size(); g++)
+  {
+    const ResourceFormat &format = groups[g].m_Format;
+    bool bNeedsCast = false;
+    std::string why;
+    const bool bPicture = FormatPicture(format, bNeedsCast, why);
+    const char *picture = bPicture ? "yes" : (bNeedsCast ? "with a cast" : "no");
+
+    if(IsJson())
+    {
+      ObjectRow(Fmt(
+          "{\"format\": \"%s\", \"textures\": %lld, \"bytes\": %llu, \"components\": %u,"
+          " \"componentBits\": %u, \"type\": \"%s\", \"srgb\": %d, \"blockCompressed\": %d,"
+          " \"special\": %d, \"elementBytes\": %u, \"picture\": \"%s\", \"why\": \"%s\"}",
+          JsonEscape(groups[g].m_Key.c_str()).c_str(), groups[g].m_Count, groups[g].m_Bytes,
+          (unsigned)format.compCount, (unsigned)format.compByteWidth * 8u, CastText(format.compType),
+          format.SRGBCorrected() ? 1 : 0, format.BlockFormat() ? 1 : 0, format.Special() ? 1 : 0,
+          (unsigned)format.ElementSize(), picture, JsonEscape(why.c_str()).c_str()));
+    }
+    else
+    {
+      printf("%-28s %5lld %10.2f MB  %-26s %-12s %s\n", groups[g].m_Key.c_str(), groups[g].m_Count,
+             (double)groups[g].m_Bytes / 1048576.0, FormatShape(format).c_str(), picture,
+             why.c_str());
+    }
+  }
+  ArrayClose(false);    // the totals follow
+
+  g_Indent = g_bJson ? 1 : 0;
+  Field("textures", total);
+  Field("bytes", (long long)bytes);
+  // `formatCount`, not `formats`: the array above already owns that name, and two members with one
+  // key is a document no parser can read.
+  Field("formatCount", (long long)groups.size());
+  // The two sentences this command exists to be able to say, counted rather than left for the reader to add
+  // up: a texture the engine cannot show without being told how, and one it has no layout for at all.
+  Field("needCast", needsCast);
+  Field("noLayout", noLayout, true);
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");
@@ -358,10 +787,11 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
 //: Defined with the bundle (REFERENCE §9), used here too: `image` and the bundle's `rt/` images
 //: save a target through the same code so the two cannot drift apart.
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
-                     std::string &written, int32_t &width, int32_t &height);
+                     const PictureOptions &opts, std::string &written, int32_t &width,
+                     int32_t &height);
 
 int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-             const char *outPath)
+             const char *outPath, const PictureOptions &opts)
 {
   MoveToEvent(ctrl, eid);
 
@@ -374,7 +804,7 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 
   int32_t width = 0, height = 0;
   std::string used;
-  const bool bOk = SaveTargetImage(ctrl, rt, outPath, used, width, height);
+  const bool bOk = SaveTargetImage(ctrl, rt, outPath, opts, used, width, height);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -382,6 +812,14 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   Field("width", (long long)width);
   Field("height", (long long)height);
   Field("file", used);
+  // What was asked for, so a picture can be read back later knowing which overlay and which
+  // subresource it shows: `none` and `0` are the defaults, and a document that leaves them out
+  // cannot be told from one that was made with `--overlay wireframe`.
+  Field("overlay", std::string(OverlayText(opts.m_Overlay)));
+  Field("mip", (long long)opts.m_Sub.mip);
+  Field("slice", (long long)opts.m_Sub.slice);
+  Field("sample", (long long)opts.m_Sub.sample);
+  Field("cast", std::string(CastText(opts.m_bCastGiven ? opts.m_Cast : CompType::Typeless)));
   Field("written", bOk ? 1 : 0, true);
   g_Indent = 0;
   if(g_bJson)
@@ -392,7 +830,7 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 // --------------------------------------------------------------------------- per-pass counters
 //
 // `FetchCounters` answers per event and takes no range, so a pass's cost is folded here out of the
-// per-event list (ROADMAP 2). Three things about that are worth saying rather than assuming:
+// per-event list (REFERENCE §9). Three things about that are worth saying rather than assuming:
 //
 // * Which counter *is* the cost is the engine's choice, not ours: `EventGPUDuration` when this
 //   replay produced one, and the first counter it did produce otherwise. It is named in the
@@ -1173,13 +1611,14 @@ int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 //: `stdout` is unbuffered (setvbuf in `main`), so nothing has to be flushed before the swap, and
 //: the guard restores the descriptor on every path out of the scope, early returns included.
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
-                     std::string &written, int32_t &width, int32_t &height)
+                     const PictureOptions &opts, std::string &written, int32_t &width,
+                     int32_t &height)
 {
   // The pixels come from `ReadTargetImage`, which is the same display-and-readback the contact sheet
   // uses: one implementation, so a pass image and a tile cannot be two interpretations of a target.
   ImageData img;
   std::string why;
-  bool bOk = ReadTargetImage(ctrl, target, img, why);
+  bool bOk = ReadTargetImage(ctrl, target, opts, img, why);
   width = img.m_Width;
   height = img.m_Height;
   written = std::string(outBase);
@@ -1188,11 +1627,14 @@ bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *out
 
   if(!bOk)
   {
-    // The engine's own encoder, for the cases the display readback cannot serve: a target it will not
-    // show (measured: one texture in the Android capture came back empty through the display path).
+    // The engine's own encoder, for the cases the display readback cannot serve: a target it will
+    // not show (measured: one texture in the Android capture came back empty through the display
+    // path). The options go with it, or a `--cast`/`--mip` picture would silently come back as the
+    // texture's own format at mip 0 on the fallback path only.
     TextureSave save;
     save.resourceId = target;
     save.destType = FileType::PNG;
+    ApplySaveOptions(save, opts);
     const std::string png = std::string(outBase) + ".png";
     const ResultDetails res = ctrl->SaveTexture(save, rdcstr(png.c_str()));
     if(res.OK())

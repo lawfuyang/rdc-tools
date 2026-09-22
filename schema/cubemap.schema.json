@@ -1,0 +1,25 @@
+{
+  "title": "cubemap",
+  "description": "A cubemap written as six face pictures plus the engine's cruciform: the resource, the directory, the face size, and what was actually written (`faces` is 0..6, `cross` is empty when the cruciform could not be written).",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "resource",
+               "name", "directory", "faceSize", "mips", "mip", "format", "faces", "cross"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "resource": {"type": "string"},
+    "name": {"type": "string"},
+    "directory": {"type": "string"},
+    "faceSize": {"type": "integer"},
+    "mips": {"type": "integer"},
+    "mip": {"type": "integer"},
+    "format": {"type": "string"},
+    "faces": {"type": "integer"},
+    "cross": {"type": "string"}
+  },
+  "additionalProperties": false
+}

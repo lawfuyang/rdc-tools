@@ -535,10 +535,11 @@ const SchemaDoc kSchemas[] = {
 
     {"mesh", "mesh", R"sc({
   "title": "mesh",
-  "description": "One draw's mesh: the state that feeds it, and -- when the capture has post-VS data -- the vertices the vertex shader emitted.",
+  "description": "One draw's geometry at one mesh stage: the stream the engine has for it, the vertices, and -- when they can be derived -- the primitive count and the position bounds. `stage` is what the data is (vsin is what the draw read, vsout what the vertex shader wrote), `primitives` is absent with `primitivesNote` in its place when the topology does not fix a count, and `obj`/`objVertices` are the --obj export (an empty `obj` means none was asked for).",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "instance",
-               "topology", "vertexResource", "vertexStride", "vertexBytes", "indexResource", "indexBytes"],
+               "stage", "topology", "vertexResource", "vertexStride", "vertexBytes", "indexResource",
+               "indexBytes", "indexCount", "obj", "objVertices"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -548,26 +549,35 @@ const SchemaDoc kSchemas[] = {
     "machine": {"type": "string"},
     "eid": {"type": "integer"},
     "instance": {"type": "integer"},
+    "stage": {"type": "string"},
     "topology": {"type": "integer"},
     "vertexResource": {"type": "string"},
     "vertexStride": {"type": "integer"},
     "vertexBytes": {"type": "integer"},
     "indexResource": {"type": "string"},
     "indexBytes": {"type": "integer"},
+    "indexCount": {"type": "integer"},
     "baseVertex": {"type": "integer"},
     "vertices": {"type": "array", "items": {"type": "string"}},
     "vertexCount": {"type": "integer"},
-    "componentsPerVertex": {"type": "integer"}
+    "componentsPerVertex": {"type": "integer"},
+    "primitives": {"type": "integer"},
+    "primitivesNote": {"type": "string"},
+    "boundsMin": {"type": "string"},
+    "boundsMax": {"type": "string"},
+    "boundsNote": {"type": "string"},
+    "obj": {"type": "string"},
+    "objVertices": {"type": "integer"}
   },
   "additionalProperties": false
 })sc"},
 
     {"image", "image", R"sc({
   "title": "image",
-  "description": "One render target saved to a file, and whether the write succeeded.",
+  "description": "One render target saved to a file, and whether the write succeeded: the subresource, the component type it was read as, and the display overlay drawn into it.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "resource",
-               "width", "height", "file", "written"],
+               "width", "height", "file", "overlay", "mip", "slice", "sample", "cast", "written"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -580,7 +590,83 @@ const SchemaDoc kSchemas[] = {
     "width": {"type": "integer"},
     "height": {"type": "integer"},
     "file": {"type": "string"},
+    "overlay": {"type": "string"},
+    "mip": {"type": "integer"},
+    "slice": {"type": "integer"},
+    "sample": {"type": "integer"},
+    "cast": {"type": "string"},
     "written": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"formats", "formats", R"sc({
+  "title": "formats",
+  "description": "The format coverage audit: every format in the frame's texture list, how many resources use it, what it is made of, and whether the engine can make a picture of it. `picture` is 'yes', 'with a cast' or 'no', and `why` carries the reason when it is not a plain yes -- so a format nothing can show is a row rather than a silent skip.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "formats",
+               "textures", "bytes", "formatCount", "needCast", "noLayout"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "formats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["format", "textures", "bytes", "components", "componentBits", "type", "srgb",
+                     "blockCompressed", "special", "elementBytes", "picture", "why"],
+        "properties": {
+          "format": {"type": "string"},
+          "textures": {"type": "integer"},
+          "bytes": {"type": "integer"},
+          "components": {"type": "integer"},
+          "componentBits": {"type": "integer"},
+          "type": {"type": "string"},
+          "srgb": {"type": "integer"},
+          "blockCompressed": {"type": "integer"},
+          "special": {"type": "integer"},
+          "elementBytes": {"type": "integer"},
+          "picture": {"type": "string"},
+          "why": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "textures": {"type": "integer"},
+    "bytes": {"type": "integer"},
+    "formatCount": {"type": "integer"},
+    "needCast": {"type": "integer"},
+    "noLayout": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"cubemap", "cubemap", R"sc({
+  "title": "cubemap",
+  "description": "A cubemap written as six face pictures plus the engine's cruciform: the resource, the directory, the face size, and what was actually written (`faces` is 0..6, `cross` is empty when the cruciform could not be written).",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "resource",
+               "name", "directory", "faceSize", "mips", "mip", "format", "faces", "cross"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "resource": {"type": "string"},
+    "name": {"type": "string"},
+    "directory": {"type": "string"},
+    "faceSize": {"type": "integer"},
+    "mips": {"type": "integer"},
+    "mip": {"type": "integer"},
+    "format": {"type": "string"},
+    "faces": {"type": "integer"},
+    "cross": {"type": "string"}
   },
   "additionalProperties": false
 })sc"},

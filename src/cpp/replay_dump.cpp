@@ -76,9 +76,27 @@ void Usage()
       "  shaders <rdc> <eid> [--disasm]    reflection: cbuffers, bindings, signatures, "
       "disassembly\n"
       "  cb      <rdc> <eid> <stage> <slot> named values of one constant buffer\n"
-      "  textures <rdc> [filter] [--save <dir>]   texture list; --save decodes to PNG\n"
-      "  mesh    <rdc> <eid> [instance] [max]     post-VS vertices for one instance\n"
-      "  image   <rdc> <eid> <out.bmp>     the texture display at that event, as a BMP\n"
+      "  textures <rdc> [filter] [--save <dir>] [--mip N] [--slice N] [--sample N] [--raw]\n"
+      "          [--cast <type>] [--range min,max]\n"
+      "                                    texture list; --save decodes one subresource at a time "
+      "to\n"
+      "                                    PNG, or writes the engine's own bytes with --raw\n"
+      "  formats <rdc>                     every format in the frame's texture list: how many "
+      "resources\n"
+      "                                    use it, what it is made of, and whether the engine can "
+      "make a\n"
+      "                                    picture of it\n"
+      "  cubemap <rdc> <resId|name> [outDir=cross]   a cubemap as six faces plus the engine's "
+      "cruciform\n"
+      "  mesh    <rdc> <eid> [instance] [max] [--stage vsin|vsout|gsout|taskout|meshout] [--obj "
+      "<file>]\n"
+      "                                    one instance's vertices at that stage, with the "
+      "primitive\n"
+      "                                    count and the position bounds; --obj exports a "
+      "Wavefront OBJ\n"
+      "  image   <rdc> <eid> <out.bmp> [--overlay <name>] [--mip N] [--slice N] [--sample N]\n"
+      "          [--cast <type>] [--hdr M] [--gamma]   the texture display at that event, as a "
+      "BMP\n"
       "  sheet   <rdc> [outDir=sheet] [--every N] [--max N] [--tile N] [--list]   one image per "
       "pass,\n"
       "                                    a montage of them and an index; --list writes nothing\n"
@@ -484,6 +502,94 @@ bool ParseIndexOpt(const std::vector<std::string> &args, const char *name, uint3
   return true;
 }
 
+//: Whether an argument asks for an option rather than naming a positional. The picture commands take their
+//: positionals first (`mesh 270 1 8 --stage gsout`), and once an option is seen nothing after it is a
+//: positional -- otherwise `--stage gsout` would leave `gsout` to be read as the instance.
+bool IsOption(const std::string &arg)
+{
+  return !arg.empty() && arg[0] == '-';
+}
+
+//: The options the picture commands (`image`, `textures`, `cubemap`, and the bundle's `rt/` images)
+//: share, parsed in one place so `main`, a batch file and a library session cannot disagree about
+//: them -- the same reason every other option is parsed in this file. `why` receives the refusal,
+//: because each of these is a value a typo in changes *the question*: `--cast uint` on a float
+//: texture gives integers that still look like numbers, and `--slice 7` on a four-slice array asks
+//: about a slice that is not there.
+bool PictureOptionsFromArgs(const std::vector<std::string> &args, PictureOptions &opts,
+                            std::string &why)
+{
+  if(!ParseIndexOpt(args, "--mip", opts.m_Sub.mip) ||
+     !ParseIndexOpt(args, "--slice", opts.m_Sub.slice) ||
+     !ParseIndexOpt(args, "--sample", opts.m_Sub.sample))
+  {
+    why = "--mip, --slice and --sample are positions: they take a number from 0 up";
+    return false;
+  }
+
+  const char *castName = OptValue(args, "--cast", NULL);
+  if(castName != NULL)
+  {
+    if(!CastFromName(castName, opts.m_Cast))
+    {
+      why =
+          Fmt("'%s' is not a component type (typeless, float, unorm, snorm, uint, sint, uscaled, "
+              "sscaled, depth, srgb)",
+              castName);
+      return false;
+    }
+    opts.m_bCastGiven = true;
+  }
+
+  const char *overlayName = OptValue(args, "--overlay", NULL);
+  if(overlayName != NULL)
+  {
+    if(!OverlayFromName(overlayName, opts.m_Overlay))
+    {
+      why = Fmt("'%s' is not an overlay (%s)", overlayName, OverlayNames(", ").c_str());
+      return false;
+    }
+    opts.m_bOverlayGiven = true;
+  }
+
+  // The display path's tonemapping: a multiplier for float/HDR content, because the engine cannot know the
+  // range a capture meant; and whether to read the values as linear and show them as gamma.
+  const char *hdr = OptValue(args, "--hdr", NULL);
+  if(hdr != NULL)
+  {
+    char *end = NULL;
+    const double value = strtod(hdr, &end);
+    if(end == hdr || *end != '\0' || !(value > 0.0))
+    {
+      why = Fmt("'%s' is not an --hdr multiplier: it takes one positive number", hdr);
+      return false;
+    }
+    opts.m_HdrMultiplier = (float)value;
+  }
+  opts.m_bGamma = HasOpt(args, "--gamma");
+
+  // The save path's tonemapping, and the one that matters for a float/HDR texture on disk: the
+  // range that becomes 0..255. `min,max` because a single number could only be a scale, and the
+  // interesting case is a measured range -- an SH buffer's values are nowhere near 0..1.
+  const char *range = OptValue(args, "--range", NULL);
+  if(range != NULL)
+  {
+    double low = 0.0, high = 0.0;
+    char tail = '\0';
+    if(sscanf(range, "%lf , %lf %c", &low, &high, &tail) != 2 || !(high > low))
+    {
+      why = Fmt("'%s' is not a --range: it takes two numbers, 'min,max', with max above min", range);
+      return false;
+    }
+    opts.m_BlackPoint = (float)low;
+    opts.m_WhitePoint = (float)high;
+  }
+
+  // `--raw` is the save path's own switch: the engine's bytes rather than a picture of them.
+  opts.m_bRaw = HasOpt(args, "--raw");
+  return true;
+}
+
 //: How many arguments a command needs before it can run, the command itself counted: the same
 //: numbers the dispatch table below enforces (`args.size() > 4` for `pixelhistory` is 5 here). They
 //: are listed once, for the one question that has to be answered *before* dispatch -- whether a
@@ -675,13 +781,56 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
       return Fail(2, "'%s' is not a shader stage (vs hs ds gs ps cs as ms)", args[2].c_str());
     return CmdCbuffer(ctrl, file, path, ToInt(args[1], 0), stage, ToInt(args[3], 0));
   }
+  if(!strcmp(cmd, "formats"))
+    return CmdFormats(ctrl, file, path);
+  if(!strcmp(cmd, "cubemap") && args.size() > 1)
+  {
+    PictureOptions opts;
+    std::string why;
+    if(!PictureOptionsFromArgs(args, opts, why))
+      return Fail(2, "%s", why.c_str());
+    // The directory is the second positional and optional, like `dump`'s: `cubemap frame.rdc 271`
+    // writes beside the tool as `cross/`.
+    return CmdCubemap(ctrl, file, path, args[1].c_str(),
+                      args.size() > 2 && !IsOption(args[2]) ? args[2].c_str() : NULL, opts);
+  }
   if(!strcmp(cmd, "textures"))
-    return CmdTextures(ctrl, file, path, args.size() > 1 ? args[1].c_str() : NULL, saveDir);
+  {
+    PictureOptions opts;
+    std::string why;
+    if(!PictureOptionsFromArgs(args, opts, why))
+      return Fail(2, "%s", why.c_str());
+    // The filter is optional and is the first positional; `--save <dir>` is a global option
+    // (SplitLine), which is why it arrives as its own parameter.
+    return CmdTextures(ctrl, file, path,
+                       args.size() > 1 && !IsOption(args[1]) ? args[1].c_str() : NULL, saveDir, opts);
+  }
   if(!strcmp(cmd, "mesh") && args.size() > 1)
-    return CmdMesh(ctrl, file, path, ToInt(args[1], 0), args.size() > 2 ? ToInt(args[2], 0) : 0,
-                   args.size() > 3 ? ToInt(args[3], 16) : 16);
+  {
+    // The positionals come first, as the help text shows, and the *first* option ends them: `mesh
+    // 270 --stage gsout` has no instance rather than reading `gsout` as one. `at` only advances
+    // over positionals, so an option's value is never mistaken for one.
+    int instance = 0, maxRows = 16;
+    size_t at = 2;
+    if(at < args.size() && !IsOption(args[at]))
+      instance = ToInt(args[at++], instance);
+    if(at < args.size() && !IsOption(args[at]))
+      maxRows = ToInt(args[at++], maxRows);
+    MeshDataStage stage = MeshDataStage::VSOut;
+    const char *stageName = OptValue(args, "--stage", NULL);
+    if(stageName != NULL && !MeshStageFromName(stageName, stage))
+      return Fail(2, "'%s' is not a mesh stage (%s)", stageName, MeshStageNames(", ").c_str());
+    return CmdMesh(ctrl, file, path, ToInt(args[1], 0), instance, maxRows, stage,
+                   OptValue(args, "--obj", NULL));
+  }
   if(!strcmp(cmd, "image") && args.size() > 2)
-    return CmdImage(ctrl, file, path, ToInt(args[1], 0), args[2].c_str());
+  {
+    PictureOptions opts;
+    std::string why;
+    if(!PictureOptionsFromArgs(args, opts, why))
+      return Fail(2, "%s", why.c_str());
+    return CmdImage(ctrl, file, path, ToInt(args[1], 0), args[2].c_str(), opts);
+  }
   if(!strcmp(cmd, "counters"))
     return CmdCounters(ctrl, file, path, HasOpt(args, "--per-pass"),
                        OptValue(args, "--passes", NULL), ToInt(OptValue(args, "--top", "5"), 5));

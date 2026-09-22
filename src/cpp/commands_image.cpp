@@ -220,7 +220,7 @@ int CmdSheet(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     tile.m_Pass.m_ImageEid = imageEid;
     ImageData img;
     std::string why;
-    if(!ReadTargetImage(ctrl, target, img, why))
+    if(!ReadTargetImage(ctrl, target, PictureOptions(), img, why))
     {
       tile.m_Note = why;
       skipped++;
@@ -392,4 +392,121 @@ int CmdImgDiff(ICaptureFile *file, const char *path, const char *aPath, const ch
         "of 64",
         differing, 100.0 * (double)differing / (double)pixels, maxDelta, hamming);
   return 0;
+}
+
+// --------------------------------------------------------------------------- a cubemap, six ways
+
+//: `cubemap <rdc> <resId|name> [outDir=cross]` (REFERENCE §9): an environment map as six pictures
+//: plus the engine's own cruciform.
+//:
+//: Why a command of its own rather than a switch on `textures --save`: what makes a cubemap
+//: reviewable is the *layout* -- six faces named in the order a viewer expects, and the unfolded
+//: cross beside them -- and `TextureSliceMapping::cubeCruciform` is the engine drawing that cross.
+//: Reassembling one out of six bitmaps by hand is exactly where the rotations go wrong (the `+z`
+//: face is not the one a reader assumes), so the layout is the engine's and this command is the
+//: names, the summary and the options around it.
+int CmdCubemap(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
+               const char *outDir, const PictureOptions &opts)
+{
+  // D3D's own face order for a cube array -- +X, -X, +Y, -Y, +Z, -Z -- which is also the order a
+  // viewer reads a `px nx py ny pz nz` set in, so no mapping table is needed at either end.
+  static const char *const kFaces[] = {"px", "nx", "py", "ny", "pz", "nz"};
+
+  std::string name, why;
+  const ResourceId id = ResolveResourceArg(ctrl, what, name, why);
+  if(id == ResourceId::Null())
+    return Fail(1, "%s", why.c_str());
+
+  const rdcarray<TextureDescription> &texs = ctrl->GetTextures();
+  const TextureDescription *found = NULL;
+  for(size_t i = 0; i < texs.size() && found == NULL; i++)
+  {
+    if(texs[i].resourceId == id)
+      found = &texs[i];
+  }
+  if(found == NULL)
+    return Fail(1, "res%s is not a texture this engine can describe, so its faces cannot be named",
+                IdText(id).c_str());
+  // `cubemap` is the engine's own flag for it, and the slice count is the second half of the same
+  // fact: a cube is an array of six, and the cruciform below needs all six to be there.
+  if(!found->cubemap || found->arraysize < 6)
+    return Fail(
+        1,
+        "res%s is not a cubemap (%u slice(s)): `textures --save <dir> --slice N` writes one "
+        "subresource of it",
+        IdText(id).c_str(), (unsigned)found->arraysize);
+
+  const std::string dir = outDir == NULL ? std::string("cross") : std::string(outDir);
+  if(!MakeDir(dir))
+    return Fail(1, "cannot create the cubemap directory %s", dir.c_str());
+
+  int written = 0;
+  for(int face = 0; face < 6; face++)
+  {
+    PictureOptions faceOpts = opts;
+    faceOpts.m_Sub.slice =
+        (uint32_t)face;    // a face is one slice of the array, 0..5 in D3D's order
+    TextureSave save;
+    save.resourceId = id;
+    save.destType = FileType::PNG;
+    ApplySaveOptions(save, faceOpts);
+    const std::string out = (std::filesystem::path(dir) / Fmt("%s.png", kFaces[face])).string();
+    const ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
+    if(res.OK())
+    {
+      written++;
+      Log("cubemap: %s -> %s", kFaces[face], out.c_str());
+    }
+    else
+    {
+      fprintf(stderr, "  warning: could not save face %s of res%s: %s\n", kFaces[face],
+              IdText(id).c_str(), ResultText(res).c_str());
+    }
+  }
+
+  // The cruciform: one save with every slice and `cubeCruciform`, which is the engine laying the
+  // six faces out as the unfolded cross and filling the gaps with transparent black. The
+  // `--mip`/`--cast`/`--range` options still apply -- a low mip is what a reflection probe actually
+  // samples.
+  std::string cross;
+  {
+    TextureSave save;
+    save.resourceId = id;
+    save.destType = FileType::PNG;
+    ApplySaveOptions(save, opts);
+    save.slice.sliceIndex = -1;    // every slice: the six faces
+    save.slice.cubeCruciform = true;
+    cross = (std::filesystem::path(dir) / "cross.png").string();
+    const ResultDetails res = ctrl->SaveTexture(save, rdcstr(cross.c_str()));
+    if(res.OK())
+    {
+      Log("cubemap: cruciform -> %s", cross.c_str());
+    }
+    else
+    {
+      fprintf(stderr, "  warning: could not write the cruciform: %s\n", ResultText(res).c_str());
+      cross.clear();
+    }
+  }
+
+  PrintCaptureHeader(file, path);
+  Field("resource", IdText(id));
+  Field("name", name);
+  Field("directory", dir);
+  Field("faceSize", (long long)found->width);
+  Field("mips", (long long)found->mips);
+  Field("mip", (long long)opts.m_Sub.mip);
+  Field("format", std::string(found->format.Name().c_str()));
+  Field("faces", (long long)written);
+  Field("cross", cross, true);
+  g_Indent = 0;
+  if(g_bJson)
+    printf("}\n");
+
+  // Exit 1 on a partial set: five faces and no cross is a directory a caller would otherwise take
+  // for a finished job, and the warning above is the reason.
+  if(written < 6)
+    return Fail(1, "%d of 6 face(s) and %s could be written", written,
+                cross.empty() ? "no cross" : "a cross");
+  return cross.empty() ? 1 : 0;
 }

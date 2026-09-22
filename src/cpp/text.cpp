@@ -254,6 +254,125 @@ const rdcarray<ShaderStage> &ReportedStages()
   return gs_Stages;
 }
 
+// --------------------------------------------------------------------------- the picture vocabulary
+
+//: The `--overlay` vocabulary: RenderDoc's `DebugOverlay`, one spelling per member, in the engine's
+//: own order with `none` first (it is the default). One table read by `OverlayFromName`,
+//: `OverlayText` and `OverlayNames`, so the parse, the document and the error message cannot
+//: disagree about what exists.
+//:
+//: The names are the engine's own idea spelled the way a command line can type it: `backface` is
+//: `BackfaceCull`, `viewport` is `ViewportScissor`, and the four cost overlays keep the
+//: `...Pass`/`...Draw` distinction because it is the whole point of having both (one measures over
+//: a pass, one over a draw).
+static const struct
+{
+  const char *m_Name;
+  DebugOverlay m_Overlay;
+} kOverlays[] = {
+    {"none", DebugOverlay::NoOverlay},
+    {"drawcall", DebugOverlay::Drawcall},
+    {"wireframe", DebugOverlay::Wireframe},
+    {"depth", DebugOverlay::Depth},
+    {"stencil", DebugOverlay::Stencil},
+    {"backface", DebugOverlay::BackfaceCull},
+    {"viewport", DebugOverlay::ViewportScissor},
+    {"nan", DebugOverlay::NaN},
+    {"clipping", DebugOverlay::Clipping},
+    {"clear-before-pass", DebugOverlay::ClearBeforePass},
+    {"clear-before-draw", DebugOverlay::ClearBeforeDraw},
+    {"quad-pass", DebugOverlay::QuadOverdrawPass},
+    {"quad-draw", DebugOverlay::QuadOverdrawDraw},
+    {"triangle-size-pass", DebugOverlay::TriangleSizePass},
+    {"triangle-size-draw", DebugOverlay::TriangleSizeDraw},
+};
+
+bool OverlayFromName(std::string_view name, DebugOverlay &overlay)
+{
+  for(size_t i = 0; i < sizeof(kOverlays) / sizeof(kOverlays[0]); i++)
+  {
+    if(name == kOverlays[i].m_Name)
+    {
+      overlay = kOverlays[i].m_Overlay;
+      return true;
+    }
+  }
+  return false;
+}
+
+const char *OverlayText(DebugOverlay overlay)
+{
+  for(size_t i = 0; i < sizeof(kOverlays) / sizeof(kOverlays[0]); i++)
+  {
+    if(overlay == kOverlays[i].m_Overlay)
+      return kOverlays[i].m_Name;
+  }
+  return "none";
+}
+
+std::string OverlayNames(const char *separator)
+{
+  std::string text;
+  for(size_t i = 0; i < sizeof(kOverlays) / sizeof(kOverlays[0]); i++)
+  {
+    if(!text.empty())
+      text += separator;
+    text += kOverlays[i].m_Name;
+  }
+  return text;
+}
+
+//: The `--stage` vocabulary for `mesh`, in the engine's order. `AmpOut` is an alias of `TaskOut`
+//: (an older name for the same stage), so it is parsed and never printed: two spellings of one
+//: stage would otherwise look like two stages, and the document is the thing a reader compares
+//: between runs.
+static const struct
+{
+  const char *m_Name;
+  MeshDataStage m_Stage;
+} kMeshStages[] = {
+    {"vsin", MeshDataStage::VSIn},     {"vsout", MeshDataStage::VSOut},
+    {"gsout", MeshDataStage::GSOut},   {"taskout", MeshDataStage::TaskOut},
+    {"ampout", MeshDataStage::AmpOut}, {"meshout", MeshDataStage::MeshOut},
+};
+
+bool MeshStageFromName(std::string_view name, MeshDataStage &stage)
+{
+  for(size_t i = 0; i < sizeof(kMeshStages) / sizeof(kMeshStages[0]); i++)
+  {
+    if(name == kMeshStages[i].m_Name)
+    {
+      stage = kMeshStages[i].m_Stage;
+      return true;
+    }
+  }
+  return false;
+}
+
+const char *MeshStageText(MeshDataStage stage)
+{
+  // `AmpOut` and `TaskOut` are the same value, so the first match is the one printed -- and
+  // `taskout` is listed before `ampout` for exactly that reason.
+  for(size_t i = 0; i < sizeof(kMeshStages) / sizeof(kMeshStages[0]); i++)
+  {
+    if(stage == kMeshStages[i].m_Stage)
+      return kMeshStages[i].m_Name;
+  }
+  return "vsout";
+}
+
+std::string MeshStageNames(const char *separator)
+{
+  std::string text;
+  for(size_t i = 0; i < sizeof(kMeshStages) / sizeof(kMeshStages[0]); i++)
+  {
+    if(!text.empty())
+      text += separator;
+    text += kMeshStages[i].m_Name;
+  }
+  return text;
+}
+
 // --------------------------------------------------------------------------- renderdoc.dll loading
 //: a matrix by eye without drowning in noise.
 std::string FormatValue(const ShaderVariable &v, int depth)

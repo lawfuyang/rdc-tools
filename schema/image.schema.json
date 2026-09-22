@@ -1,9 +1,9 @@
 {
   "title": "image",
-  "description": "One render target saved to a file, and whether the write succeeded.",
+  "description": "One render target saved to a file, and whether the write succeeded: the subresource, the component type it was read as, and the display overlay drawn into it.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "resource",
-               "width", "height", "file", "written"],
+               "width", "height", "file", "overlay", "mip", "slice", "sample", "cast", "written"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -16,6 +16,11 @@
     "width": {"type": "integer"},
     "height": {"type": "integer"},
     "file": {"type": "string"},
+    "overlay": {"type": "string"},
+    "mip": {"type": "integer"},
+    "slice": {"type": "integer"},
+    "sample": {"type": "integer"},
+    "cast": {"type": "string"},
     "written": {"type": "integer"}
   },
   "additionalProperties": false

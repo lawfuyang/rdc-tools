@@ -698,6 +698,160 @@ int CmdSelftest()
             "the selftest left its scratch folder behind");
   }
 
+  // ---------------------------------- the picture and geometry vocabularies (text.cpp, commands_*.cpp)
+  {
+    // Every name round-trips: one that parses into an overlay and prints as another is a document that lies
+    // about the picture beside it, which is the kind of wrong answer reading the code does not reveal.
+    bool bRoundTrip = true;
+    const char *const kOverlayNames[] = {
+        "none",      "drawcall",           "wireframe",         "depth",
+        "stencil",   "backface",           "viewport",          "nan",
+        "clipping",  "clear-before-pass",  "clear-before-draw", "quad-pass",
+        "quad-draw", "triangle-size-pass", "triangle-size-draw"};
+    for(size_t i = 0; i < sizeof(kOverlayNames) / sizeof(kOverlayNames[0]); i++)
+    {
+      DebugOverlay overlay = DebugOverlay::NoOverlay;
+      bRoundTrip = bRoundTrip && OverlayFromName(kOverlayNames[i], overlay) &&
+                   strcmp(OverlayText(overlay), kOverlayNames[i]) == 0;
+    }
+    t.Check(bRoundTrip, "overlay-names-round-trip", "an overlay name did not parse back to itself");
+    DebugOverlay ignored = DebugOverlay::NoOverlay;
+    t.Check(!OverlayFromName("wirefrane", ignored), "overlay-refuses-a-typo",
+            "a misspelled overlay was accepted");
+    // The engine's own list, so an upgrade that adds an overlay is where this check fails rather
+    // than the overlay quietly not existing: RenderDoc 1.46 has fifteen, `none` included.
+    t.Check(OverlayNames(",") ==
+                std::string(
+                    "none,drawcall,wireframe,depth,stencil,backface,viewport,nan,clipping,"
+                    "clear-before-pass,clear-before-draw,quad-pass,quad-draw,triangle-size-pass,"
+                    "triangle-size-draw"),
+            "overlay-list-is-the-engines", "the overlay list is not the fifteen the engine has");
+
+    MeshDataStage stage = MeshDataStage::VSOut;
+    t.Check(MeshStageFromName("gsout", stage) && stage == MeshDataStage::GSOut &&
+                MeshStageFromName("vsin", stage) && stage == MeshDataStage::VSIn,
+            "mesh-stages-parse", "a mesh stage name did not parse");
+    // The engine aliases `AmpOut` to `TaskOut`: one stage, two spellings, and the document prints
+    // the one a comparison between two runs can match.
+    t.Check(MeshStageFromName("ampout", stage) && stage == MeshDataStage::TaskOut &&
+                strcmp(MeshStageText(stage), "taskout") == 0,
+            "mesh-stage-alias-prints-one-name", "AmpOut and TaskOut are not one stage here");
+    t.Check(!MeshStageFromName("vs", stage), "mesh-stages-refuse-a-shader-stage",
+            "a shader stage name was accepted as a mesh stage");
+
+    // The primitive count, which no buffer shows and every reader would take as arithmetic: strips
+    // lose their first two, a loop has one more segment than vertices, and the two adjacency lists
+    // are what they are because their vertices outnumber their primitives.
+    t.Check(PrimitiveCount(Topology::TriangleList, 9) == 3, "primitives-triangle-list",
+            "nine vertices in a triangle list are not three triangles");
+    t.Check(PrimitiveCount(Topology::TriangleStrip, 5) == 3 &&
+                PrimitiveCount(Topology::TriangleFan, 3) == 1,
+            "primitives-strips", "a strip or fan lost its off-by-two");
+    t.Check(PrimitiveCount(Topology::PointList, 7) == 7 && PrimitiveCount(Topology::LineList, 7) == 3,
+            "primitives-points-and-lines", "a point or line list is not the count it is");
+    t.Check(PrimitiveCount(Topology::LineLoop, 4) == 4 &&
+                PrimitiveCount(Topology::TriangleList_Adj, 12) == 2,
+            "primitives-line-loop-and-adjacency", "a loop or an adjacency list is off");
+    // A patch list's control-point count is in the topology's own value: 4CPs means one patch per four.
+    t.Check(PrimitiveCount(Topology::PatchList_4CPs, 32) == 8, "primitives-patch-list",
+            "a patch list is not divided by its control points");
+    // Not derived, and that is the answer: a bad zero here would read as "nothing was drawn".
+    t.Check(PrimitiveCount(Topology::TriangleStrip_Adj, 12) == 0,
+            "primitives-strip-with-adjacency-is-not-derived",
+            "a strip with adjacency claimed a primitive count from its vertex count");
+    t.Check(PrimitiveCount(Topology::Unknown, 12) == 0 &&
+                PrimitiveCount(Topology::TriangleList, 0) == 0,
+            "primitives-zero-inputs", "an unknown topology or an empty draw produced a count");
+
+    // The position bounds: `x y z` of the first three components, whatever else the stride carries,
+    // and a `NaN` dropped rather than compared -- one of them would poison every later min and max.
+    {
+      const float vertices[] = {
+          0.0f,  1.0f, 2.0f,
+          9.0f,    // x y z, then a fourth component the bounds ignore
+          -3.0f, 4.0f, std::numeric_limits<float>::quiet_NaN(),
+          9.0f,  2.0f, -5.0f,
+          0.5f,  9.0f,
+      };
+      bytebuf data;
+      data.resize(sizeof(vertices));
+      memcpy(data.data(), vertices, sizeof(vertices));
+      const Bounds3 bounds = VertexBounds(data, 4u * sizeof(float), 3);
+      // The middle vertex is dropped *whole* (-3 never reaches the box): a vertex whose three
+      // components are not all finite is not a position this can compare, and taking the two that
+      // happen to be finite would build a box out of vertices the shader never emitted.
+      t.Check(bounds.m_bAny && bounds.m_Min[0] == 0.0f && bounds.m_Max[0] == 2.0f &&
+                  bounds.m_Min[1] == -5.0f && bounds.m_Max[1] == 1.0f && bounds.m_Min[2] == 0.5f &&
+                  bounds.m_Max[2] == 2.0f,
+              "vertex-bounds-min-and-max", "the bounds are not the extremes of the finite vertices");
+      const float poison[] = {std::numeric_limits<float>::quiet_NaN(), 1.0f, 2.0f, 3.0f};
+      bytebuf bad;
+      bad.resize(sizeof(poison));
+      memcpy(bad.data(), poison, sizeof(poison));
+      t.Check(!VertexBounds(bad, 4u * sizeof(float), 1).m_bAny, "vertex-bounds-skips-a-nan",
+              "a NaN vertex was counted as a position");
+    }
+
+    // `--obj`: the format's own rules are one-based indices and a `v` line per vertex, and the
+    // faces are spelled out only for the topology whose vertex order *is* the primitive's.
+    {
+      const float tri[] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+      bytebuf data;
+      data.resize(sizeof(tri));
+      memcpy(data.data(), tri, sizeof(tri));
+      const std::string triPath = DefaultLogStem() + ".selftest.obj";
+      std::string why;
+      const long long written = WriteObj(triPath, data, 3u * sizeof(float), 3,
+                                         std::vector<uint32_t>(), Topology::TriangleList, why);
+      std::string text;
+      const bool bRead = ReadWholeFile(triPath, text);
+      t.Check(written == 3 && bRead && text.find("v 0 0 0\n") != std::string::npos &&
+                  text.find("f 1 2 3\n") != std::string::npos,
+              "obj-writes-vertices-and-a-face", "the OBJ has no `v` line or no face");
+      const std::string stripPath = DefaultLogStem() + ".selftest-strip.obj";
+      WriteObj(stripPath, data, 3u * sizeof(float), 3, std::vector<uint32_t>(),
+               Topology::TriangleStrip, why);
+      std::string stripText;
+      t.Check(ReadWholeFile(stripPath, stripText) &&
+                  stripText.find("no faces:") != std::string::npos &&
+                  stripText.find("\nf ") == std::string::npos,
+              "obj-says-why-there-are-no-faces",
+              "a strip's OBJ has faces or does not say why it has none");
+      RemoveQuiet(triPath);
+      RemoveQuiet(stripPath);
+    }
+
+    // The format audit's two rules, on formats built here: what it is made of, and whether a
+    // picture of it is possible without being told how to read the bits.
+    {
+      ResourceFormat unorm;
+      unorm.type = ResourceFormatType::Regular;
+      unorm.compType = CompType::UNorm;
+      unorm.compCount = 4;
+      unorm.compByteWidth = 1;
+      bool bNeedsCast = false;
+      std::string why;
+      t.Check(FormatPicture(unorm, bNeedsCast, why) && !bNeedsCast, "format-picture-plain-unorm",
+              "a plain UNORM format was not picture-able");
+      t.Check(FormatShape(unorm) == std::string("4 x 8-bit unorm"), "format-shape-unorm",
+              "the shape of a 4x8-bit UNORM format is not what it is");
+
+      ResourceFormat typeless = unorm;
+      typeless.compType = CompType::Typeless;
+      t.Check(!FormatPicture(typeless, bNeedsCast, why) && bNeedsCast,
+              "format-picture-typeless-needs-cast",
+              "a typeless format was called picture-able without a cast");
+
+      ResourceFormat nothing;
+      nothing.type = ResourceFormatType::Regular;
+      nothing.compType = CompType::UNorm;
+      nothing.compCount = 0;
+      nothing.compByteWidth = 0;
+      t.Check(!FormatPicture(nothing, bNeedsCast, why) && !bNeedsCast, "format-picture-no-layout",
+              "a format with no components was called picture-able");
+    }
+  }
+
   // -------------------------------------------------------- the version guard (capture.cpp)
   {
     // Two pure functions over strings and one that reads 32 bytes of a file, so all of it is

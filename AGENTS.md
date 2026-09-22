@@ -362,6 +362,12 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
 
 - Docs: `README.md` (setup, quick start, the playbook for an agent), `REFERENCE.md` (internals, the command
   reference, examples, pitfalls, the driver), `ROADMAP.md` (unimplemented work).
+- **The scope is one machine, and the roadmap tracks only that** (2026-09-22): a `.rdc` on this machine, the
+  offline Python, the driver exe, and the `renderdoc.dll` installed here. Work that would need a replay server,
+  a capture from another API, a DLL inside the captured application, or a program of our own to feed the
+  shaders is out of scope; `ROADMAP.md` names each of those with its reason, and none of them comes back as an
+  item until the thing it needs is here. When proposing work, prefer the item that *extracts* an answer the
+  engine already has, or decodes a payload the offline parser's siblings already decode.
 - Never commit `renderdoc-src/` — upstream code fetched on demand, gitignored (`src/py/rdc_renderdoc_src.py`).
 - Never run `git commit` or `git push` unless explicitly asked to.
 - **An engine call's cost is measured, not assumed.** `$RDC_PROFILE=1` prints a per-call-site breakdown at the

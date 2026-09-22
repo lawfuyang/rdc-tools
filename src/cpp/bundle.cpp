@@ -784,12 +784,13 @@ void ComputeSweepBounds(IReplayController *ctrl, DumpOptions &opts, int &until, 
 // Reproducing the serial history per worker costs the whole prefix -- the reported state is a
 // function of every replay pass before it, so the last worker would pay the entire range. And
 // splitting at command-list boundaries, where a cold jump lands on a list's own first bindings,
-// needs a mapping from the engine's event ids to the file's chunk stream, which is the `Upstream`
-// item in ROADMAP §2. Two incidental findings from the attempt are in REFERENCE §9: a spawned child
-// must be given a stdin it can use (an inherited slot it cannot takes its whole stdio down -- three
-// "successful" workers once left three empty logs), and simultaneous replay-device creations can
-// leave one hung at zero CPU with no error, which is why any such design needs a deadline and a
-// serial fallback rather than an unbounded wait.
+// needs a mapping from the engine's event ids to the file's chunk stream -- two numberings that
+// are independent by design (the engine numbers what a command list recorded, the file numbers
+// chunks), and nothing in ROADMAP.md proposes to close that. Two incidental findings from the
+// attempt are in REFERENCE §9: a spawned child must be given a stdin it can use (an inherited slot
+// it cannot takes its whole stdio down -- three "successful" workers once left three empty logs),
+// and simultaneous replay-device creations can leave one hung at zero CPU with no error, which is
+// why any such design needs a deadline and a serial fallback rather than an unbounded wait.
 
 //: The bundle producer (REFERENCE §9): one replay session, everything the engine alone can answer
 //: written to disk, so the offline half can analyse a frame without a device. It is also the reason

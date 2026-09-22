@@ -290,7 +290,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
-| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §1.5) | `dump-shaders 'capture.rdc' .\shaders` |
+| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or any tool of your own that can take a shader | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
 
 #### The report, the A/B and the corpus
@@ -578,8 +578,9 @@ self-A/B in that same run: `replaydiff` of one bundle against *itself* must find
 7. Then the report *(REFERENCE §4.11)*, or the recipe that matches the question — A, B, D or H.
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
-with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §1.5):
+with *different* inputs. Replay can only re-run the captured commands with the captured resources — there is no
+`SetBufferData`, and `ReplaceResource` needs an existing replacement — so that question needs a program of your
+own to run the shader in. This tool's part is to hand you everything the harness would need:
 
 ```powershell
 python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
@@ -587,8 +588,10 @@ python src\py\rdc_analysis.py rootsig 'capture.rdc'                  # the exact
 .\bin\replay_dump.exe cb 'capture.rdc' <eid> ps 0           # realistic constants to start from
 ```
 
-Feed those three into the harness with hand-built constants, and compare its result against what replay reports
-for the same draw (`cb`, `mesh`, `image`) — the capture is the reference implementation.
+Feed those three into a harness of your own with hand-built constants, and compare its result against what
+replay reports for the same draw (`cb`, `mesh`, `image`) — the capture is the reference implementation. The
+harness itself is deliberately not part of this repository: it is a second program to write and maintain rather
+than a `.rdc` and a script, which is the scope `ROADMAP.md` states.
 
 **L. "Write the answer."** An agent's report should look like the tools' own output in one respect: evidence or
 silence.
@@ -698,10 +701,13 @@ built on.
   reference, §5 worked examples, §6 verified payload facts, §7 how to add a command, §8 pitfalls and known
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
 * **`ROADMAP.md`** — what is not implemented yet, in priority order, each item with its *P* label and its own
-  effort figure: the work beyond the local desktop (§1, with the standalone D3D12 harness as §1.5) and the
-  suggested order (§2), which places every item in one phased list. Landed items are *removed* rather than
-  ticked off, so these numbers move — that is the file's own rule, and its cross-references are updated in
-  the same change.
+  effort figure: the extracts the engine already answers (§1), the analysis built on them (§2), two probes
+  whose answer is not yet known (§3), and the suggested order (§4) that places every item in one phased list.
+  Its scope is **one machine** — a `.rdc` here, this repository's Python, the driver exe — and work needing
+  anything else (a replay server, another API's capture, a DLL inside the captured application, a program of
+  our own) is named in "what is deliberately *not* on this list" with the reason it left. Landed items are
+  *removed* rather than ticked off, so these numbers move — that is the file's own rule, and its
+  cross-references are updated in the same change.
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.
 * **`renderdoc-src/`** — fetched into the root folder on first use (§1.1), and also where this project keeps

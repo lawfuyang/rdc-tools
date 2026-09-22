@@ -12,9 +12,9 @@ def report_caveats() -> List[str]:
     than one that never mentioned it."""
     return [
         'A pass here is a run of consecutive events with the same call kind, render targets and depth '
-        'target -- not a named pass. Call kinds (draw/copy/clear/marker), per-event triangle and thread '
-        'counts, and marker names are not in a bundle at all: the replay API exposes no action list '
-        '(REFERENCE §9).',
+        'target -- not a named pass. What a draw or a dispatch *asked for* is not in a bundle either: no '
+        'index or instance count and no thread count, because the engine\'s action list -- which has them, '
+        'and which `draws` reads -- is not part of what `dump` writes (ROADMAP §1).',
         'A compute pass is a run of dispatches with the same pipeline and shaders, and its targets and '
         'depth are given as not applicable: a dispatch does not set the output-merge state, so what the '
         'engine reports there is leftover from an earlier call. What a dispatch *does* write (its UAVs) '
@@ -47,8 +47,8 @@ def report_caveats() -> List[str]:
         'rows, and the rules that read them are then reported as not looked at rather than as clean.',
         'The notable lists rank what a bundle can measure -- calls, target bytes, resource churn, and counter '
         'cost when the bundle was written with --with-counters -- and their own table says so where an input is '
-        'not available: a draw\'s vertex count is the first input of the rule and no bundle has it, because the '
-        'replay API exposes no action list (REFERENCE §9). A recommendation is a lead, not a verdict: it names '
+        'not available: a draw\'s vertex count is the first input of the rule and no bundle has it, because '
+        '`dump` writes no action list (ROADMAP §1). A recommendation is a lead, not a verdict: it names '
         'the first instance of something, with the command that shows it, and the finding behind it is still '
         'unproven.',
         'Missing reflection is not reported as missing: a shader the engine has no reflection for is simply a '
@@ -57,8 +57,8 @@ def report_caveats() -> List[str]:
         'debugging is a capture property, not a bundle one: nothing here can say what a shader computed from '
         'its inputs, only what it was bound to.',
         'The frame was replayed on this machine\'s GPU: the capture properties in the bundle say whether the '
-        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §2, '
-        'remote replay). A pass is also not a *dispatch* of work in the engine\'s own terms -- the report groups '
+        'replay was local and which vendor it was, and device-specific behaviour is out of reach -- the '
+        'capture\'s own device is not this one. A pass is also not a *dispatch* of work in the engine\'s own terms -- the report groups '
         'events, and the engine\'s own pass structure is only as close as its markers are.',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
         'bound to eight slots has eight rows at one eid), and the list stops at the capture -- a read by the '

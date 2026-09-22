@@ -201,13 +201,16 @@ def align_passes(a: Sequence[MarkerPass], b: Sequence[MarkerPass]) -> List[PassR
     return rows
 
 
-def _pair_by(a: Sequence[MarkerPass], b: Sequence[MarkerPass], paired: Dict[int, int],
+def _pair_by(a: Sequence[object], b: Sequence[object], paired: Dict[int, int],
              notes: Dict[int, str], used_b: List[bool], keys_a: Dict[int, str], keys_b: Dict[int, str],
              explain: str) -> None:
     """Pair what is still unpaired by equal keys, in occurrence order -- '' keys pair with nothing.
 
     `used_b` is mutated (an index is taken the moment it is paired) and so are `paired`/`notes`; `a` and
-    `b` are only read, so a caller can run a second rule over what the first did not claim.
+    `b` are only read, so a caller can run a second rule over what the first did not claim. Only their
+    lengths are read, which is why the sequences are `object` rather than `MarkerPass`: `rdc_filediff`
+    aligns two captures' *paths* with the same two rules, and the alignment is the thing that must not
+    exist twice.
     """
     queues: Dict[str, List[int]] = {}
     for index in range(len(a)):

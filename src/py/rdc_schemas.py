@@ -194,13 +194,18 @@ REPORT_SCHEMA: Dict[str, Any] = _obj({
         'means': _text(),
         'members': _arr(_obj({'detector': _text(), 'why': _text()})),
     })),
+    # `cause` and `verdict` are optional, and only a finding the corpus's `known` list explains has them:
+    # the schema has to allow both, because "no cause established" is a state a finding is in rather than a
+    # member with a placeholder value in it (`rdc_report.apply_known`).
     'flags': _arr(_obj({
         'detector': _text(),
         'what': _text(),
         'evidence': _arr(_text()),
         'certainty': _text(),
         'unproven': {'type': 'boolean'},
-    })),
+        'cause': _text(),
+        'verdict': _text(),
+    }, required=['detector', 'what', 'evidence', 'certainty', 'unproven'])),
     'detectors': _arr(_obj({'detector': _text(), 'ran': {'type': 'boolean'}, 'why': _text()})),
     'caveats': _arr(_text()),
     'appendix': _arr(_text()),

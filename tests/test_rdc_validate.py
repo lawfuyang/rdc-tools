@@ -266,7 +266,7 @@ class TestValidateCommand(unittest.TestCase):
 
     def test_a_document_with_a_repeated_key_is_refused_rather_than_read(self):
         """The one check a schema cannot make: a plain parse keeps the *last* value of a repeated key and
-        says nothing, which is how a dropped vertex-shader block went unnoticed (ROADMAP §5)."""
+        says nothing, which is how a dropped vertex-shader block went unnoticed (REFERENCE §4.12)."""
         self.write('manifest.json', minimal(self.schemas()['manifest']))
         with open(os.path.join(self.tmp, 'events.json'), 'w', encoding='utf-8') as fh:
             fh.write('{"capture": "c", "events": [], "vs": [], "vs": []}')

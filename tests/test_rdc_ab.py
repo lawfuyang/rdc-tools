@@ -734,7 +734,7 @@ class TestReplayDiffCommand(BundleCase):
         self.assertIn('## What this cannot say', markdown)
 
     def test_the_json_twin_is_schema_valid(self):
-        """The A/B's own schema against the document it describes (the acceptance gate of ROADMAP §5).
+        """The A/B's own schema against the document it describes (the acceptance gate, REFERENCE §4.12).
 
         Like the report's, the schema lives in `rdc_schemas.py` rather than in `schema/`: that folder is
         what the *driver* publishes, and this document is the offline tool's. The schema is exhaustive and

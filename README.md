@@ -194,7 +194,8 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | Which draw is the one I care about? | `draws`, then `find` |
 | What pipeline state, constant buffers and vertex streams does draw N use? | `draws` (the file's account), `state` (the engine's) |
 | Who writes this resource, and who reads it? | `deps`; `usage` for the engine's side |
-| What does the frame's memory add up to, and what could share it? | `memory` |
+| What does the frame's memory add up to, and what could share it? | `memory`, `vram` (REFERENCE §4.15, §4.20) |
+| Is what the root signatures declare what the stream binds? | `rootsig-check` (REFERENCE §4.19) |
 | What is `res342`, and which buffers/textures exist at all? | `resources` |
 | What does the descriptor heap hold that this binding points into? | `descriptors` |
 | What does this root signature declare? | `rootsig` |
@@ -215,7 +216,7 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | Where does the time and the bandwidth go? | `counters`, `counters --per-pass`, `crosscheck` |
 | What if the shader did something else? | `patch <eid> <stage> --from <file>` |
 | What does this whole frame do, pass by pass, and what is off about it? | `report` — after a `dump` (REFERENCE §4.11) |
-| How do two captures differ (mobile vs desktop, before vs after)? | `passdiff`, then `replaydiff` (REFERENCE §4.16) |
+| How do two captures differ (mobile vs desktop, before vs after)? | `diff` (the streams' own record), `passdiff`, then `replaydiff` (REFERENCE §4.18, §4.16) |
 | Do the documents still match their contract? | `validate <bundle> schema`, `schema --check` |
 | How do I run any of this headless (no GPU, no captures)? | `selftest`, `goldens --check`, `bundle-verify`, `schema --check` |
 
@@ -267,6 +268,8 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | `rootsig` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter's type, register, space and descriptor ranges | `rootsig 'capture.rdc' 8` |
 | `deps` | who writes what and who reads it, from the stream itself: per resource, writes and reads with their first and last event, with `read-before-write` and `write-never-read` flagged; `table` (default), `dot` or `mermaid` | `deps 'capture.rdc' 40 mermaid` |
 | `memory` | what the frame's memory adds up to: placement and kind with byte totals, capture-relative lifetimes, the aliasing barriers memory is handed over with, heaps ranked by size, never-read bytes | `memory 'capture.rdc' 40` |
+| `vram` | the same ledger as a *budget*: the resources the frame references by role (render targets, textures, buffers, acceleration structures), the pass with the largest peak live inside it, and the what-if arithmetic — this frame at half resolution, or with the resources a name filter matches dropped | `vram 'capture.rdc' --drop GBuffer` |
+| `rootsig-check` | what the root signatures declare against what the stream binds and the heaps hold: an index the signature does not have, a table slot the frame never wrote, a slot holding another kind than the range declares, a resource the capture never creates — and, with a bundle, the same facts against the engine's own rows (exit 1 on a certain disagreement) | `rootsig-check 'capture.rdc' bundle` |
 
 #### The frame as the file sees it
 
@@ -281,18 +284,19 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
-| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §6.5) | `dump-shaders 'capture.rdc' .\shaders` |
+| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §4.5) | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
 
 #### The report, the A/B and the corpus
 
 | Command | What it answers | Example |
 |---|---|---|
-| `report` | the frame report from a bundle: frame at a glance, the engine's vocabulary, the pipeline map, pass by pass, notable passes and resources, red flags with their evidence, ranked recommendations, and its own caveats | `report 'capture.rdc' bundle` → `bundle\report.md` + `.json` |
+| `report` | the frame report from a bundle: frame at a glance, the engine's vocabulary, the pipeline map, pass by pass, notable passes and resources, red flags with their evidence, ranked recommendations, and its own caveats. A finding whose cause the corpus knows (`goldens/captures.json`'s `known`, matched by the capture's SHA-256) is printed **proven** with that cause; every other one is **unproven** (REFERENCE §4.11, §4.17) | `report 'capture.rdc' bundle` → `bundle\report.md` + `.json` |
+| `diff` | the two *streams'* own calls, compared: the marker path, the call's arguments, the state chunks that changed before it, and every binding in force — by name, and by what each slot is, so a re-numbered root parameter is not a difference (REFERENCE §4.18) | `diff ab\mobile.rdc ab\desktop.rdc --all` |
 | `passdiff` | the two captures' marker trees side by side, aligned by path — the free first half of "why do these two differ" | `passdiff ab\mobile.rdc ab\desktop.rdc --all` |
 | `replaydiff` | the A/B of two bundles: structure, state rows, every named constant member by member, each shader's hash, and with `--with-images` the renders, per pixel up to `--image-detail` | `replaydiff ab\mobile ab\desktop --with-images --out ab\diff` |
 | `validate` | documents against the schemas the driver publishes (plus the report's own): a whole bundle, or one saved `--json` file with the `kind` it is | `validate bundle schema`, `validate t.json schema textures` |
-| `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts, the A/B documents and the **driver's own text** for that capture byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare) | `goldens --check`, `goldens --write` |
+| `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts, the A/B documents and the **driver's own text** for that capture byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare). It also carries what is *known* about each capture — notes, and the **causes** the report matches findings against (REFERENCE §4.17) | `goldens --check`, `goldens --write` |
 
 #### Upkeep
 
@@ -431,28 +435,33 @@ history says the shader itself is responsible, patch it *(REFERENCE §9)* — fo
 and re-render the draw to see what changes. That experiment is often faster than reasoning about the
 disassembly.
 
-**C. "Why do mobile and PC look different?"** The project's original question, and the reason `passdiff` and
-`replaydiff` exist (REFERENCE §4.16).
+**C. "Why do mobile and PC look different?"** The project's original question, and the reason `diff`,
+`passdiff` and `replaydiff` exist (REFERENCE §4.16, §4.18).
 
 ```powershell
+python src\py\rdc_analysis.py diff     mobile.rdc desktop.rdc          # the two streams' own calls, no device
 python src\py\rdc_analysis.py passdiff mobile.rdc desktop.rdc          # the two files' pass lists, no device
 .\bin\replay_dump.exe dump mobile.rdc  ab\mobile  --with-images      # the engine's answers for each side
 .\bin\replay_dump.exe dump desktop.rdc ab\desktop --with-images      #   (one replay at a time, REFERENCE §9)
 python src\py\rdc_analysis.py replaydiff ab\mobile ab\desktop --out ab\diff --with-images
 ```
 
-`passdiff` first, because it is free and it answers "is the same pass even there": the marker trees are
-aligned by **path**, then by the innermost name (a path carries dynamic text — `CullLights 32x20x8` against
-`22x14x8`), with the passes only one side has listed. `replaydiff` then compares what the engine saw for the
-passes that matched: their structure, the state rows at each pass's first event, every named constant value
-member by member, each shader's **hash** (so "a different shader" is a fact), and — with `--with-images` —
-each pass's readback, by bytes first and pixel by pixel up to `--image-detail`, with a heat map per compared
-pair. It writes `replaydiff.md` and `replaydiff.json` and prints a summary. Then narrow by name rather than
-by index: the named cbuffer values that moved (`watch <name>` *(ROADMAP §1)* turns that into a table over the
-whole frame), and the tables in `engine-schemas/` *(REFERENCE §4.11)* to say which *concept* the differing
-block is (`IndirectLightingCache`, `Material`, …). Where the two engines' reflections disagree on names
-entirely, the offline `resources` and `rootsig` views are the fallback: they compare what the *file* recorded.
-State the GPU caveat (§2.6) in the answer: both frames were replayed on *this* machine's GPU.
+The two offline steps come first because they are free. `diff` reads what the *stream* recorded: the same
+call under the same marker path, and whether its arguments, the state chunks that changed before it, or any
+binding in force differ — by name, and by what each slot *is* (`cbv b0 s0`), so a root parameter renumbered
+by a different signature is not reported as a difference. `passdiff` then answers "is the same pass even
+there": the marker trees are aligned by **path**, then by the innermost name (a path carries dynamic text —
+`CullLights 32x20x8` against `22x14x8`), with the passes only one side has listed. `replaydiff` then compares
+what the engine saw for the passes that matched: their structure, the state rows at each pass's first event,
+every named constant value member by member, each shader's **hash** (so "a different shader" is a fact), and —
+with `--with-images` — each pass's readback, by bytes first and pixel by pixel up to `--image-detail`, with a
+heat map per compared pair. It writes `replaydiff.md` and `replaydiff.json` and prints a summary. Then narrow
+by name rather than by index: the named cbuffer values that moved (`watch <name>` *(ROADMAP §1)* turns that
+into a table over the whole frame), and the tables in `engine-schemas/` *(REFERENCE §4.11)* to say which
+*concept* the differing block is (`IndirectLightingCache`, `Material`, …). Where the two engines' reflections
+disagree on names entirely, the offline `resources`, `rootsig` and `rootsig-check` views are the fallback:
+they compare what the *file* recorded. State the GPU caveat (§2.6) in the answer: both frames were replayed on
+*this* machine's GPU.
 
 **D. "Is this texture the problem?"**
 
@@ -506,7 +515,7 @@ a puzzle to keep grinding at.
 
 The offline half supplies the parts the GPU cannot: `deps` *(REFERENCE §4.15)* for writes nobody reads and reads nobody
 wrote, `memory` *(REFERENCE §4.15)* for "these N MB could be shared" and for which resources nothing reads, and the
-VRAM budget *(ROADMAP §4)* for "what if this were half resolution". Counters are hardware and driver dependent — if they are unavailable, the honest
+VRAM budget (`vram`, REFERENCE §4.20) for "what if this were half resolution". Counters are hardware and driver dependent — if they are unavailable, the honest
 answer is "not measurable here", not zero.
 
 **H. "This looks uninitialised, or garbage."**
@@ -556,7 +565,7 @@ self-A/B in that same run: `replaydiff` of one bundle against *itself* must find
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
 with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §6.5):
+this is the one case for the standalone harness (ROADMAP §4.5):
 
 ```powershell
 python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers

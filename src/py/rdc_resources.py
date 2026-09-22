@@ -108,6 +108,39 @@ def _portable_handle(blob: Buffer, offset: int) -> Optional[Tuple[int, int]]:
         return None
     return u64(blob, offset), u32(blob, offset + 8)
 
+def apply_descriptor_chunk(name: str, blob: Buffer,
+                           heaps: Dict[int, Dict[int, DescriptorInfo]]) -> bool:
+    """Apply one descriptor write or copy to `heaps` in place; True when `name` is one of them.
+
+    Split out of `parse_descriptor_heaps` because the *order* matters and not every caller wants the
+    whole stream: a walk that resolves a binding has to know what a slot holds *at that moment*
+    (`rdc_sigcheck`), while `parse_descriptor_heaps` hands back the state at the end of the frame.
+    One implementation of the payload layouts, so the two cannot drift.
+    """
+    kind = DESCRIPTOR_KINDS.get(name)
+    if kind is not None:
+        if len(blob) < _DESCRIPTOR_WRITE_MIN:
+            return True
+        dst = _portable_handle(blob, len(blob) - 12)
+        if dst is None:
+            return True
+        resource = 0 if kind == 'sampler' else u64(blob, 16)
+        heaps.setdefault(dst[0], {})[dst[1]] = DescriptorInfo(kind=kind, resource=resource)
+        return True
+    if name in DESCRIPTOR_COPY_CHUNKS:
+        count = u64(blob, 0) if len(blob) >= 8 else 0
+        for i in range(count):
+            entry = 8 + i * _DESCRIPTOR_COPY_SIZE
+            dst = _portable_handle(blob, entry + 4)
+            src = _portable_handle(blob, entry + 16)
+            if dst is None or src is None:
+                break
+            info = heaps.get(src[0], {}).get(src[1])
+            if info is not None:
+                heaps.setdefault(dst[0], {})[dst[1]] = info
+        return True
+    return False
+
 @rdc_profile.timed('descriptor heaps')
 def parse_descriptor_heaps(stream: Buffer, names: Optional[Dict[int, str]] = None
                            ) -> Dict[int, Dict[int, DescriptorInfo]]:
@@ -123,28 +156,8 @@ def parse_descriptor_heaps(stream: Buffer, names: Optional[Dict[int, str]] = Non
     heaps: Dict[int, Dict[int, DescriptorInfo]] = {}
     for ch in iter_chunks(stream):
         nm = names.get(ch['id'], '')
-        kind = DESCRIPTOR_KINDS.get(nm)
-        if kind is not None:
-            blob = chunk_payload(stream, ch)
-            if len(blob) < _DESCRIPTOR_WRITE_MIN:
-                continue
-            dst = _portable_handle(blob, len(blob) - 12)
-            if dst is None:
-                continue
-            resource = 0 if kind == 'sampler' else u64(blob, 16)
-            heaps.setdefault(dst[0], {})[dst[1]] = DescriptorInfo(kind=kind, resource=resource)
-        elif nm in DESCRIPTOR_COPY_CHUNKS:
-            blob = chunk_payload(stream, ch)
-            count = u64(blob, 0) if len(blob) >= 8 else 0
-            for i in range(count):
-                entry = 8 + i * _DESCRIPTOR_COPY_SIZE
-                dst = _portable_handle(blob, entry + 4)
-                src = _portable_handle(blob, entry + 16)
-                if dst is None or src is None:
-                    break
-                info = heaps.get(src[0], {}).get(src[1])
-                if info is not None:
-                    heaps.setdefault(dst[0], {})[dst[1]] = info
+        if nm in DESCRIPTOR_KINDS or nm in DESCRIPTOR_COPY_CHUNKS:
+            apply_descriptor_chunk(nm, chunk_payload(stream, ch), heaps)
     return heaps
 
 def _descriptor_label(heaps: Dict[int, Dict[int, DescriptorInfo]],
@@ -374,33 +387,42 @@ def _bind_name(binds: Dict[str, Dict[Tuple[str, int, int], str]], param: RootPar
     names = {m.get(key, '') for m in binds.values()} - {''}
     return names.pop() if len(names) == 1 else ''
 
+def _root_param_what(param: RootParam) -> str:
+    """What a parameter *is*, without its index: `cbv b1 s0`, `table t0 n5 s0`, `32bit b0 s0 n4`.
+
+    A table lists its ranges as HLSL would name them (`table t0 n5 s0`; `u0 n3 s0` for the UAV range of
+    the same table), where the letter is the register kind and `n` the descriptor count; a root
+    descriptor and root constants get their register and space.
+
+    Split out of `_root_param_label` because the index is the one part of a label two captures do not
+    share: `rdc_filediff` keys a binding by what it *is*, so a slot that moved from `rp10` to `rp5`
+    between two builds of the same scene still compares as the same binding, while a slot whose kind,
+    register or space changed does not.
+    """
+    if param['kind'] == 'table':
+        return 'table ' + ', '.join(
+            '%s%d n%s s%d' % (REGISTER_LETTERS.get(r['kind'], '?'), r['base'],
+                              'unbounded' if r['count'] == 0xffffffff else r['count'], r['space'])
+            for r in param['ranges'])
+    if param['kind'] == '32bit':
+        return '32bit b%d s%d n%d' % (param['register'], param['space'], param['count'])
+    return '%s %s%d s%d' % (param['kind'], REGISTER_LETTERS.get(param['kind'], '?'),
+                            param['register'], param['space'])
+
 def _root_param_label(sig: Optional[RootSignature],
                       binds: Dict[str, Dict[Tuple[str, int, int], str]], rp: int) -> str:
     """`rp2(cbv b1 s0)` -- the index `draws` prints, plus what the signature says it holds.
 
-    A table lists its ranges as HLSL would name them (`table t0 n5 s0`; `u0 n3 s0` for the UAV range
-    of the same table), where the letter is the register kind and `n` the descriptor count. A root
-    descriptor and root constants get their register and space. When `RDEF` reflection named the
-    binding the name is appended (`rp2(cbv b1 s0) [SceneCB]`), which is the mapping this item is
-    about; when the capture has no reflection -- every DXIL capture seen so far -- the type, register
-    and space still say what the parameter is, which the bare index did not.
+    When `RDEF` reflection named the binding the name is appended (`rp2(cbv b1 s0) [SceneCB]`), which
+    is the mapping this item is about; when the capture has no reflection -- every DXIL capture seen so
+    far -- the type, register and space still say what the parameter is, which the bare index did not.
     """
     if sig is None or not (0 <= rp < len(sig['params'])):
         return 'rp%d' % rp
     param = sig['params'][rp]
-    if param['kind'] == 'table':
-        what = 'table ' + ', '.join(
-            '%s%d n%s s%d' % (REGISTER_LETTERS.get(r['kind'], '?'), r['base'],
-                              'unbounded' if r['count'] == 0xffffffff else r['count'], r['space'])
-            for r in param['ranges'])
-    elif param['kind'] == '32bit':
-        what = '32bit b%d s%d n%d' % (param['register'], param['space'], param['count'])
-    else:
-        what = '%s %s%d s%d' % (param['kind'], REGISTER_LETTERS.get(param['kind'], '?'),
-                                param['register'], param['space'])
     vis = '' if param['visibility'] == 'all' else param['visibility'] + ' '
     name = _bind_name(binds, param)
-    return 'rp%d(%s%s)%s' % (rp, vis, what, ' [%s]' % name if name else '')
+    return 'rp%d(%s%s)%s' % (rp, vis, _root_param_what(param), ' [%s]' % name if name else '')
 
 def _resource_size(info: ResourceInfo, formats: Dict[int, str]) -> str:
     """The size column of `resources`: bytes for a buffer or an AS, dimensions + format for a texture."""
@@ -436,6 +458,8 @@ __all__ = [
     '_portable_handle',
     '_resource_size',
     '_root_param_label',
+    '_root_param_what',
+    'apply_descriptor_chunk',
     'load_format_names',
     'parse_descriptor_heaps',
     'parse_rdef',

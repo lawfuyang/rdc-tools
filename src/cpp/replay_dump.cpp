@@ -194,7 +194,7 @@ void Usage()
       "say how much was actually compared, and an empty findings list next to three zeros means\n"
       "nothing was, not that the frame is clean.\n"
       "\n"
-      "`dump` writes a bundle for the offline tool (ROADMAP §1): events.json for every id with "
+      "`dump` writes a bundle for the offline tool (REFERENCE §9): events.json for every id with "
       "bound\n"
       "state, states/<eid>.state.json and .shaders.json for the first event and every state "
       "change, one\n"

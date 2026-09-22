@@ -17,7 +17,7 @@ opportunistic · **P3** = nice-to-have.
 descriptor writes. `replay_dump.exe` asks the **engine**: names, values, decoded textures, geometry, the
 rendered image (REFERENCE §9). Anything that spans the two is written here as a **pipeline** item, and the split
 inside it follows the same line — the driver *extracts* what only the engine knows, the offline tool
-*analyses and presents* it, because that half must be testable without a GPU, a capture or a driver (§5).
+*analyses and presents* it, because that half must be testable without a GPU, a capture or a driver (REFERENCE §4.6).
 
 ### What is deliberately *not* on this list
 
@@ -43,10 +43,10 @@ or `ShaderReflection` answers exactly. What is left is deliberately offline: the
 **The report generator was the one carve-out, and it did not break the rule.** It added no new extraction:
 it consumes what `replay_dump` and the offline parser already produce, and puts analysis, ranking and
 presentation on top (landed — REFERENCE §4.11). That is the shape any future analysis takes: offline code over
-a bundle of engine answers, testable from fixtures and diffable between runs (§5), with its tests landed in the
+a bundle of engine answers, testable from fixtures and diffable between runs (REFERENCE §4.11), with its tests landed in the
 same change.
 
-The **D3D12 harness** (§6.5) absorbs nothing: it exists for the one question replay cannot answer — what a
+The **D3D12 harness** (§4.5) absorbs nothing: it exists for the one question replay cannot answer — what a
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
@@ -150,30 +150,7 @@ say so explicitly, and should degrade gracefully when it is missing.
   decoded". Also the RT-format audit the summary needs: which targets are UNORM/sRGB/float, and what the shader
   wrote into them. (~half a day)
 
-## 4. P1/P2 — Offline analysis: what the file knows that the frame does not
-
-* **Structural capture diff** — `diff <a.rdc> <b.rdc>` for the file's own view: same draw index or marker path,
-  what changed in PSO/CBVs/streams/descriptors. It can say *"rp2 was a compute CBV at b0, now a vertex CBV at b1;
-  `SkyViewLut` left the table"* because `draws` now carries the command-list state, resource names, descriptor
-  resolution and the `rpN` annotations. The mobile-vs-PC question is the reason this exists — and it is what
-  `passdiff`/`replaydiff` (REFERENCE §4.16) cannot do: they read the marker trees and the engine's answers, this
-  one would read the descriptor writes and the command payloads the stream holds. (~1 d)
-* **Root-signature vs chunk-stream cross-check** — verify that every root parameter the signature declares has the
-  descriptor writes the stream shows, and that what replay reports at an eid agrees with what the file recorded.
-  Two independent paths to the same fact is exactly what this project uses instead of trust. (~1 d)
-* **VRAM budget and what-if** — total by category (RTs, textures, buffers, heaps), the peak of the widest pass,
-  and "at half resolution" / "with this MRT dropped" arithmetic for a first-pass optimisation pass. (half a day)
-
-## 5. P2 — Verification, regression and the bug atlas
-
-* **The captures' known-bug lists** — the corpus carries what is *known* about each capture
-  (`goldens/captures.json`'s `known`, and the labels in `*.expect.json`), and for the two bundled frames that
-  is "63 findings, none of them checked against a bug whose cause is known". The item is to make that list
-  real: take one finding per capture, follow it to a cause in the frame (or in the engine's answer), and
-  write the cause down — that is what turns the detectors from observations into verdicts, and it is the
-  `unproven` gate in the report's own flags (REFERENCE §4.11). (~1 d, ongoing)
-
-## 6. P2/P3 — Beyond the local desktop
+## 4. P2/P3 — Beyond the local desktop
 
 * **Remote replay** — capture on a phone, replay where the driver lives: RenderDoc's remote server plus
   `ReplayOptions`, so a mobile capture is replayed by the mobile driver on the device (real counters, real driver
@@ -188,12 +165,12 @@ say so explicitly, and should degrade gracefully when it is missing.
 * **Other APIs' names** — the offline tool's chunk-name loader already takes a driver (`load_chunk_names(driver=...)`);
   expose it, and accept that a Vulkan capture's chunks will be read by the same code with different enums. The
   replay driver is API-agnostic already; the analysis is where the D3D12 assumptions live. (~1 d, plus evidence)
-* **D3D12 harness** (kept for completeness) — see §6.5 below.
+* **D3D12 harness** (kept for completeness) — see §4.5 below.
 * **Upstream** — the chunk-level findings (event ids vs chunk indices, what `InitialContents` really holds, the
   crash-handle server, the `TextureSave`/`GetTextureData` subresource split) are the kind of thing RenderDoc's
   own docs and tools benefit from. Not a work item, a standing intention: file them as they are confirmed.
 
-### 6.5 The D3D12 harness (only for *synthetic inputs*)
+### 4.5 The D3D12 harness (only for *synthetic inputs*)
 
 **What.** A minimal standalone D3D12 program that creates its own device/PSO/buffers and runs a shader (the
 DXIL extracted by `dump-shaders`) with constants that we choose.
@@ -230,7 +207,7 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 
 **Effort.** ~2–3 days for a single-purpose harness; scope it to one shader at a time.
 
-## 7. P3 — Robustness and scope
+## 5. P3 — Robustness and scope
 
 * **Zstd without the dependency** — either vendor a decoder or fail with a clear message (today it needs
   `pip install zstandard`). (~4 h)
@@ -240,29 +217,14 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 * **Format coverage in the offline view** — the same audit §3's format coverage does for the engine's textures,
   for the file's payloads: what was decoded, what was skipped, and why. (~2 h)
 
-## 8. Suggested order
+## 6. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
-item of §1–§7 appears exactly once, so this is the whole list in one place rather than a selection of it; each
+item of §1–§5 appears exactly once, so this is the whole list in one place rather than a selection of it; each
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**Phase 1 — the offline questions this project was started for (~3½ days; no GPU, no capture).** The corpus's
-pair (`mobile-1` against `desktop-1`) is kept for one question — what changed between the same scene on two
-platforms — and these four answer it from the file, where answers are cheap, diffable and testable:
-
-1. **Structural capture diff (§4, ~1 d)** — `diff <a.rdc> <b.rdc>` over descriptor writes and command
-   payloads. `passdiff`/`replaydiff` read the marker trees and the engine's answers; this reads what the
-   stream itself recorded, which is the half they cannot see.
-2. **Root-signature vs chunk-stream cross-check (§4, ~1 d)** — two independent paths to the same fact is what
-   this project uses instead of trust, applied to pipeline state rather than to findings.
-3. **The captures' known-bug lists (§5, ~1 d, ongoing)** — what turns the detectors from observations into
-   verdicts, and what clears the report's `unproven` flags. Following a finding to its cause can need the
-   engine's answer, so part of this may spill into phase 2.
-4. **VRAM budget and what-if (§4, half a day)** — the ledger behind `memory` already holds what the totals
-   need; "at half resolution" and "with this MRT dropped" are arithmetic on top of it.
-
-**Phase 2 — the driver, once per frame instead of once per process (~4 days).** The bundle landed (`dump` +
+**Phase 1 — the driver, once per frame instead of once per process (~4 days).** The bundle landed (`dump` +
 `bundle-verify`, REFERENCE §4), which is the precondition the library was waiting on:
 
 1. **The driver as a library (§1, ~2–3 d)** — a thin C ABI called through `ctypes`, so every driver item
@@ -273,10 +235,10 @@ platforms — and these four answer it from the file, where answers are cheap, d
 3. **`sweep <dir> [--out <root>]` (§1, ~4 h)** — one bundle per capture with a combined index: the half of
    the corpus (REFERENCE §4.17) that needs a GPU to rebuild in bulk.
 
-**Phase 3 — the pictures, and what was skipped (~4 days).** Everything a person needs to look at, plus the two
+**Phase 2 — the pictures, and what was skipped (~4 days).** Everything a person needs to look at, plus the two
 audits that keep a summary honest about its own gaps:
 
-1. **Format coverage audit (§3, half a day)** and **Format coverage in the offline view (§7, ~2 h)** — the
+1. **Format coverage audit (§3, half a day)** and **Format coverage in the offline view (§5, ~2 h)** — the
    same question on the engine's side and on the file's: what was decoded, what was skipped, and why. A
    summary that silently skips a texture is worse than one that says "12 textures use ASTC, not decoded".
 2. **Texture subresources and formats (§3, ~1–2 d)** — one subresource at a time (mip, slice, sample, raw
@@ -287,25 +249,25 @@ audits that keep a summary honest about its own gaps:
 4. **Geometry beyond the vertex shader's output (§3, ~1–2 d)** — `mesh` reads `VSOut` today; a mesh shader's
    or a GS's actual output, plus `--obj` to export it, is what makes a mesh-heavy capture inspectable.
 
-**Phase 4 — robustness, when a capture asks for it (~half a day each).** Small, independent, and none of them
+**Phase 3 — robustness, when a capture asks for it (~half a day each).** Small, independent, and none of them
 blocks anything above:
 
-1. **Zstd without the dependency (§7, ~4 h)** — vendor a decoder or refuse with a clear message, instead of
+1. **Zstd without the dependency (§5, ~4 h)** — vendor a decoder or refuse with a clear message, instead of
    needing `pip install zstandard`.
-2. **Memory-mapped stream access (§7, ~4 h)** — the largest capture is ~1.5 GB held in RAM today.
-3. **Non-D3D12 driver names (§7, ~1 h)** — the loader already takes `driver=`; the CLI does not expose it.
+2. **Memory-mapped stream access (§5, ~4 h)** — the largest capture is ~1.5 GB held in RAM today.
+3. **Non-D3D12 driver names (§5, ~1 h)** — the loader already takes `driver=`; the CLI does not expose it.
 
-**Phase 5 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
+**Phase 4 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
 list — a device, a debug-info capture, evidence, or a decision:
 
-1. **Remote replay (§6, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
+1. **Remote replay (§4, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
    honest fix for the desktop-GPU caveat every report carries.
 2. **Shader debugging (§2, ~2 d)** — only for shaders built with debug info (`-Zi -Od`), which most captures
    do not have: the first half of the item is to say that clearly and document how to re-capture.
-3. **D3D12 harness (§6.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
+3. **D3D12 harness (§4.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
    settling whether a patched shader changes a render (REFERENCE §9 has the measurement), not by writing the
    program.
-4. **A capture-side annotation layer (§6, ~2–3 d)** — needs an installed DLL, and a scenario where our own
+4. **A capture-side annotation layer (§4, ~2–3 d)** — needs an installed DLL, and a scenario where our own
    markers beat the engine's names.
-5. **Other APIs' names (§6, ~1 d + evidence)** — needs a capture from another API in hand.
-6. **Upstream (§6)** — not a work item and not a phase: a standing intention to file what gets confirmed.
+5. **Other APIs' names (§4, ~1 d + evidence)** — needs a capture from another API in hand.
+6. **Upstream (§4)** — not a work item and not a phase: a standing intention to file what gets confirmed.

@@ -23,7 +23,7 @@ import json
 import os
 import sys
 import unittest
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -605,6 +605,77 @@ class TestBundleHalf(GoldenCase):
                                                       schema_dir=self.schemas())
         self.assertEqual((checked, failed), (False, 0))
         self.assertIn('not here', notes[0])
+
+
+class TestKnownCauses(GoldenCase):
+    """The `known` list: prose notes and the causes the report matches findings against (REFERENCE §4.17)."""
+
+    def cause(self, **extra: Any) -> Dict[str, Any]:
+        entry = {'detector': 'dead-allocation', 'what': 'created and never used',
+                 'evidence': '', 'cause': 'allocated for a path this frame does not run',
+                 'verdict': 'confirmed'}
+        entry.update(extra)
+        return entry
+
+    def test_a_cause_has_to_say_all_five_things(self):
+        # A typo in `detector` or `what` would stop a cause from ever applying, which is the failure a
+        # corpus of causes must not have: the shape is checked rather than trusted.
+        for missing in ('detector', 'what', 'cause', 'verdict'):
+            entry = self.cause()
+            del entry[missing]
+            path = self.corpus([self.capture_entry(known=[entry])])
+            with self.assertRaises(schemas.SchemaError) as caught:
+                goldens.load_corpus(path)
+            self.assertIn('detector/what/evidence/cause/verdict', str(caught.exception))
+
+    def test_an_empty_member_is_refused_but_an_empty_evidence_is_the_way_to_match_everything(self):
+        path = self.corpus([self.capture_entry(known=[self.cause(what='')])])
+        with self.assertRaises(schemas.SchemaError) as caught:
+            goldens.load_corpus(path)
+        self.assertIn('non-empty `what`', str(caught.exception))
+        path = self.corpus([self.capture_entry(known=[self.cause(evidence='')])])
+        self.assertEqual(len(goldens.load_corpus(path)['captures'][0].get('known') or []), 1)
+
+    def test_a_verdict_is_one_of_the_two_things_following_a_cause_produces(self):
+        path = self.corpus([self.capture_entry(known=[self.cause(verdict='maybe')])])
+        with self.assertRaises(schemas.SchemaError) as caught:
+            goldens.load_corpus(path)
+        self.assertIn('`confirmed` or `not a defect`', str(caught.exception))
+
+    def test_a_note_is_still_a_string_and_loads_beside_a_cause(self):
+        path = self.corpus([self.capture_entry(known=['its markers balance', self.cause()])])
+        known = goldens.load_corpus(path)['captures'][0].get('known') or []
+        self.assertEqual(known[0], 'its markers balance')
+        self.assertEqual(cast(Dict[str, Any], known[1])['detector'], 'dead-allocation')
+
+    def test_the_corpus_path_is_derived_from_the_tool_s_own_place(self):
+        path = goldens.default_corpus_path()
+        self.assertTrue(path.endswith(os.path.join(goldens.GOLDENS_DIR, goldens.CORPUS_NAME)))
+        self.assertTrue(os.path.isfile(path), 'the checked-in corpus is beside the tool')
+
+    def test_a_capture_is_matched_by_its_hash_and_not_by_its_name(self):
+        capture = self.write_fixture_capture()
+        digest = goldens.sha256_file(capture)
+        same_size = os.path.getsize(capture)
+        entry = self.capture_entry(known=[self.cause()], sha256=digest, bytes=same_size)
+        path = self.corpus([entry])
+        self.assertEqual(len(goldens.known_for_capture(capture, path)), 1)
+        # The same name, a different file: the cause was established on one capture and must not follow
+        # the name to another.
+        entry['sha256'] = 'ab' * 32
+        path = self.corpus([entry])
+        self.assertEqual(goldens.known_for_capture(capture, path), [])
+
+    def test_nothing_to_match_answers_with_nothing_rather_than_failing(self):
+        capture = self.write_fixture_capture()
+        self.assertEqual(goldens.known_for_capture(capture, os.path.join(self.tmp, 'nope.json')), [])
+        other = write_json(os.path.join(self.tmp, 'squat.json'),
+                           {'schemaVersion': goldens.CORPUS_VERSION + 1, 'captures': []})
+        self.assertEqual(goldens.known_for_capture(capture, other), [])
+        path = self.corpus([self.capture_entry(known=[self.cause()], sha256='cd' * 32,
+                                               bytes=os.path.getsize(capture))])
+        self.assertEqual(goldens.known_for_capture(capture, path), [])
+        self.assertEqual(goldens.known_for_capture(os.path.join(self.tmp, 'gone.rdc'), path), [])
 
 
 if __name__ == '__main__':

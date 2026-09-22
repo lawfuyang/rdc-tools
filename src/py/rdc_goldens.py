@@ -39,7 +39,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
 
 import rdc_cache
 import rdc_driver
@@ -92,6 +92,28 @@ WORK_DIR = os.path.join('build', 'goldens')
 DIFF_LINES = 12
 
 
+class KnownCause(TypedDict):
+    """One finding whose *cause* is known: how to match it, and what following it turned out to say.
+
+    This is the machine-readable half of `known` (REFERENCE §4.17): the report matches a detector's finding
+    against it and, on a match, turns the finding's `unproven` flag off and prints the cause
+    (`rdc_report.apply_known`). The gate is the cause being *written down*, not a detector being trusted.
+
+    `detector` names the detector; `what` is a substring the finding's own `what` must contain, and
+    `evidence` -- which may be empty, matching any -- is a substring one of its evidence lines must
+    contain, so a cause can be scoped to one resource out of twenty findings of the same detector.
+    `verdict` is what following the cause concluded: `confirmed` (the finding is real, and this is why)
+    or `not a defect` (the observation is real and its cause is not a frame bug). `cause` is the sentence
+    the report prints, and it has to stand on its own, because that is where a reader meets it.
+    """
+
+    detector: str
+    what: str
+    evidence: str
+    cause: str
+    verdict: str
+
+
 class GoldenCapture(TypedDict, total=False):
     """One capture in the corpus: which file it is, what it is, and what is expected of it."""
     #: The key this capture is named by everywhere: `desktop-1`, `desktop-2`, `mobile-1` -- platform, then
@@ -109,7 +131,12 @@ class GoldenCapture(TypedDict, total=False):
     what: str
     api: str
     bytes: int
-    known: List[str]
+    #: What is known about this capture: a **note** (prose about the frame, for a reader) or a
+    #: **cause** (`KnownCause`: a finding of its report, matched and explained). Both are what the corpus
+    #: is for -- the notes say what the frame contains, the causes turn a detector's observation into a
+    #: verdict -- and `load_corpus` checks the shape of each, because a cause whose `detector` is a typo
+    #: would simply never apply, which is the failure a corpus of causes must not have.
+    known: List[Union[str, KnownCause]]
     #: The commands whose transcript is pinned, each as its own argument list (`[["draws", "25"], ...]`):
     #: the capture path is inserted after the command name, and `<capture>` where it is wanted again.
     commands: List[List[str]]
@@ -220,6 +247,8 @@ def load_corpus(path: str) -> GoldenCorpus:
                     or not command:
                 raise rdc_schemas.SchemaError('%s: every `driverCommands` entry of %s is a list of '
                                               'strings' % (path, key))
+        for entry_known in capture.get('known') or []:
+            _check_known(path, key, entry_known)
         captures.append(capture)
     # A local file that names a capture the corpus does not have is a typo that would otherwise present
     # itself as "not on this machine" for the capture that *is* there: say so instead.
@@ -231,6 +260,69 @@ def load_corpus(path: str) -> GoldenCorpus:
                         captures=captures, pair=document.get('pair') or {},
                         driver=_load_driver(path, document.get('driver')))
 
+
+def _check_known(corpus_path: str, key: str, entry: Any) -> None:
+    """One `known` entry: a note (a string) or a cause (exactly the five `KnownCause` members).
+
+    Checked here rather than trusted, because the report *matches* on three of the five members: a typo in
+    `detector` or `what` would silently stop a cause from ever applying, and a corpus that says a bug is
+    known while the report keeps calling its finding unproven is worse than a corpus with no causes at all.
+    """
+    if isinstance(entry, str):
+        return
+    if not isinstance(entry, dict) or sorted(entry) != ['cause', 'detector', 'evidence', 'verdict', 'what']:
+        raise rdc_schemas.SchemaError(
+            '%s: every `known` entry of %s is a note (a string) or a cause with the members '
+            'detector/what/evidence/cause/verdict' % (corpus_path, key))
+    for member in ('detector', 'what', 'cause', 'verdict'):
+        if not isinstance(entry.get(member), str) or not entry[member]:
+            raise rdc_schemas.SchemaError('%s: the `known` entry of %s needs a non-empty `%s`'
+                                          % (corpus_path, key, member))
+    if not isinstance(entry.get('evidence'), str):
+        raise rdc_schemas.SchemaError('%s: the `known` entry of %s needs an `evidence` string (it may be '
+                                      'empty, which matches any finding of that detector)' % (corpus_path, key))
+    if entry['verdict'] not in ('confirmed', 'not a defect'):
+        raise rdc_schemas.SchemaError('%s: the `known` entry of %s has verdict %r -- it is `confirmed` or '
+                                      '`not a defect`' % (corpus_path, key, entry['verdict']))
+
+def default_corpus_path() -> str:
+    """`<repo>/goldens/captures.json`, from this file's own place in the tool."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(os.path.dirname(here)), GOLDENS_DIR, CORPUS_NAME)
+
+def known_for_capture(path: str, corpus_path: Optional[str] = None) -> List[Any]:
+    """The corpus's `known` entries for the capture at `path` -- what the report matches findings against.
+
+    Identity is the **SHA-256** the corpus holds for a capture, not its name: a cause was established on
+    one file, and a re-capture under the same name must not inherit it. The size is compared first, which
+    is what makes this affordable -- hashing a 1.5 GB capture to answer "is this file in the corpus at
+    all" would cost seconds per report for a question one `stat` answers for almost every file.
+
+    No corpus, no `captures.json` beside it, a capture the corpus does not have, a capture that cannot be
+    read, or a corpus that does not parse: `[]` every time. An empty answer is not an error here -- it
+    means every finding stays **unproven**, which is the answer that claims least (REFERENCE §4.17).
+    """
+    if corpus_path is None:
+        corpus_path = default_corpus_path()
+    if not os.path.isfile(corpus_path):
+        return []
+    try:
+        corpus = load_corpus(corpus_path)
+        size = os.path.getsize(path)
+    except (OSError, rdc_schemas.SchemaError):
+        return []
+    digest: Optional[str] = None
+    for capture in corpus['captures']:
+        if int(capture.get('bytes', 0) or 0) != size:
+            continue
+        if digest is None:
+            try:
+                digest = sha256_file(path)
+            except OSError:
+                return []
+        if str(capture.get('sha256', '')) == digest:
+            return list(capture.get('known') or [])
+    return []
 
 def _load_driver(corpus_path: str, raw: Any) -> Dict[str, Any]:
     """The corpus's `driver` member -- how to invoke the driver -- with its `argv` checked and defaulted.
@@ -1073,6 +1165,7 @@ __all__ = [
     'GoldenCapture',
     'GoldenCorpus',
     'GoldenExpect',
+    'KnownCause',
     'WORK_DIR',
     'check_bundle',
     'check_driver',
@@ -1082,11 +1175,13 @@ __all__ = [
     'cmd_goldens',
     'command_line',
     'compare_document',
+    'default_corpus_path',
     'diff_lines',
     'differing_lines',
     'driver_environment_failure',
     'driver_findings',
     'findings_by_detector',
+    'known_for_capture',
     'load_corpus',
     'load_expect',
     'normalise_driver',

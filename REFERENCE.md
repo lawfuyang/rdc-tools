@@ -160,6 +160,9 @@ parts (`fourcc, offset, length`). Part meanings:
 | `resources` | `<rdc> [limit=200] [nameFilter] [--format table|csv|markdown]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
 | `descriptors` | `<rdc> [limit=200] [heapFilter] [--format table|csv|markdown]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
+| `diff` | `<a.rdc> <b.rdc> [--all] [--format table\|csv\|markdown]` | the two streams' own calls, compared: marker path, arguments, the state chunks that changed before each call, and every binding — by what each slot is, not by its index (§4.18) |
+| `rootsig-check` | `<rdc> [bundleDir] [--format table\|csv\|markdown]` | what the root signatures declare against what the stream binds and the heaps hold, and (with a bundle) against the engine's own rows. Exit 0/1 (§4.19) |
+| `vram` | `<rdc> [maxPasses=8] [--drop <nameFilter>] [--format table\|csv\|markdown]` | the frame's memory by role, the pass with the largest peak live inside it, and the what-if arithmetic (§4.20) |
 | `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the fallback to the bundled table. Needs no capture file |
 | `chunk-names` | `[--check\|--write] [--out <file>] [--src <tree>]` | the bundled enum table (`src/py/rdc_chunknames.py`) against a source tree: `--write` regenerates it from that tree's `SystemChunk`, `D3D12Chunk` and `DXGI_FORMAT` enums, `--check` reports the drift (exit 0 current, 1 differs or is missing, **2 no tree to compare with**). `--write` refuses an incomplete tree, because a table written from one would shrink to whatever that tree happens to have. Needs no capture file |
 | `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare for an artefact** — no binary, no library or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison for its own binary and says so in its log (§9) — that warning does not cover the library, which it never loads. **Both artefacts `cmake --build` writes are compared, each in its own block**, because they can disagree and the difference matters: a stale exe answers with the previous revision's behaviour, while `bin/rdc_lz4.dll` *is* the offline tool's decoder (§3.2), so a stale one decodes every capture with code its source no longer says. The two are independent — a new `lz4.c` does not make the exe stale, and a new `replay_dump.cpp` does not make the library stale |
@@ -194,7 +197,7 @@ which replay does not expose.
 | Command | Arguments | Output |
 |---|---|---|
 | `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §6.5) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §4.5) |
 
 ### 4.5 Chunk level
 
@@ -494,7 +497,7 @@ which is why the checked-in copy cannot quietly go stale after a document change
 | pass by pass | per pass: why it *starts* there (the boundary reason), work in events, targets, structure, the shaders it uses, their constant blocks, and the resources first used in it |
 | notable passes | the ranking's top five, plus every pass an oddity rule matches (depth-only, one call, unmarked, dead, the only pass touching a resource) — with the **rule printed above the rows**: each input, how it is measured, and which ones *this* bundle could not answer |
 | notable resources | the same for resources: ranked by size and by how many passes read them, plus never-read, targets, formats whose bytes mislead, and textures the table names no format for |
-| red flags | what the detectors found, each with the evidence that proves it and how certain it is — grouped by the severity table printed with it (the tool's declared judgement, per detector, so a line of it can be disagreed with), and every finding marked `unproven`, because none of them has been checked against a capture whose bug list is known (ROADMAP §5, the known-bug lists) |
+| red flags | what the detectors found, each with the evidence that proves it and how certain it is — grouped by the severity table printed with it (the tool's declared judgement, per detector, so a line of it can be disagreed with). A finding is marked **`proven`** with the *cause* the corpus knows for it, or **`unproven`** where no cause has been established (§4.17): the corpus's `known` list is matched by the capture's SHA-256, and `rdc_report.apply_known` is the only thing that opens that gate (§4.17) |
 | recommendations | what to look at first, ranked by the same severity: one row per detector that fired, per oddity rule that matched and per gap the report could not close — each with the driver command that shows its evidence |
 | what this report cannot tell you | the report states its own gaps, and every one of them is a roadmap item |
 | appendix | the `replay_dump state` / `shaders` / `usage` commands that reproduce a pass, a claim and a notable row |
@@ -838,7 +841,7 @@ python src\py\rdc_analysis.py replaydiff ab\mobile ab\pc --out ab\diff --with-im
 **Why `replaydiff` takes bundles and not two `.rdc` paths.** Because the engine replays one capture at a
 time: two replay devices on one GPU is what makes a run look stuck (§9), so a command that opened both
 would be a command that hangs. Everything it needs is already a file after `dump`, and reading files is
-the half that is testable without a GPU, a capture or a driver (ROADMAP §5). The driver half stays what it
+the half that is testable without a GPU, a capture or a driver (§4.6). The driver half stays what it
 was — one `dump` per capture, the engine's answers — and this half is the analysis.
 
 **`passdiff <a.rdc> <b.rdc> [--all]`** — the marker trees side by side. A *pass* here is a marker with at
@@ -1013,6 +1016,133 @@ dumped `--with-images` — answers `10` passes in both, `2` only in A, `37` only
 whose values moved, `16` shader hashes differing and `2` image pairs compared. **The captures themselves are not verified**: the SHA-256 in the corpus is, so a re-capture under
 the same name is caught, but nothing here can tell you that a frame recorded on a phone is what it says it
 is.
+
+**`known`: notes, and the causes that make a finding a verdict.** A capture's `known` list holds two kinds of
+entry. A **note** (a string) is prose about the frame for a reader — "its markers balance", "1186 ids carry
+bound state" — and nothing reads it. A **cause** is an object, and the report *uses* it:
+
+| member | what it is |
+|---|---|
+| `detector` | the detector whose finding this explains |
+| `what` | a substring the finding's own `what` must contain |
+| `evidence` | a substring one of the finding's evidence lines must contain; **empty matches any**, which is how one cause covers all fourteen findings of a rule that has one explanation |
+| `cause` | the sentence the report prints: what following the finding to the frame (or to the engine's answer) concluded |
+| `verdict` | `confirmed` (the finding is real and this is why) or `not a defect` (the observation is real, its cause is not a frame bug) |
+
+A match turns the finding's **`unproven`** flag off and prints the cause beside it, and this is the *only*
+path by which that gate opens: the gate is the cause being written down, not a detector being
+trusted. `load_corpus` checks the shape of every entry — a cause whose `detector` is a typo would simply never
+apply, and a corpus that says a bug is known while the report keeps calling it unproven is worse than a corpus
+with no causes at all — and `cmd_report` prints any entry that matched nothing as **stale**, because a cause
+written for a rule that has since stopped firing is the corpus lying about the frame.
+
+The corpus is matched to a capture by the **SHA-256** it already carries, never by name: a cause was
+established on one file, and a re-capture under the same name must not inherit it. A machine with no corpus,
+or a capture the corpus does not have, leaves every finding unproven — the answer that claims least. Today:
+`desktop-1` has one cause (its 48 MB `Nanite.VisibleClustersSWHW` allocation, `confirmed` from two paths that
+agree nothing touches it) and `mobile-1` has one that covers all fourteen of its `unbound-root-parameter`
+findings (`not a defect`: the reflection and the state's root parameters come from different namespaces at
+those events, and no dispatch or draw runs with a block unbound).
+
+---
+
+### 4.18 The file's own diff: `diff`
+
+`diff <a.rdc> <b.rdc> [--all] [--format table|csv|markdown]` compares two captures by what their **streams**
+recorded — the third thing beside `passdiff` (the marker trees) and `replaydiff` (two bundles of engine
+answers), and the one neither can do. Per call it compares four things:
+
+| what | how it is compared |
+|---|---|
+| the marker path and the call | paths pair by full text first and then by their **innermost name** — the same two rules `passdiff` uses, deliberately reused (`rdc_passdiff._pair_by`) so the two commands cannot align one pair of frames differently — and inside a paired path, calls pair by name in occurrence order |
+| the call's own arguments | `idx=… inst=…` / `x=… y=… z=…`, the words `draws` prints |
+| the state chunks that changed before it | the setter chunks seen on that call's *command list* since its previous call, in order (`SetPipelineState + OMSetRenderTargets`) |
+| every binding in force | one key per slot, and a description per value |
+
+**The keys are what a slot *is*, not what it is numbered.** A binding is keyed `cbv b1 s0`,
+`table t0 n5 s0`, `32bit b0 s0 n4` — `rdc_resources._root_param_what`, the words `draws` prints inside
+`rpN(...)` — plus the stage when a parameter is not visible everywhere, so a slot that moved from `rp10` to
+`rp5` between two builds of a scene still compares as the *same* binding, while a slot whose kind, register or
+space changed does not. The fixed slots (`RTV`, `DSV`, `VB0`, `IB`, `PSO`, `rootsig`) are keyed by name.
+
+**The values are descriptions, not ids**: a named resource by the name the application gave it, an unnamed one
+by kind and shape (`texture2d 1024x1024x1`, `buffer 4096 B`), a table slot by what the capture wrote into it.
+Two consequences are stated in the output rather than hidden: two unnamed resources of the same shape compare
+*equal*, and the byte offset of a binding is **not** compared — for a resource sub-allocated out of a UE page
+(§4.9) it is where that recording put the sub-allocation, and comparing it would make every page binding in a
+pair differ for a reason nobody could act on.
+
+Output: the counts, then sections for the changed rows, the calls only one side ran, and the paths that paired
+by their innermost name. `--all` lifts the per-section cap; `--format csv|markdown` prints one row per
+difference (`status,path,call,field,a,b`) in the same order, with the prose on stderr. Exit **1** when no
+chunk can be named at all (no source tree, README §1.1); otherwise 0 — a difference is not an error, it is the
+answer. Measured on the pair: 24 calls in the mobile frame against 52 in the desktop one, 3 identical, 6
+changed, 15 and 43 one-sided, and 10 paths paired by their innermost name.
+
+### 4.19 The signature against the stream: `rootsig-check`
+
+`rootsig-check <rdc> [bundleDir] [--format table|csv|markdown]` reads the two records of one fact — the root
+signature the capture *creates* and the bindings the frame *makes* — and reports where they disagree, with an
+exit code (**1** on a `certain` finding, 0 otherwise) so it can gate a script like `verify`.
+
+| check | certainty | what it says |
+|---|---|---|
+| `undeclared-parameter` | certain | the stream sets `rpN` on a signature that has fewer parameters than that |
+| `range-kind-mismatch` | certain | a slot a range covers holds another kind of descriptor than the range declares |
+| `partial-heap` | question | the frame writes descriptors into a heap and binds slots in it that it never wrote |
+| `unknown-resource` | question | a binding names a resource id the capture never creates |
+| `never-set-parameter` | question | a signature a call binds declares a parameter no call in the frame sets |
+| `no-signature` / `unknown-signature` | question | a binding set on a list whose signature this stream does not have, or one it never creates |
+
+Two things make it exact rather than approximate. **A table binding is resolved against the heap as it stood
+when the table was bound**: the heaps are rebuilt chunk by chunk (`rdc_resources.apply_descriptor_chunk`, the
+same write/copy decoding `parse_descriptor_heaps` uses, so the two cannot drift) instead of read from the
+frame's final state — UE re-uses descriptor memory, so one slot can be an SRV early and a UAV later, and a
+final-state answer reports every such re-use as a mismatch (measured: 87 findings became 1). And a range
+offset of `0xffffffff` is `D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND`, which means "after the previous range", not
+four billion: the ranges are walked in declaration order and each append takes the running end.
+
+**A slot the frame never wrote is not a finding**: UE fills its descriptor heaps at startup and the frame only
+references them, so that is the normal case (measured: 3,520 of `desktop-1`'s 4,960 bound slots). It is
+reported as coverage — which heaps the frame binds and never writes, and how many slots it wrote — and the
+question is kept for the sharper case of a heap the frame *does* write without writing the slot it binds.
+
+**With a bundle** (`replay_dump dump`, §9) the same facts are compared against the engine's own rows: the
+signature ids it reports against the ids the file decodes, every parameter row's class, register, space and
+visibility against the decoded signature, and every `heapH+0xO` it resolves against the bindings the file
+recorded (the offset is in descriptors on both sides). Measured on `desktop-1`: 71 state documents, 21
+signature ids, 88 parameter rows and 29 table bindings compared, **0 disagreements** — two readers of one
+capture agreeing exactly. What is *not* compared is what the engine resolved inside a table (`cat(N) type(N)`):
+its rows are per event and the file's writes cannot be aligned to an event (no event-to-chunk mapping exists,
+§8), so a difference between the two sets would not be a disagreement; that comparison is the driver's own
+`crosscheck`.
+
+### 4.20 The budget and the what-if: `vram`
+
+`vram <rdc> [maxPasses] [--drop <nameFilter>] [--format table|csv|markdown]` is `memory`'s ledger asked a
+different question — not where the bytes are, but **what they are for and what would change**. It reads the
+same walk as `deps`/`memory` (§4.15) and adds no extraction of its own.
+
+**By role**: the resources the frame *references* (an unused allocation is `memory`'s business; a budget that
+counted it would charge the frame for it) grouped by what they are for — a resource with an `rtv`/`dsv` use is
+a **render target** even if it is a texture, then textures, buffers, acceleration structures. Textures are
+counted at 4 bytes a pixel and every figure containing one is marked `~`, the report's own convention. Heaps
+are reported beside the roles, and the output says plainly that placed resources are counted in both: a budget
+wants what the frame uses, `memory` is where the placement is unpacked.
+
+**The widest pass** is the pass with the largest **peak live bytes inside it** — the resources whose use
+windows overlap the pass, swept the way `memory` sweeps a heap (`_peak_live`), with the windows clipped to the
+pass so a resource that outlives it is not charged to it twice. Pass ranges come from the file's own markers
+(`rdc_passdiff.marker_passes`), in chunk indices. Measured: `desktop-1`'s `FRDGBuilder::Execute` touches 83
+resources (~201 MB) and peaks at ~146 MB; mobile's peaks at ~59 MB.
+
+**What-if** is the arithmetic the budget exists for, and nothing more: `now`, `at half resolution` (render
+targets and textures scale by *area* — a quarter of their bytes; buffers and acceleration structures do not)
+and one row per `--drop <nameFilter>` (a subtraction over the resources whose name matches). Whether either
+change is *legal* — a target's format, a pass's dependencies, D3D12's aliasing requirements — is not in the
+arithmetic, and the last section of the output says so. Measured on `desktop-1`: 21 render targets ~103.8 MB,
+45 buffers 62.2 MB, 21 textures ~45.6 MB (~211.6 MB total), ~99.5 MB at half resolution, and `--drop GBuffer`
+saves ~48.0 MB over 5 resources.
 
 ---
 
@@ -1344,7 +1474,7 @@ its 2,132 collected ids were one state repeated past the last event; on `desktop
 back, and `--until` can narrow the range but no longer extend it past the frame's end. All of the gaps are
 written into the bundle's own `notInThisBundle` list, so a reader does not conclude that the frame had no
 copies. Nothing offline derives one numbering from the other: the mismatch between event ids and chunk indices is
-one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §6), and no item anywhere in that file
+one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §4), and no item anywhere in that file
 proposes to close it here.
 
 **The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
@@ -1375,7 +1505,7 @@ left in the reported state by earlier replay passes, real rows in every bundle t
 on any per-event reading of a state that sits between command lists -- and the two things that would
 make a parallel sweep honest are both out of reach: reproducing the serial history per worker costs
 the whole prefix (the last worker would pay the entire range), and splitting at command-list
-boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §6, `Upstream`).
+boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §4, `Upstream`).
 The attempt also left
 two Windows findings behind: a spawned child must be given a stdin it can use (an inherited slot it
 cannot takes its whole stdio down -- three "successful" workers once left three empty logs), and

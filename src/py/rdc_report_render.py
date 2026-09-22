@@ -14,7 +14,7 @@ def report_caveats() -> List[str]:
         'A pass here is a run of consecutive events with the same call kind, render targets and depth '
         'target -- not a named pass. Call kinds (draw/copy/clear/marker), per-event triangle and thread '
         'counts, and marker names are not in a bundle at all: the replay API exposes no action list '
-        '(ROADMAP §1).',
+        '(REFERENCE §9).',
         'A compute pass is a run of dispatches with the same pipeline and shaders, and its targets and '
         'depth are given as not applicable: a dispatch does not set the output-merge state, so what the '
         'engine reports there is leftover from an earlier call. What a dispatch *does* write (its UAVs) '
@@ -30,8 +30,9 @@ def report_caveats() -> List[str]:
         'the table tags, as the bundle\'s cbuffer documents hold them: what the engine reported at that '
         'event, not what the shader made of it.',
         'Twenty detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
-        'state, one over the resource table and three over the capture\'s chunk stream -- and every finding '
-        'is unproven: none of them has been checked against a capture whose bug list is known (ROADMAP §5). '
+        'state, one over the resource table and three over the capture\'s chunk stream -- and a finding is '
+        'proven only where the corpus carries a cause for it (the capture\'s `known` list, matched by the '
+        'capture\'s own SHA-256, REFERENCE §4.17); everything else is unproven, a lead rather than a verdict. '
         'What is not checked at all is stated rather than approximated: MSAA\'s *which '
         'subresource did the resolve copy* half needs the ResolveSubresource payload, and the sRGB/linear half '
         'of the format rule needs a later sampling view\'s sRGB flag -- neither is in a bundle. The pipeline '
@@ -47,7 +48,7 @@ def report_caveats() -> List[str]:
         'The notable lists rank what a bundle can measure -- calls, target bytes, resource churn, and counter '
         'cost when the bundle was written with --with-counters -- and their own table says so where an input is '
         'not available: a draw\'s vertex count is the first input of the rule and no bundle has it, because the '
-        'replay API exposes no action list (ROADMAP §1). A recommendation is a lead, not a verdict: it names '
+        'replay API exposes no action list (REFERENCE §9). A recommendation is a lead, not a verdict: it names '
         'the first instance of something, with the command that shows it, and the finding behind it is still '
         'unproven.',
         'Missing reflection is not reported as missing: a shader the engine has no reflection for is simply a '
@@ -56,7 +57,7 @@ def report_caveats() -> List[str]:
         'debugging is a capture property, not a bundle one: nothing here can say what a shader computed from '
         'its inputs, only what it was bound to.',
         'The frame was replayed on this machine\'s GPU: the capture properties in the bundle say whether the '
-        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §5, '
+        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §4, '
         'remote replay). A pass is also not a *dispatch* of work in the engine\'s own terms -- the report groups '
         'events, and the engine\'s own pass structure is only as close as its markers are.',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '
@@ -64,7 +65,7 @@ def report_caveats() -> List[str]:
         'next frame or by the CPU afterwards looks exactly like nothing ever reading the resource. A resource '
         'whose only row is `eid 0, Unused` was not tracked by the engine and is never judged: what the engine '
         'did not record cannot be turned into either a use or an absence of one.',
-        'Counters are not folded into the pass sections (ROADMAP §3). A bundle written with --with-counters '
+        'Counters are not folded into the pass sections (REFERENCE §9). A bundle written with --with-counters '
         'carries the per-event results in counters.json, and the notable ranking sums them per pass, but no pass '
         'roll-up prints them.',
         'Blend, depth-test, stencil, viewport and scissor state are in the bundle per state change, and the '
@@ -438,10 +439,13 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
                  % (len(doc['flags']), ', '.join(ran) or 'none',
                     ' Skipped: %s.' % ', '.join(skipped) if skipped else ''))
     lines.append('')
+    proven = sum(1 for flag in doc['flags'] if not flag['unproven'])
     lines.append('`certain` means the bundle proves the observation; `question` would mean the observation is '
-                 'real but its meaning depends on what the frame was for. Every finding is **unproven**: none '
-                 'of these detectors has been checked against a capture whose bugs are known (ROADMAP §5), '
-                 'so they are leads, not verdicts.')
+                 'real but its meaning depends on what the frame was for. A finding is **proven** only where '
+                 'the corpus knows its cause -- followed to the frame (or to the engine\'s answer) and written '
+                 'down in the capture\'s `known` list (REFERENCE §4.17), which is where the printed cause comes '
+                 'from; %d of %d finding(s) here are. Every other one is **unproven**: a lead, not a verdict.'
+                 % (proven, len(doc['flags'])))
     lines.append('')
     lines.extend(_severity_block(doc['severityTable']))
     # The group of a finding is a join on its detector -- the severity table above is the only place that
@@ -461,7 +465,9 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
                 lines.append('| %s | %s | %s | %s%s |'
                              % (flag['detector'], _md(flag['what']),
                                 '; '.join(_md(item) for item in flag['evidence']), flag['certainty'],
-                                ', unproven' if flag['unproven'] else ''))
+                                ', unproven' if flag['unproven']
+                                else ', **proven** (%s): %s' % (_md(str(flag.get('verdict', ''))),
+                                                                _md(str(flag.get('cause', ''))))))
             lines.append('')
     else:
         lines.append('Nothing fired -- which is a statement about these detectors, not about the frame: the '
@@ -491,7 +497,7 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('Every row in this report carries the event id or the resource id it is about -- a pass by its '
                  'eid range, a resource by its `res` id, a finding by the evidence on its own row -- and the '
                  'recommendations carry the command that shows each one. A row that could not cite either would '
-                 'be a claim without evidence, and the suite fails on one (ROADMAP §5).')
+                 'be a claim without evidence, and the suite fails on one (AGENTS.md).')
     lines.append('')
     lines.append('A usage finding is checked the same way: `replay_dump usage \'%s\' <resId>` prints the same '
                  'list the detectors read (the engine\'s own `GetUsage`).' % _md(rdc))

@@ -37,7 +37,7 @@ PASS_INPUTS: List[NotableInput] = [
      'how': "the draw's or dispatch's own argument, from the capture's action tree",
      'available': False,
      'why': 'a bundle carries no action list -- the replay API exposes none, so no capture argument is in one '
-            '(ROADMAP §1). Every count below is therefore a count of *calls*, not of the work inside them.'},
+            '(REFERENCE §9). Every count below is therefore a count of *calls*, not of the work inside them.'},
     {'input': 'calls',
      'how': "the pass's own events of its kind: a graphics pass is a run of draws with the same targets, so its "
             'graphics-event count is its draw count, and a compute pass is a run of dispatches',
@@ -57,7 +57,7 @@ PASS_INPUTS: List[NotableInput] = [
      'how': "the sum of the counter results the bundle holds for this pass's events",
      'available': False,
      'why': 'counters are collected only by a bundle written with --with-counters, and they are '
-            'driver-dependent and slow to fetch (ROADMAP §3)'},
+            'driver-dependent and slow to fetch (REFERENCE §9)'},
 ]
 
 #: Passes that are listed whatever their rank, and what "odd" means for each.

@@ -21,6 +21,7 @@ import sys
 import tempfile
 import unittest
 from typing import Any, Callable, Dict, List, Optional, Sequence
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -30,6 +31,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
 
 import rdc_analysis as R          # noqa: E402
 import rdc_chunkmap as chunkmap   # noqa: E402  (the detectors name chunks through this module, so the
+import rdc_report                 # noqa: E402  (patched by name: the corpus lookup is its global, not R's)
 import rdc_fixtures as F          # noqa: E402   #   capture fixture must be built with the same map)
 from rdc_testcase import CmdCase as _CmdCase   # noqa: E402
 
@@ -366,7 +368,7 @@ class TestReportDocument(BundleCase):
         self.assertEqual(len(self.document(bundle)['caveats']), len(R.report_caveats()))
 
     def test_the_json_twin_is_schema_valid(self):
-        """The report's own schema against the document it describes (the acceptance gate of ROADMAP §5).
+        """The report's own schema against the document it describes (the acceptance gate, REFERENCE §4.12).
 
         The schema lives in `rdc_schemas.py` rather than in `schema/`, because that folder is what the driver
         publishes and the driver does not write this document. It is exhaustive and closed, so a member a
@@ -397,7 +399,7 @@ class TestReportDocument(BundleCase):
         # ranking's unavailable inputs (the action list) and the counters (the frame's pictures and counters).
         # The marker path is no longer one of the gaps -- the driver records it -- so the caveat speaks of the
         # *bundle's* age instead, which is what the last needle checks.
-        for needle in ('ROADMAP §5', 'ROADMAP §1', 'ROADMAP §3'):
+        for needle in ('REFERENCE §4.17', 'REFERENCE §9', 'ROADMAP §4'):
             self.assertIn(needle, text)
         self.assertIn('as of 2026-09-17', text)
         # The vocabulary's own two limits: what a name can say, and which names exist at all.
@@ -638,7 +640,7 @@ class TestReportRecommendations(BundleCase):
 
 
 class TestReportEvidence(BundleCase):
-    """ROADMAP §5: no claim without evidence -- every row says which event or resource it is about."""
+    """AGENTS.md: no claim without evidence -- every row says which event or resource it is about."""
 
     def test_every_row_of_every_section_cites_an_event_or_a_resource(self):
         bundle = self.path('b')
@@ -1423,6 +1425,81 @@ class TestReportRefusals(BundleCase):
         printed = self.report(bundle)
         self.assertIn('warning: the bundle was written for other.rdc', printed)
         self.assertTrue(os.path.isfile(os.path.join(bundle, 'report.md')))
+
+
+class TestKnownCauses(BundleCase):
+    """`apply_known`: the one path by which a finding stops being unproven (REFERENCE §4.17)."""
+
+    def flag(self, **extra: Any) -> Any:
+        """One finding as `detect_all` hands it over: `Any`, so a test can bend any member of it."""
+        flag = {'detector': 'dead-allocation', 'what': 'created and never used by any call',
+                'evidence': ['res80125 "Nanite.VisibleClustersSWHW" (buffer, buffer)'],
+                'certainty': 'certain', 'unproven': True}
+        flag.update(extra)
+        return flag
+
+    def cause(self, **extra: Any) -> Any:
+        entry = {'detector': 'dead-allocation', 'what': 'created and never used',
+                 'evidence': 'Nanite.VisibleClustersSWHW', 'cause': 'allocated for a path this frame '
+                 'does not run', 'verdict': 'confirmed'}
+        entry.update(extra)
+        return entry
+
+    def test_a_match_turns_the_flag_off_and_writes_the_cause_on_it(self):
+        flags = [self.flag()]
+        self.assertEqual(R.apply_known(flags, [self.cause()]), [])
+        self.assertFalse(flags[0]['unproven'])
+        self.assertEqual(flags[0]['cause'], 'allocated for a path this frame does not run')
+        self.assertEqual(flags[0]['verdict'], 'confirmed')
+
+    def test_the_detector_the_substring_and_the_evidence_all_have_to_agree(self):
+        # Each of the three is narrowed, and a non-match comes back as *stale* -- described by the
+        # corpus entry's own detector and `what`, because that is what a reader has to go and fix.
+        for entry, stale in ((self.cause(detector='other'), 'other: created and never used'),
+                             (self.cause(what='nothing like it'),
+                              'dead-allocation: nothing like it'),
+                             (self.cause(evidence='res999'),
+                              'dead-allocation: created and never used')):
+            flags = [self.flag()]
+            self.assertEqual(R.apply_known(flags, [entry]), [stale])
+            self.assertTrue(flags[0]['unproven'])
+            self.assertNotIn('cause', flags[0])
+
+    def test_an_empty_evidence_matches_any_finding_of_that_detector(self):
+        flags = [self.flag(evidence=['res1 (buffer, buffer)'])]
+        self.assertEqual(R.apply_known(flags, [self.cause(evidence='')]), [])
+        self.assertFalse(flags[0]['unproven'])
+
+    def test_a_note_is_not_a_cause_and_never_matches(self):
+        flags = [self.flag()]
+        self.assertEqual(R.apply_known(flags, ['its markers balance']), [])
+        self.assertTrue(flags[0]['unproven'])
+
+    def test_one_cause_can_cover_several_findings_of_the_same_detector(self):
+        flags = [self.flag(), self.flag(what='created and never used by any call: 48.00 MB',
+                                       evidence=['res2 "Other" (buffer, buffer)'])]
+        self.assertEqual(R.apply_known(flags, [self.cause(evidence='')]), [])
+        self.assertEqual([flag['unproven'] for flag in flags], [False, False])
+
+    def test_a_cause_that_no_finding_matches_comes_back_as_stale(self):
+        self.assertEqual(R.apply_known([self.flag()], [self.cause(what='a rule that stopped firing')]),
+                         ['dead-allocation: a rule that stopped firing'])
+
+    def test_the_report_counts_what_was_proven_and_says_which_corpus_it_read(self):
+        bundle = self.path('bundle')
+        write_bundle(bundle, events=[event(1003)])
+        with mock.patch.object(rdc_report, 'known_for_capture', lambda path: [self.cause()]):
+            printed = capture_text(R.cmd_report, RDC, bundle)
+        self.assertIn('known    : 1 entr(y/ies) for this capture in the corpus, 1 of them a cause', printed)
+
+    def test_a_stale_cause_is_printed_rather_than_left_to_be_found(self):
+        bundle = self.path('bundle')
+        write_bundle(bundle, events=[event(1003)])
+        with mock.patch.object(rdc_report, 'known_for_capture',
+                               lambda path: [self.cause(what='a rule that stopped firing')]):
+            printed = capture_text(R.cmd_report, RDC, bundle)
+        self.assertIn('stale    : the corpus knows a cause for dead-allocation: a rule that stopped '
+                      'firing that no finding here matches any more', printed)
 
 
 if __name__ == '__main__':

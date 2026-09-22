@@ -96,22 +96,35 @@ class ReportPass(TypedDict):
     blocks: List[str]
     firstTouched: List[str]
 
-#: One red flag. `what` is the *observation*; what it means is the reader's, because a bundle can prove what
-#: the engine held, not what the frame intended. `certainty` is what the detector could prove (`certain` -- the
-#: bundle shows it; `question` -- the observation is real, its meaning depends on what the frame was for).
-#: `unproven` is the ROADMAP §5 gate: a detector that has never been checked against a capture whose bugs are
-#: known has not earned a verdict.
+#: One red flag's required keys. `what` is the *observation*; what it means is the reader's, because a
+#: bundle can prove what the engine held, not what the frame intended. `certainty` is what the detector
+#: could prove (`certain` -- the bundle shows it; `question` -- the observation is real, its meaning
+#: depends on what the frame was for). `unproven` is the corpus's cause gate (REFERENCE §4.17): a detector that has never
+#: been checked against a capture whose bugs are known has not earned a verdict, and
+#: `rdc_report.apply_known` is what opens it.
 #:
-#: A flag does *not* carry a severity: that is a property of the detector, not of the finding, and it lives in
-#: `severityTable` (one row per group, one member per detector, with the line that justifies it). The report's
-#: grouping is therefore a join on `detector`, and there is one place to disagree with -- rather than a value
-#: copied into every finding that a later change could leave behind.
-class RedFlag(TypedDict):
+#: A flag does *not* carry a severity: that is a property of the detector, not of the finding, and it lives
+#: in `severityTable` (one row per group, one member per detector, with the line that justifies it). The
+#: report's grouping is therefore a join on `detector`, and there is one place to disagree with -- rather
+#: than a value copied into every finding that a later change could leave behind.
+class RedFlagBase(TypedDict):
     detector: str
     what: str
     evidence: List[str]
     certainty: str
     unproven: bool
+
+#: A red flag, plus the two keys a **known cause** fills in -- and only those findings have them, which is
+#: why they are optional here rather than empty everywhere (`total=False` on the subclass is what says so,
+#: and it is 3.8-compatible where `typing.NotRequired` is not). `rdc_report.apply_known` sets both when the
+#: corpus's `known` list has an entry matching this finding, and that is the one path by which `unproven`
+#: is turned off: the gate is the *cause being written down*, not a detector being trusted.
+#:
+#: `verdict` is `confirmed` (the finding is real and the cause says why) or `not a defect` (the observation
+#: is real, its cause is not a frame bug) -- the two answers following a finding to its cause produces.
+class RedFlag(RedFlagBase, total=False):
+    cause: str
+    verdict: str
 
 #: One detector inside a severity group: its name, and why its findings belong in that group.
 class SeverityMember(TypedDict):

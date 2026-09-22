@@ -38,6 +38,17 @@ Usage:
   python rdc_analysis.py dump-shaders <rdc> <outdir>
   python rdc_analysis.py report   <rdc> <bundleDir> [outDir]   # frame report from `replay_dump dump`
   python rdc_analysis.py passdiff <a.rdc> <b.rdc> [--all]     # the two files' pass lists, by marker path
+  python rdc_analysis.py vram     <rdc> [maxPasses] [--drop <nameFilter>] [--format table|csv|markdown]
+                                                        # the frame's memory by role, the widest pass
+                                                        #   and the "at half resolution" arithmetic
+  python rdc_analysis.py rootsig-check <rdc> [bundleDir] [--format table|csv|markdown]
+                                                        # what the root signatures declare against
+                                                        #   what the stream binds and the heaps hold,
+                                                        #   and (with a bundle) against the engine
+  python rdc_analysis.py diff     <a.rdc> <b.rdc> [--all] [--format table|csv|markdown]
+                                                        # the two streams' own calls, compared: marker
+                                                        #   path, arguments, the state chunks that
+                                                        #   changed before each call, and every binding
   python rdc_analysis.py replaydiff <bundleA> <bundleB> [--out <dir>] [--with-images]
                                    [--image-detail N] [--threshold N]
                                                          # A/B of two bundles: passes, state, values,
@@ -93,6 +104,7 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         BundleError as BundleError, DetectorRun as DetectorRun,
                         RedFlag as RedFlag, ReportDocument as ReportDocument, ReportPass as ReportPass,
                         _command as _command, _refs as _refs,
+                        apply_known as apply_known,
                         cmd_report as cmd_report, detect_all as detect_all,
                         detect_dead_allocations as detect_dead_allocations,
                         detect_marker_balance as detect_marker_balance,
@@ -128,6 +140,9 @@ from rdc_schemas import (AB_SCHEMA as AB_SCHEMA, BUNDLE_SCHEMAS as BUNDLE_SCHEMA
 from rdc_types import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_stream import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_passdiff import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_filediff import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_sigcheck import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_vram import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_ab import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_ab_render import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_image import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -235,6 +250,30 @@ def _take_format(cmd: str, argv: Sequence[str]) -> Tuple[List[str], str]:
         del rest[index:index + 2]
     return rest, fmt
 
+def _take_drops(cmd: str, argv: Sequence[str]) -> Tuple[List[str], List[str]]:
+    """`(argv without the --drop pairs, the filters they named)`, in the order they were written.
+
+    Repeatable because a what-if is asked one resource at a time ("what if this MRT went away, and that
+    debug buffer"), and taken out *before* the positional arguments are read for the same reason
+    `_take_format` is: written as `vram <rdc> --drop SceneColor 4`, the filter would otherwise be read
+    as the pass limit. A `--drop` with nothing after it is a usage error, like a bad `--format`.
+    """
+    rest: List[str] = []
+    drops: List[str] = []
+    index = 0
+    while index < len(argv):
+        if argv[index] == '--drop':
+            if index + 1 >= len(argv):
+                print('usage: rdc_analysis.py %s <rdc> [maxPasses] [--drop <nameFilter>] ... [--format '
+                      '%s]' % (cmd, '|'.join(rdc_table.FORMATS)))
+                sys.exit(2)
+            drops.append(argv[index + 1])
+            index += 2
+            continue
+        rest.append(argv[index])
+        index += 1
+    return rest, drops
+
 def cmd_bootstrap(argv: Sequence[str]) -> int:
     """`bootstrap [tag]` -- put the RenderDoc source tree where the tool reads its chunk names from.
 
@@ -332,6 +371,20 @@ def _dispatch() -> None:
             print('usage: rdc_analysis.py passdiff <a.rdc> <b.rdc> [--all]')
             sys.exit(2)
         sys.exit(cmd_passdiff(path, argv[3], '--all' in argv[4:]))
+    elif cmd == 'diff':
+        rest, fmt = _take_format('diff', argv)
+        if len(rest) < 4:
+            print('usage: rdc_analysis.py diff <a.rdc> <b.rdc> [--all] [--format %s]'
+                  % '|'.join(rdc_table.FORMATS))
+            sys.exit(2)
+        sys.exit(cmd_filediff(rest[2], rest[3], '--all' in rest[4:], fmt))
+    elif cmd == 'rootsig-check':
+        rest, fmt = _take_format('rootsig-check', argv)
+        sys.exit(cmd_rootsig_check(path, rest[3] if len(rest) > 3 else None, fmt))
+    elif cmd == 'vram':
+        rest, drops = _take_drops('vram', argv)
+        rest, fmt = _take_format('vram', rest)
+        cmd_vram(path, _arg(rest, 3, 8), drops, fmt)
     elif cmd == 'replaydiff':
         if len(argv) < 4:
             print('usage: rdc_analysis.py replaydiff <bundleA> <bundleB> [--out <dir>] [--with-images] '

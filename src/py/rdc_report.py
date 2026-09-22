@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 from rdc_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_goldens import KnownCause as KnownCause, known_for_capture as known_for_capture
 from rdc_passes import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 import rdc_profile
 from rdc_notable import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -36,6 +37,47 @@ from rdc_report_render import *  # noqa: F401,F403  (re-exported for the CLI and
 #
 # Byte-stable for a fixed bundle: no timestamps, no absolute paths, every table sorted, and nothing
 # iterated out of a set. That is what lets two runs be diffed against each other and the output be
+
+def _known_matches(flag: RedFlag, entry: KnownCause) -> bool:
+    """Whether one corpus cause is about one finding.
+
+    Three parts, and the third is what makes a cause specific: the detector must be the same, the cause's
+    `what` must be a substring of the finding's (so `the shader reads a constant block at b0 s0` is
+    matched by `the shader reads a constant block at`), and the cause's `evidence` -- when it is not
+    empty -- must appear in one of the finding's evidence lines, which is how one finding out of twenty
+    of the same detector is picked out (a name, a register, an eid range).
+    """
+    if flag['detector'] != entry['detector'] or entry['what'] not in flag['what']:
+        return False
+    return not entry['evidence'] or any(entry['evidence'] in line for line in flag['evidence'])
+
+def apply_known(flags: List[RedFlag], known: Sequence[Union[str, KnownCause]]) -> List[str]:
+    """Mark the findings a known cause explains, and return the causes that explained nothing.
+
+    A match turns `unproven` off and fills `cause` and `verdict`, and this is the **only** path by which
+    that gate opens (REFERENCE §4.17): a detector is not trusted because it exists, but a finding whose cause
+    has been followed to the frame -- or to the engine's answer -- and written down in the corpus is not
+    an observation any more, it is a verdict. A note (a string in `known`) is not a cause and matches
+    nothing.
+
+    What comes back is the **stale** list: an entry that no longer matches any finding is a corpus that
+    lies about the frame it describes (a detector renamed, a finding gone), and the caller prints it
+    rather than leaving it to be found one day. The flags are updated in place; the caller's list is its
+    own, built by `detect_all` for this run.
+    """
+    stale: List[str] = []
+    for entry in known:
+        if isinstance(entry, str):
+            continue
+        if not any(_known_matches(flag, entry) for flag in flags):
+            stale.append('%s: %s' % (entry['detector'], entry['what']))
+            continue
+        for flag in flags:
+            if _known_matches(flag, entry):
+                flag['unproven'] = False
+                flag['cause'] = entry['cause']
+                flag['verdict'] = entry['verdict']
+    return stale
 
 @rdc_profile.timed('report: detectors')
 def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List[RedFlag], List[DetectorRun]]:
@@ -158,6 +200,12 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
 
     flags, detectors = detect_all(bundle, path)
 
+    # The causes the corpus knows for *this* capture, matched by the corpus's own identity for it (its
+    # SHA-256, `rdc_goldens.known_for_capture`): a finding whose cause has been followed to the frame and
+    # written down stops being an observation, and `apply_known` is the only thing that turns that off.
+    known = known_for_capture(path)
+    stale = apply_known(flags, known)
+
     # Which of them is worth looking at first (REFERENCE §4.11): a ranking whose inputs and rules are printed with
     # its result, plus everything the rules list whatever its rank. The two lists are computed together because
     # they share the rule table and the roll-up notes.
@@ -219,7 +267,13 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     print('notable  : %d pass(es), %d resource(s)' % (len(notable_lists['passes']),
                                                       len(notable_lists['resources'])))
     print('look at  : %d recommendation(s), ranked' % len(todo['rows']))
-    print('flags    : %d finding(s) from %d detector(s), all unproven (ROADMAP §5)'
-          % (len(flags), sum(1 for run in detectors if run['ran'])))
+    proven = sum(1 for flag in flags if not flag['unproven'])
+    print('flags    : %d finding(s) from %d detector(s), %d proven by a known cause, %d unproven'
+          % (len(flags), sum(1 for run in detectors if run['ran']), proven, len(flags) - proven))
+    if known:
+        print('known    : %d entr(y/ies) for this capture in the corpus, %d of them a cause that matched'
+              % (len(known), sum(1 for entry in known if not isinstance(entry, str))))
+    for entry in stale:
+        print('stale    : the corpus knows a cause for %s that no finding here matches any more' % entry)
     return 0
 

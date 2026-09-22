@@ -347,8 +347,8 @@ int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int e
   return 0;
 }
 
-//: Defined with the bundle (ROADMAP §1), used here too: `image` and the bundle's `rt/` images save
-//: a target through the same code so the two cannot drift apart.
+//: Defined with the bundle (REFERENCE §9), used here too: `image` and the bundle's `rt/` images
+//: save a target through the same code so the two cannot drift apart.
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
                      std::string &written, int32_t &width, int32_t &height);
 
@@ -1075,7 +1075,7 @@ int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   return 0;
 }
 
-// --------------------------------------------------------------------------- the bundle (ROADMAP §1)
+// --------------------------------------------------------------------------- the bundle (REFERENCE §9)
 
 //: Runs a block with stdout pointing at a file, so a command written to print to the terminal
 //: writes a file instead. A file-descriptor swap rather than a `FILE *` threaded through the

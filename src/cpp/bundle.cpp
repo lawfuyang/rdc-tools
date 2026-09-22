@@ -555,7 +555,8 @@ void ComputeSweepBounds(IReplayController *ctrl, DumpOptions &opts, int &until, 
   opts.m_Bound = (int)idBudget;
 }
 
-// --------------------------------------------------------------------------- why the sweep is not parallel
+// --------------------------------------------------------------------------- why the sweep is not
+// parallel
 //
 // The sweep looks embarrassingly parallel -- one `SetFrameEvent` per id, each independent -- and a
 // parallel version of it was built and measured before being removed: four worker processes, each
@@ -581,14 +582,14 @@ void ComputeSweepBounds(IReplayController *ctrl, DumpOptions &opts, int &until, 
 // Reproducing the serial history per worker costs the whole prefix -- the reported state is a
 // function of every replay pass before it, so the last worker would pay the entire range. And
 // splitting at command-list boundaries, where a cold jump lands on a list's own first bindings,
-// needs a mapping from the engine's event ids to the file's chunk stream, which is ROADMAP §3's
-// open item. Two incidental findings from the attempt are in REFERENCE §9: a spawned child must
-// be given a stdin it can use (an inherited slot it cannot takes its whole stdio down -- three
+// needs a mapping from the engine's event ids to the file's chunk stream, which is the `Upstream`
+// item in ROADMAP §4. Two incidental findings from the attempt are in REFERENCE §9: a spawned child
+// must be given a stdin it can use (an inherited slot it cannot takes its whole stdio down -- three
 // "successful" workers once left three empty logs), and simultaneous replay-device creations can
 // leave one hung at zero CPU with no error, which is why any such design needs a deadline and a
 // serial fallback rather than an unbounded wait.
 
-//: The bundle producer (ROADMAP §1): one replay session, everything the engine alone can answer
+//: The bundle producer (REFERENCE §9): one replay session, everything the engine alone can answer
 //: written to disk, so the offline half can analyse a frame without a device. It is also the reason
 //: a crash is survivable: files are written as they are produced, and the manifest lists what was
 //: written, so a partial bundle says so.
@@ -1176,7 +1177,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     ObjectRow(
         std::string("{\"what\": \"an exact end to the id list\", \"why\": \"ids past the frame's"
                     " last event clamp to it, so the sweep is bounded by the file's chunk count"
-                    " (ROADMAP §2) and may hold a few trailing repeats\"}"));
+                    " (REFERENCE §9) and may hold a few trailing repeats\"}"));
     ArrayClose(false);
 
     ArrayOpen("skipped");

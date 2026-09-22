@@ -615,7 +615,7 @@ class TestCmdDxbc(CmdCase):
 
     It deliberately says nothing about what a shader *reads*: that used to be guessed by scanning the
     container for GI-ish strings, and it was removed because the shader reflection -- the replay
-    driver's job (ROADMAP §1) -- answers it exactly.
+    driver's job (REFERENCE §9) -- answers it exactly.
     """
 
     def capture(self):

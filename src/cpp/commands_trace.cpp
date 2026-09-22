@@ -1,44 +1,51 @@
 // z.commands_trace — `trace`: one shader invocation, stepped (REFERENCE §9)
 //
-// Every other command in this program reads what the frame *did*: what was bound at an event, what a
-// constant block held, which pixels a draw wrote. This one runs a single invocation of a shader and
-// reports what happened *inside* it, instruction by instruction — the question no read of the file can
-// reach, and the reason the engine's own debugger is worth a command.
+// Every other command in this program reads what the frame *did*: what was bound at an event, what
+// a constant block held, which pixels a draw wrote. This one runs a single invocation of a shader
+// and reports what happened *inside* it, instruction by instruction — the question no read of the
+// file can reach, and the reason the engine's own debugger is worth a command.
 //
-// Three facts about that debugger shape everything below, and each of them is a decision rather than a
-// detail:
+// Three facts about that debugger shape everything below, and each of them is a decision rather
+// than a detail:
 //
-//  * **A trace is one stage.** `DebugPixel`, `DebugVertex`, `DebugThread` and `DebugMeshThread` each run
-//    one shader; a pixel's whole history is *two* traces (the vertex shader that made its inputs, then
-//    the pixel shader), and this command runs the one whose invocation the caller named. Which stage
-//    that is follows from the selector, and the document prints `trace->stage` — the engine's own
-//    answer — rather than the selector's, so a mismatch would be visible rather than assumed away.
+//  * **A trace is one stage.** `DebugPixel`, `DebugVertex`, `DebugThread` and `DebugMeshThread`
+//  each run
+//    one shader; a pixel's whole history is *two* traces (the vertex shader that made its inputs,
+//    then the pixel shader), and this command runs the one whose invocation the caller named. Which
+//    stage that is follows from the selector, and the document prints `trace->stage` — the engine's
+//    own answer — rather than the selector's, so a mismatch would be visible rather than assumed
+//    away.
 //
-//  * **What the engine needs to step a shader depends on what the shader is.** A DXBC (SM5) shader is
-//    interpreted from its own bytecode, so it steps with no debug info at all — what debug info adds
-//    there is the *source*: the file and line per instruction (`instInfo`) and the source-level names
+//  * **What the engine needs to step a shader depends on what the shader is.** A DXBC (SM5) shader
+//  is
+//    interpreted from its own bytecode, so it steps with no debug info at all — what debug info
+//    adds there is the *source*: the file and line per instruction (`instInfo`) and the
+//    source-level names
 //    (`sourceVars`). A DXIL shader (DXC, and every UE shader in this project's captures) is stepped
 //    *through* the debug data DXC emitted, so without it there is no trace at all. Measured, on the
 //    Android capture: `trace 289 --pixel 640,360` answers `sourceDebugInfo is 0` and the engine's
-//    loading log says `Did not find debug data for '<hash>.pdb'` — the search for the PDB beside the
-//    capture. So which of the two a reader has is *said* (`sourceDebugInfo`) rather than assumed, and
-//    the refusal names the file the engine went looking for.
+//    loading log says `Did not find debug data for '<hash>.pdb'` — the search for a PDB that is not
+//    beside the capture, and one the caller can point the engine at with `--pdb <dir>` (`main`
+//    writes the engine's own shader-debug search paths, which are otherwise a UI-only setting). So
+//    which of the two a reader has is *said* (`sourceDebugInfo`) rather than assumed, and the
+//    refusal names both the file the engine went looking for and the flag that answers it.
 //
 //  * **A trace that could not be run comes back empty.** The engine answers NULL, or a trace whose
-//    `debugger` is NULL (RenderDoc's own callers treat that second form as invalid too — every viewer in
-//    qrenderdoc tests `trace->debugger == NULL`), and the *reason* is not in the return value: it keeps
-//    it in its log and, for a shader it knows it cannot run, in `ShaderDebugInfo::debugStatus`. The
-//    refusal below is therefore built out of what the reflection actually holds, says which causes it
-//    can and cannot tell apart, and names the fix rather than printing "failed".
+//    `debugger` is NULL (RenderDoc's own callers treat that second form as invalid too — every
+//    viewer in qrenderdoc tests `trace->debugger == NULL`), and the *reason* is not in the return
+//    value: it keeps it in its log and, for a shader it knows it cannot run, in
+//    `ShaderDebugInfo::debugStatus`. The refusal below is therefore built out of what the
+//    reflection actually holds, says which causes it can and cannot tell apart, and names the fix
+//    rather than printing "failed".
 //
 // What is printed is the three things the roadmap's item asks for: the invocation's **inputs** (the
-// values its first instruction sees), one row per **step** with the variables that changed on it, and
-// the **outputs** — the variable list after the last step, which is what the invocation ended up
-// producing. The outputs are accumulated the way RenderDoc's own UI accumulates them (`ShaderViewer`):
-// a change's name is its `before` name when it has one and its `after` name otherwise, an empty `after`
-// name is a variable leaving scope, and every other change is a new value. That rule lives in
-// `TraceApplyChange` below, on its own, because it is the one piece of this command that is wrong
-// *quietly* — and the selftest pins it without needing a device.
+// values its first instruction sees), one row per **step** with the variables that changed on it,
+// and the **outputs** — the variable list after the last step, which is what the invocation ended
+// up producing. The outputs are accumulated the way RenderDoc's own UI accumulates them
+// (`ShaderViewer`): a change's name is its `before` name when it has one and its `after` name
+// otherwise, an empty `after` name is a variable leaving scope, and every other change is a new
+// value. That rule lives in `TraceApplyChange` below, on its own, because it is the one piece of
+// this command that is wrong *quietly* — and the selftest pins it without needing a device.
 
 #include "common.h"
 
@@ -59,6 +66,27 @@ std::string FirstLogLine(const rdcstr &log)
   while(!text.empty() && (text[text.size() - 1] == '\r' || text[text.size() - 1] == ' '))
     text.erase(text.size() - 1);
   return text;
+}
+
+//: The same log, whole, with every line indented so it sits under the sentence that introduces it.
+//: For the case where the engine found nothing: each line is a path it tried or a place it decided
+//: not to look, and that list *is* the answer to "where does this PDB have to be?".
+std::string IndentedLog(const rdcstr &log)
+{
+  std::string out;
+  const std::string text = log.c_str();
+  size_t at = 0;
+  while(at < text.size())
+  {
+    const size_t end = text.find('\n', at);
+    const std::string line = text.substr(at, end == std::string::npos ? std::string::npos : end - at);
+    if(!line.empty())
+      out += Fmt("\n       %s", line.c_str());
+    if(end == std::string::npos)
+      break;
+    at = end + 1;
+  }
+  return out;
 }
 
 //: The reason a trace could not be run, as a sentence: the facts the reflection holds, then what to do
@@ -95,8 +123,17 @@ std::string NoTraceText(const TraceRequest &req, int eid, ShaderStage stage,
   }
 
   if(info != NULL && !info->debugInfoLoadingLog.empty())
-    out += Fmt("\n       its shader loading log says: %s",
-               FirstLogLine(info->debugInfoLoadingLog).c_str());
+  {
+    // A *missing* debug-data case is a search, and every line of the log is part of the answer: which
+    // paths the engine tried is exactly what says where the PDB has to be, or what to pass to `--pdb`.
+    // With debug data present the rest of the log is noise, so that case keeps the first line only.
+    if(info->sourceDebugInformation)
+      out += Fmt("\n       its shader loading log says: %s",
+                 FirstLogLine(info->debugInfoLoadingLog).c_str());
+    else
+      out += Fmt("\n       and its shader loading log is the search, in the engine's own words:%s",
+                 IndentedLog(info->debugInfoLoadingLog).c_str());
+  }
 
   if(info != NULL && !info->sourceDebugInformation)
   {
@@ -104,10 +141,12 @@ std::string NoTraceText(const TraceRequest &req, int eid, ShaderStage stage,
         "\n       the debug data is what the engine steps a DXIL shader through, so it has to be "
         "findable: embedded in the shader with `-Zi -Qembed_debug`, or the PDB the shader names "
         "(the file "
-        "the log above is about) beside the capture -- RenderDoc's debug search paths, set in its "
-        "own UI, "
-        "are where to add a folder. A DXBC (SM5) shader is stepped from its own bytecode and needs "
-        "none "
+        "the log above is about) in a folder given as `--pdb <dir>` -- the engine searches those "
+        "directories "
+        "recursively, by file name, and the name is a hash, so the folder is the part worth "
+        "naming. A "
+        "DXBC "
+        "(SM5) shader is stepped from its own bytecode and needs none "
         "of this, so if that is what this capture holds, the cause is the invocation instead.";
   }
   else

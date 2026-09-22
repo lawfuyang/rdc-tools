@@ -1619,9 +1619,10 @@ assumed:
 * **A trace that could not be run comes back empty, and says nothing about why.** The engine answers a NULL
   trace or one whose `debugger` is NULL (the second is what it actually returns — RenderDoc's own Qt viewers all
   test `trace->debugger == NULL`), and the reason lives in its log and in `ShaderDebugInfo`. So the refusal is
-  built from what the reflection holds and **branches on `sourceDebugInfo`**: no debug data → the file the
-  loading log names, and what to do about it (embed it with `-Zi -Qembed_debug`, or put the PDB beside the
-  capture — RenderDoc's debug search paths, set in its own UI, are where to add a folder); debug data *present* →
+  built from what the reflection holds and **branches on `sourceDebugInfo`**: no debug data → the engine's
+  whole loading log, which is a *search* (every line of it names a path it tried: that list is the answer to
+  "where does this PDB have to be?"), and what to do about it — embed the debug info in the shader with
+  `-Zi -Qembed_debug`, or point the engine at the folder that holds it with `--pdb <dir>`; debug data *present* →
   the *invocation* is what failed, which for a pixel is usually a co-ordinate no fragment wrote or none that
   passed the depth test there, and `--vertex`/`--thread` on the same event is the cheapest way to tell the two
   apart because an invocation with no fragment to find cannot fail for want of one. The engine's own
@@ -1862,6 +1863,38 @@ The guard judges the **program** version, not the logfile format version: the en
 rows above are `tests`-free and reproducible by hand — copy a capture, rewrite sixteen bytes at offset 16,
 and run `info`.
 
+**`--pdb <dir>` is where the engine looks for shader debug info** (repeatable; `$RDC_PDB` is the same list
+with `;` between directories, and it is the only way in for a caller that does not write the command line —
+the library takes no options, and `sweep`/`batch` run lines with no room for a global flag). It exists
+because of what the file *is*: a DXIL shader is stepped through its debug data, that data is looked up by the
+**name the shader carries** (a hash — `Did not find debug data for 'ec6e6433f96a985d5086cd232bf42fd8.pdb'`),
+and the capture does not record where the shader was built. So a reader cannot guess the folder, and the
+alternative was editing RenderDoc's own `renderdoc.conf` before a command that is otherwise one line.
+
+It is RenderDoc's setting, not a private mechanism: the driver resolves `RENDERDOC_SetConfigSetting` from the
+loaded DLL and writes `DXBC_Debug_SearchDirPaths` — the engine's list of directories to walk **recursively**,
+comparing file names against the name the shader asks for — as an array of strings, which is the shape
+`ConfigVarRegistration<rdcarray<rdcstr>>` reads (`value`'s children, each one's `data.str`). Four details are
+deliberate: it is set **after** `RENDERDOC_InitialiseReplay` (which is what loads the config) and **before**
+the capture is opened, so nothing overwrites it; the list is **replaced** rather than appended to, because a
+per-process setting that starts empty makes the command line the whole answer rather than a contribution to
+whatever the last run left behind; each directory is made **absolute** here, so a relative path means what the
+caller's working directory says rather than whatever directory the *engine* happens to be in; and a directory
+that is not there is **warned about** instead of being searched in silence, because the engine's answer to a
+path it cannot read is identical to its answer to an empty one. Nothing is written back to the user's
+`renderdoc.conf`: a replay app writes that file only from `ProcessConfig`, which runs inside
+`InitialiseReplay`, so a value set afterwards lives and dies with this process.
+
+Measured on the Android capture, whose pixel shader wants a PDB that is not in the capture: with
+`--pdb build\perf\pdbs` the engine's own loading log reads `Recursive Search Path(s):` and then the absolute
+form of that directory, and with a file of the wanted *name* placed there it goes on to say `Ignoring debug
+info file '<dir>/ec6e6433f96a985d5086cd232bf42fd8.pdb' hash 0x080080080080 does not match shader hash
+0x0833646EEC085D986AF90823CD865008D82FF42BFile found in recursive directory search` — the file was found, by
+name, in the folder the flag named, and rejected for the one reason a placeholder deserves. With a PDB whose
+hash matches, that is where the debug data comes from, and it is what turns `sourceDebugInfo is 0` into a
+trace. The refusal quotes the whole loading log for exactly this reason: it is the search, line by line, and
+the fix is to put the file in one of the paths it lists.
+
 **The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path; `--dll` overrides both). RenderDoc's own
 stringisers for `ResultCode`, `ResourceUsage`, `MessageSeverity` and `GPUCounter` are not exported, so
 the driver does **not** supply the missing template specialisations: RenderDoc's definitions exist in
@@ -2069,7 +2102,13 @@ call it is -- and only then treat a `patch` render as evidence. Reporting this i
   runs at once cannot write into each other's log (a second run in the same second takes `-2`). It
   records the working directory, each phase with a timestamp, every batch command with its own time,
   and why the run stopped. `--log <file>` names one exact file instead, truncated, since it is still
-  that run's log. Long loops — the sweep, the per-event pass, `resources.json`, texture decoding — also
+  that run's log. A message reaches stderr and the log through one formatting path each (`Log`, and `Fail`
+  for a failure, which prints the same text to both), and both format into a `std::string` rather than a
+  fixed buffer: a message can carry the engine's own words, and a 512-byte `vsnprintf` — what both used
+  until 2026-09-22 — cut the shader-trace refusal mid-path, dropping every line that named a directory the
+  engine had searched. Nothing else in the driver formats a message into a fixed buffer except the two
+  places where the *caller* owns the buffer (`api.cpp`'s ABI error slot, whose length is a parameter).
+  Long loops — the sweep, the per-event pass, `resources.json`, texture decoding — also
   print a **line every ten seconds** with the rate and what is left (`900/1740 (52%), 47 ms each, ~40 s
   left`), because the count-based version (`every 2000 ids`) stayed silent for the whole 164 s of a
   `--max-events 900` sweep: it stopped at id 1740, before the first line was ever due. A loop that

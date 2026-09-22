@@ -170,7 +170,8 @@ void Usage()
       "DLL\n"
       "\n"
       "Options (any position): --json, --log <file>, --disasm, --save <dir>, --out <dir>, --check\n"
-      "<dir>, --at-marker <path>, --dll <path> (the renderdoc.dll to replay with).\n"
+      "<dir>, --at-marker <path>, --dll <path> (the renderdoc.dll to replay with), --pdb <dir>\n"
+      "(repeatable, or $RDC_PDB: where to look for shader debug info, for `trace`).\n"
       "\n"
       "An event id argument may be a *marker path* instead of a number: `state BasePass` and\n"
       "`state \"Scene > BasePass\"` both work, matching the name inside the path first, then a\n"
@@ -301,6 +302,24 @@ void Usage()
       "than the one loaded is refused, with both versions named, instead of being replayed by an "
       "engine\n"
       "that does not know the file.\n"
+      "--pdb <dir> (repeatable, or $RDC_PDB with `;` between the directories) is where the engine "
+      "should look\n"
+      "for the debug info a shader names -- the\n"
+      "`.pdb` matched by hash, which a DXIL shader is stepped *through*, and which almost no "
+      "shipped capture\n"
+      "carries: without it `trace` can only say which file the engine went looking for, and that "
+      "file's name\n"
+      "is a hash, so guessing where it lives is not a thing a reader can do. Each directory is "
+      "searched\n"
+      "recursively, by file name; the list is what the engine's own `DXBC_Debug_SearchDirPaths` "
+      "setting\n"
+      "holds, which RenderDoc's UI is otherwise the only way to set, and it is replaced rather "
+      "than added to\n"
+      "-- this process starts with none. A directory that is not there is warned about instead "
+      "of being\n"
+      "searched in silence, because the engine's answer to a typo is the same as its answer to a "
+      "PDB that\n"
+      "was never built there.\n"
       "$RDC_REPLAY_DEBUG=1 traces every step, for when the engine takes the process down. Run one\n"
       "replay at a time: the engine creates a device per process, and two at once on one GPU is "
       "what\n"
@@ -1341,9 +1360,32 @@ int main(int argc, char **argv)
   bool bWantDisasm = false;
   const char *saveDir = NULL;
   std::string logPath = DefaultLogStem();
-  bool bPerRunLog = true;                    // until `--log` names one exact file
-  std::string schemaOut;                     // `--out <dir>`: where `schema` writes them
-  std::string schemaCheck;                   // `--check <dir>`: the copy to verify against
+  bool bPerRunLog = true;              // until `--log` names one exact file
+  std::string schemaOut;               // `--out <dir>`: where `schema` writes them
+  std::string schemaCheck;             // `--check <dir>`: the copy to verify against
+  std::vector<std::string> pdbDirs;    // `--pdb <dir>`, repeatable: the shader debug search paths
+  // `$RDC_PDB` is the same list from the environment, and it is the *only* way in for a caller that
+  // does not write the command line: the library (api.cpp) takes no options of its own, and
+  // `sweep`/`batch` run lines that have no room for a global flag. `;` separates, as it does in
+  // every path list on Windows, and the flag adds to what the environment asked for rather than
+  // replacing it -- "where to look" is a list where more places to look is never the surprising
+  // reading.
+  if(const char *env = getenv("RDC_PDB"))
+  {
+    std::string list = env;
+    size_t at = 0;
+    while(at <= list.size())
+    {
+      const size_t end = list.find(';', at);
+      const std::string dir =
+          list.substr(at, end == std::string::npos ? std::string::npos : end - at);
+      if(!dir.empty())
+        pdbDirs.push_back(dir);
+      if(end == std::string::npos)
+        break;
+      at = end + 1;
+    }
+  }
   bool bRepl = false, bReplQuiet = false;    // `--repl` / `--stdin`: commands from stdin
   for(int i = 1; i < argc; i++)
   {
@@ -1360,6 +1402,8 @@ int main(int argc, char **argv)
     }
     else if(!strcmp(argv[i], "--dll") && i + 1 < argc)
       g_DllOverride = argv[++i];
+    else if(!strcmp(argv[i], "--pdb") && i + 1 < argc)
+      pdbDirs.push_back(argv[++i]);
     else if(!strcmp(argv[i], "--repl"))
       bRepl = true;
     else if(!strcmp(argv[i], "--stdin"))
@@ -1461,6 +1505,26 @@ int main(int argc, char **argv)
   if(!InitialiseReplay(dll, argc, argv))
     return Fail(1, "RENDERDOC_InitialiseReplay failed");
   const ReplaySystemGuard replaySystem;    // declared first, so it shuts down last
+
+  // `--pdb` sits here on purpose: after the engine has read its config (which is what
+  // `RENDERDOC_InitialiseReplay` does) and before anything loads a shader, so the paths are in
+  // place for the first capture open and nothing can overwrite them. A directory that is not there
+  // is said out loud
+  // -- the engine searches a path it cannot read exactly as it searches an empty one, and the
+  // difference between "the PDB is elsewhere" and "you typed the folder wrong" is one this command
+  // line already knows.
+  if(!pdbDirs.empty())
+  {
+    for(const std::string &missing : MissingShaderDebugPaths(pdbDirs))
+      fprintf(stderr, "warning: --pdb %s is not a directory, so nothing will be found under it\n",
+              missing.c_str());
+
+    if(SetShaderDebugPaths(dll, pdbDirs))
+    {
+      for(const std::string &dir : pdbDirs)
+        Log("shader debug search path: %s", AbsolutePath(dir).string().c_str());
+    }
+  }
 
   Trace("RENDERDOC_OpenCaptureFile");
   ICaptureFile *file = OpenCaptureFile(dll);

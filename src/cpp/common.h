@@ -58,6 +58,11 @@ typedef ICaptureFile *(RENDERDOC_CC *pOpenCaptureFile)();
 typedef const char *(RENDERDOC_CC *pGetVersionString)();
 typedef void(RENDERDOC_CC *pInitialiseReplay)(GlobalEnvironment env, const rdcarray<rdcstr> &args);
 typedef void(RENDERDOC_CC *pShutdownReplay)();
+//: `RENDERDOC_SetConfigSetting(name)` returns the *value* node of a setting in the engine's own
+//: config, or NULL when this engine has no setting by that name (`RenderDoc::FindConfigSetting`
+//: walks the name by `_` and `.`, and hands back the node's `value` child). It is how `--pdb`
+//: reaches the shader debug search paths, which are otherwise only settable in RenderDoc's own UI.
+typedef SDObject *(RENDERDOC_CC *pSetConfigSetting)(const rdcstr &name);
 
 // --------------------------------------------------------------------------- shared state
 //
@@ -888,6 +893,16 @@ bool DirIsEmpty(const std::filesystem::path &path, bool &bEmpty);
 //: A path inside the bundle, relative to its root and with forward slashes, so the manifest reads
 //: the same whichever way the root was spelled.
 std::string BundleRelative(const std::filesystem::path &root, const std::filesystem::path &full);
+//: The directories the engine should search for shader debug info: `--pdb <dir>`, repeatable, made
+//: absolute here and written into RenderDoc's own `DXBC_Debug_SearchDirPaths` setting before the
+//: capture is opened. False when this engine has no such setting or does not export the call, which
+//: a caller reports rather than treating as "no PDBs": the two are different facts and only one of
+//: them is the user's.
+bool SetShaderDebugPaths(HMODULE dll, const std::vector<std::string> &dirs);
+//: The entries of `dirs` that are not directories, in the order given. The engine's answer to a
+//: path that is not there is to walk it and find nothing, so a typo in `--pdb` is indistinguishable
+//: from "the PDB is not in that folder" unless the caller asks this first.
+std::vector<std::string> MissingShaderDebugPaths(const std::vector<std::string> &dirs);
 
 // --------------------------------------------------------------------------- images (image.cpp)
 

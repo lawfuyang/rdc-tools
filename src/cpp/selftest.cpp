@@ -698,6 +698,40 @@ int CmdSelftest()
             "the selftest left its scratch folder behind");
   }
 
+  // ------------------------------------------- `--pdb`'s answer about a path that is not a directory
+  //
+  // The engine's answer to a search path it cannot read is the same as its answer to an empty folder --
+  // it searches, finds nothing, and the shader's debug data is "not found" either way. So the difference
+  // between "the PDB is somewhere else" and "the flag has a typo in it" is one only the caller can make,
+  // and it is made from the filesystem alone: no engine, no capture, no device.
+  {
+    const std::filesystem::path dir(DefaultLogStem() + ".pdbdir");
+    MakeDir(dir);
+    const std::filesystem::path plain = dir / "plain.txt";
+    FILE *f = FileOpen(plain, "wb");
+    if(f != NULL)
+    {
+      fputs("x", f);
+      fclose(f);
+    }
+
+    const std::vector<std::string> asked = {dir.string(), dir.string() + "\\nope", plain.string()};
+    const std::vector<std::string> missing = MissingShaderDebugPaths(asked);
+    t.Check(missing.size() == 2 && missing[0] == asked[1] && missing[1] == asked[2],
+            "pdb-paths-report-what-is-not-a-directory",
+            "a folder that is not there, or a file, was accepted as a shader debug search path");
+    t.Check(MissingShaderDebugPaths({dir.string()}).empty(), "pdb-paths-accept-a-directory",
+            "a folder that is there was reported as missing");
+    t.Check(MissingShaderDebugPaths({}).empty(), "pdb-paths-nothing-to-check",
+            "an empty list of paths reported something");
+
+    std::error_code cleanupEc;
+    std::filesystem::remove(plain, cleanupEc);
+    std::filesystem::remove(dir, cleanupEc);
+    t.Check(!std::filesystem::exists(dir, cleanupEc), "pdb-paths-cleanup",
+            "the selftest left its scratch folder behind");
+  }
+
   // ---------------------------------- the picture and geometry vocabularies (text.cpp, commands_*.cpp)
   {
     // Every name round-trips: one that parses into an overlay and prints as another is a document that lies

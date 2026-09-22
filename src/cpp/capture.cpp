@@ -48,14 +48,18 @@ ULONGLONG Millis()
 
 void Log(const char *fmt, ...)
 {
-  char text[512];
+  // `FmtV`, not a local buffer. A message can carry the engine's own words -- the refusal for a
+  // failed shader trace prints a whole shader *loading log* -- and the 512-byte `vsnprintf` that
+  // was here cut one mid-path, silently dropping the lines that named the directories the engine
+  // had searched. The other half of the same run's output (`Fail`) truncated identically, so the
+  // two agreed on a message that was wrong.
   va_list args;
   va_start(args, fmt);
-  vsnprintf(text, sizeof(text), fmt, args);
+  const std::string text = FmtV(fmt, args);
   va_end(args);
 
   const double seconds = (g_Start == 0) ? 0.0 : (Millis() - g_Start) / 1000.0;
-  fprintf(stderr, "[replay_dump] %6.1fs  %s\n", seconds, text);
+  fprintf(stderr, "[replay_dump] %6.1fs  %s\n", seconds, text.c_str());
   fflush(stderr);
 
   if(g_LogFile != NULL)
@@ -63,7 +67,7 @@ void Log(const char *fmt, ...)
     SYSTEMTIME now;
     GetLocalTime(&now);
     fprintf(g_LogFile, "%04d-%02d-%02d %02d:%02d:%02d.%03d  %7.1fs  %s\n", now.wYear, now.wMonth,
-            now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, seconds, text);
+            now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, seconds, text.c_str());
     fflush(g_LogFile);
   }
 }
@@ -213,14 +217,17 @@ void Progress::Done(int done)
 //: a log and a stderr capture say the same thing.
 int Fail(int code, _Printf_format_string_ const char *fmt, ...)
 {
-  char text[512];
+  // Formatted the same way `Log` is, and for the same reason: a failure's message is often the
+  // *most* detailed text the driver produces (the whole of a search, a list of what was searched
+  // for), and the 512-byte buffer that used to be here cut it -- the tail of a long path and
+  // everything after it, which for the shader-trace refusal was every line naming a directory.
   va_list args;
   va_start(args, fmt);
-  vsnprintf(text, sizeof(text), fmt, args);
+  const std::string text = FmtV(fmt, args);
   va_end(args);
 
-  fprintf(stderr, "error: %s\n", text);
-  Log("failed: %s", text);
+  fprintf(stderr, "error: %s\n", text.c_str());
+  Log("failed: %s", text.c_str());
   return code;
 }
 
@@ -475,6 +482,78 @@ ICaptureFile *OpenCaptureFile(HMODULE dll)
     return NULL;
   }
   return open();
+}
+
+std::vector<std::string> MissingShaderDebugPaths(const std::vector<std::string> &dirs)
+{
+  std::vector<std::string> missing;
+  for(const std::string &dir : dirs)
+  {
+    std::error_code ec;
+    if(!std::filesystem::is_directory(dir, ec) || ec)
+      missing.push_back(dir);
+  }
+  return missing;
+}
+
+//: `--pdb <dir>`: where to look for the debug info a shader names (a `.pdb`, matched by hash), so a
+//: DXIL shader can be stepped at all (REFERENCE §9, `trace`). The path is RenderDoc's own setting
+//: -- `DXBC_Debug_SearchDirPaths`, a list of directories the engine walks recursively, comparing
+//: file *names* against the name the shader asks for -- and the UI is where it is normally set. A
+//: replay host can set it too, through `RENDERDOC_SetConfigSetting`, and this is that: the flag
+//: exists because the alternative is editing a config file by hand before a command that is
+//: otherwise one line.
+//:
+//: Three things about it are deliberate:
+//:
+//:  * **The list is replaced, not appended to.** The setting is per process and starts empty
+//:  (nothing in a
+//:    capture records where its shaders were built), so what the command line names is the whole
+//:    answer; a merged list would depend on the config file of whoever ran it last.
+//:  * **Each directory is made absolute here.** A relative path is the caller's convenience, and it
+//:  would
+//:    otherwise be resolved by the *engine*, against a working directory that is not part of the
+//:    flag.
+//:  * **It is set after `RENDERDOC_InitialiseReplay` and before the capture is opened.** The engine
+//:  reads
+//:    the config once, at `InitialiseReplay` (`ProcessConfig`), which is also the only thing that
+//:    writes the file back: a value set here lives in this process's memory and never reaches the
+//:    user's `renderdoc.conf`, so there is nothing to restore afterwards.
+bool SetShaderDebugPaths(HMODULE dll, const std::vector<std::string> &dirs)
+{
+  pSetConfigSetting setSetting =
+      (pSetConfigSetting)GetProcAddress(dll, "RENDERDOC_SetConfigSetting");
+  if(setSetting == NULL)
+  {
+    fprintf(stderr,
+            "warning: this renderdoc.dll has no RENDERDOC_SetConfigSetting export, so `--pdb` "
+            "cannot be "
+            "applied\n");
+    return false;
+  }
+
+  SDObject *value = setSetting(rdcstr("DXBC_Debug_SearchDirPaths"));
+  if(value == NULL)
+  {
+    fprintf(stderr,
+            "warning: this engine has no DXBC_Debug_SearchDirPaths setting, so `--pdb` cannot be "
+            "applied\n");
+    return false;
+  }
+
+  // The node the engine handed back is the setting's own `value` child, and a `rdcarray<rdcstr>`
+  // config is read as: the number of children, and each child's `data.str`
+  // (`ConfigVarRegistration<rdcarray<rdcstr>>` in RenderDoc's settings.cpp). So it is emptied and
+  // filled with `$el` string nodes, which is the shape the engine itself writes for an array.
+  value->DeleteChildren();
+  value->type.name = "array";
+  value->type.basetype = SDBasic::Array;
+  for(const std::string &dir : dirs)
+  {
+    const std::filesystem::path abs = AbsolutePath(std::filesystem::path(dir));
+    value->AddAndOwnChild(makeSDObject("$el"_lit, rdcstr(abs.string().c_str())));
+  }
+  return true;
 }
 
 // The teardown order is the engine's, and it is easy to get wrong by hand: the controller must go

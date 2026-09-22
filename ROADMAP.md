@@ -46,7 +46,7 @@ presentation on top (landed — REFERENCE §4.11). That is the shape any future 
 a bundle of engine answers, testable from fixtures and diffable between runs (REFERENCE §4.11), with its tests landed in the
 same change.
 
-The **D3D12 harness** (§2.5) absorbs nothing: it exists for the one question replay cannot answer — what a
+The **D3D12 harness** (§1.5) absorbs nothing: it exists for the one question replay cannot answer — what a
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
@@ -65,8 +65,9 @@ check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
 rendered image, the cross-checks between a shader's reflection and the state it is given (`crosscheck`), the
 per-pass counter fold (`counters --per-pass`), the picture commands with their subresources and overlays
-(`image`, `textures --save`, `cubemap`, `sheet`), the format coverage audit (`formats`), and the bundle the
-report generator reads (`dump` +
+(`image`, `textures --save`, `cubemap`, `sheet`), the format coverage audit (`formats`), one shader
+invocation stepped from its inputs through every step to its outputs (`trace`), and the bundle the report
+generator reads (`dump` +
 `bundle-verify`). The offline tool has a
 hermetic unittest suite (`python src\py\rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
@@ -111,16 +112,7 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ---
 
-## 1. P1 — Replay driver: experiments on the frame (the "what if" tools)
-
-* **Shader debugging** — `DebugPixel(x, y, inputs)`, `DebugVertex(vertid, instid, idx, view)`,
-  `DebugThread(group, thread)` and `DebugMeshThread(...)` return a `ShaderDebugTrace`; `ContinueDebug(debugger)`
-  steps it and returns `ShaderDebugState`s; `FreeTrace` releases it. With a trace, print the inputs, the
-  per-step variables and the outputs of one invocation. Only works for shaders built with debug info
-  (`-Zi -Od`), which most captures do not have — the item is to *say that clearly* rather than fail obscurely,
-  and to document how to re-capture with it. (~2 d)
-
-## 2. P2/P3 — Beyond the local desktop
+## 1. P2/P3 — Beyond the local desktop
 
 * **Remote replay** — capture on a phone, replay where the driver lives: RenderDoc's remote server plus
   `ReplayOptions`, so a mobile capture is replayed by the mobile driver on the device (real counters, real driver
@@ -137,12 +129,12 @@ say so explicitly, and should degrade gracefully when it is missing.
   source tree, and what is left here is doing the same for the other direction — the *analysis* is where the
   D3D12 assumptions live (the payload decoders, the resource table), so a Vulkan capture can be named and not
   yet read. (~1 d + evidence from a real capture of another API)
-* **D3D12 harness** (kept for completeness) — see §2.5 below.
+* **D3D12 harness** (kept for completeness) — see §1.5 below.
 * **Upstream** — the chunk-level findings (event ids vs chunk indices, what `InitialContents` really holds, the
   crash-handle server, the `TextureSave`/`GetTextureData` subresource split) are the kind of thing RenderDoc's
   own docs and tools benefit from. Not a work item, a standing intention: file them as they are confirmed.
 
-### 2.5 The D3D12 harness (only for *synthetic inputs*)
+### 1.5 The D3D12 harness (only for *synthetic inputs*)
 
 **What.** A minimal standalone D3D12 program that creates its own device/PSO/buffers and runs a shader (the
 DXIL extracted by `dump-shaders`) with constants that we choose.
@@ -179,25 +171,23 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 
 **Effort.** ~2–3 days for a single-purpose harness; scope it to one shader at a time.
 
-## 3. Suggested order
+## 2. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
-item of §1–§2 appears exactly once, so this is the whole list in one place rather than a selection of it; each
-item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
-item *is*.
+item of §1 appears exactly once, so this is the whole list in one place rather than a selection of it; each item
+keeps its section's **P** label and its own effort figure, so this file stays the place to read what an item
+*is*.
 
 **Phase 1 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
-list — a device, a debug-info capture, evidence, or a decision:
+list — a device, evidence, or a decision:
 
-1. **Remote replay (§2, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
+1. **Remote replay (§1, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
    honest fix for the desktop-GPU caveat every report carries.
-2. **Shader debugging (§1, ~2 d)** — only for shaders built with debug info (`-Zi -Od`), which most captures
-   do not have: the first half of the item is to say that clearly and document how to re-capture.
-3. **D3D12 harness (§2.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
+2. **D3D12 harness (§1.5, ~2–3 d)** — only for inputs the capture does not contain, and it starts by
    settling whether a patched shader changes a render (REFERENCE §9 has the measurement), not by writing the
    program.
-4. **A capture-side annotation layer (§2, ~2–3 d)** — needs an installed DLL, and a scenario where our own
+3. **A capture-side annotation layer (§1, ~2–3 d)** — needs an installed DLL, and a scenario where our own
    markers beat the engine's names.
-5. **Other APIs' names (§2, ~1 d + evidence)** — naming them is done (`--driver`); reading their payloads is
+4. **Other APIs' names (§1, ~1 d + evidence)** — naming them is done (`--driver`); reading their payloads is
    not, and that needs a capture from another API in hand.
-6. **Upstream (§2)** — not a work item and not a phase: a standing intention to file what gets confirmed.
+5. **Upstream (§1)** — not a work item and not a phase: a standing intention to file what gets confirmed.

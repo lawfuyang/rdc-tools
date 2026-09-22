@@ -559,6 +559,77 @@ const ShaderReflection *BoundReflection(IReplayController *ctrl, const D3D12Pipe
 void BlockRead(IReplayController *ctrl, const D3D12Pipe::State *st, const ShaderReflection *refl,
                ShaderStage stage, const D3D12Pipe::Shader *sh, int slot, BlockValues &out);
 
+//: `trace <rdc> <eid> <selector>`: one shader invocation, stepped (commands_trace.cpp). The engine's
+//: four debugging entry points are four ways to name *one* invocation, and which one is being run is the
+//: whole of the request -- so the selector is the request's own type rather than a flag beside it.
+enum class TraceInvocation
+{
+  None,
+  Pixel,         // DebugPixel(x, y, DebugPixelInputs)
+  Vertex,        // DebugVertex(vertid, instid, idx, view)
+  Thread,        // DebugThread(groupid, threadid)
+  MeshThread,    // DebugMeshThread(groupid, threadid)
+};
+
+//: `DebugPixelInputs`' "no preference" (`~0U`, the API's own default for all three fields), carried
+//: in the request so "the caller said nothing" and "the engine chooses" stay one value.
+constexpr uint32_t kTraceNoPreference = ~0u;
+//: The hard bound on steps even under `--all`: a shader that never leaves an unbounded loop would
+//: step until the process died, and a cap that is *said* beats one that is discovered. No measured
+//: shader comes within three orders of magnitude of it.
+constexpr long long kTraceStepCap = 1000000;
+
+struct TraceRequest
+{
+  TraceInvocation m_Kind = TraceInvocation::None;
+  //: `--pixel`: the co-ordinates in the *rendered* target's space (top-left, as the engine's API
+  //: takes them for every API, and as `pixelhistory`'s are).
+  uint32_t m_X = 0, m_Y = 0;
+  //: `--vertex`: the vertex and instance index, the index to read vertex inputs with (the draw's
+  //: own offsets applied, as the API requires), and the multiview view. `m_bIndexGiven` records
+  //: whether the caller spelled the third one at all, because the default (`idx = vertid`, right
+  //: for a non-indexed draw) is logged when it is used rather than left implicit.
+  uint32_t m_VertId = 0, m_InstId = 0, m_Index = 0, m_VertexView = 0;
+  bool m_bIndexGiven = false;
+  //: `--thread` and `--mesh-thread`: the 3D workgroup index and the thread within it.
+  uint32_t m_Group[3] = {0, 0, 0};
+  uint32_t m_Thread[3] = {0, 0, 0};
+  //: `DebugPixelInputs` (pixel only): a multisampled sample, the primitive to prefer, and the
+  //: layered or multiview view. Each is `kTraceNoPreference` unless the caller said otherwise.
+  uint32_t m_Sample = kTraceNoPreference;
+  uint32_t m_Primitive = kTraceNoPreference;
+  uint32_t m_PixelView = kTraceNoPreference;
+  //: How many steps to run before stopping (`--max-steps`), or 0 for `--all`.
+  long long m_MaxSteps = 200;
+};
+
+const char *TraceInvocationName(TraceInvocation kind);
+//: The invocation as a caller would say it back: `pixel 12,34`, `vertex 3,0,3,0`, `thread 1,0,0
+//: 0,0,0`. One spelling, used by the document and by every message about it -- a refusal that named
+//: the invocation differently from the document would be two names for one thing.
+std::string TraceInvocationText(const TraceRequest &req);
+//: The stage a selector implies, which is what the bound shader and its debug info are looked up by.
+ShaderStage TraceStage(TraceInvocation kind);
+//: A `ShaderEvents` set as words (`sample/load/gather, nan/inf`), `none` for an empty one, and an
+//: unknown bit as its own hex rather than dropped. The selftest pins all three, because a flag set
+//: is exactly the kind of value that goes wrong without looking wrong.
+std::string TraceFlagsText(ShaderEvents flags);
+//: One variable change as a reader needs it: `a: 0 -> 1`, `a = 1 (new)` for one that came into
+//: scope, `a left scope` for one that stopped existing.
+std::string TraceChangeText(const ShaderVariableChange &change);
+//: Applies a state's changes to a running variable list, the way RenderDoc's own UI does it
+//: (`ShaderViewer::AddCurrentState`): the name is the `before` name when there is one, an empty
+//: `after` name removes the variable, and anything else is a new value. The selftest pins all three
+//: cases: this is the one piece of `trace` that is wrong *quietly*.
+void TraceApplyChange(std::map<std::string, std::string> &vars, const ShaderVariableChange &change);
+//: The source location covering an instruction, from a trace's `instInfo` -- which is *not* indexed
+//: by instruction (the API says so), so this is the lower-bound search its own documentation
+//: implies. Empty when no mapping covers it, or when the instruction has one that names no file.
+std::string TraceSourceAt(const ShaderDebugTrace &trace, const ShaderReflection *refl,
+                          uint32_t instruction);
+int CmdTrace(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+             const TraceRequest &req);
+
 //: `watch <name> [--since A] [--until B] [--max-events N] [--stage <stage>] [--all]`: one reflection
 //: member's value at every event of a range, as one row per *change* (commands_watch.cpp).
 int CmdWatch(IReplayController *ctrl, ICaptureFile *file, const char *path,

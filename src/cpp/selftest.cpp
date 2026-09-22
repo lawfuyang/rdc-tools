@@ -1324,6 +1324,142 @@ int CmdSelftest()
             "a name that is not in the tree matched something");
   }
 
+  // ------------------------------------------------------------------ the shader trace's rules
+  //
+  // A trace needs a capture with debug data *and* a device, so what is checked here is the half
+  // that does not: the parts of `trace` that are wrong *quietly* if they are wrong at all. A flag
+  // set printed as `none` while it carried a bit (the step *did* sample a texture, and the document
+  // says nothing happened); a change applied under the wrong name, or applied at all when the
+  // variable stopped existing (`outputs` then holds a variable the shader deleted, under a name
+  // nothing else in the document mentions); and a source lookup that answers from the wrong entry,
+  // because `instInfo` is sparse and *not* indexed by instruction -- the API's own warning, and the
+  // reason the lookup is a lower-bound search rather than `instInfo[instruction]`.
+  {
+    t.Equal(TraceFlagsText(ShaderEvents::NoEvent), std::string("none"), "trace-flags-none");
+    t.Equal(TraceFlagsText(ShaderEvents::DebugBreak), std::string("debugbreak"),
+            "trace-flags-one-is-its-own-word");
+    t.Equal(TraceFlagsText(ShaderEvents::SampleLoadGather | ShaderEvents::GeneratedNanOrInf),
+            std::string("sample/load/gather, nan/inf"), "trace-flags-two-are-both-said");
+    // A bit this build has no name for is *said* rather than dropped: a newer engine's flag printing as
+    // `none` would read as "nothing happened on this step", which is the opposite of the fact.
+    t.Equal(TraceFlagsText(ShaderEvents(0x8u)), std::string("0x8"),
+            "trace-flags-unknown-bit-is-hex");
+
+    // One change, three shapes. The API's rule is that an empty `before` name is a variable coming
+    // into scope and an empty `after` name is one that stopped existing -- which is where the
+    // wording and the accumulator both come from.
+    const auto value = [](const char *name, float f) {
+      ShaderVariable v;
+      v.name = rdcstr(name);
+      v.type = VarType::Float;
+      v.rows = 1;
+      v.columns = 1;
+      v.value.f32v[0] = f;
+      return v;
+    };
+
+    ShaderVariableChange created;
+    created.after = value("a", 1.0f);
+    t.Equal(TraceChangeText(created), std::string("a = 1 (new)"), "trace-change-created");
+
+    ShaderVariableChange changed = created;
+    changed.before = created.after;
+    changed.after = value("a", 2.0f);
+    t.Equal(TraceChangeText(changed), std::string("a: 1 -> 2"), "trace-change-changed");
+
+    ShaderVariableChange gone = changed;
+    gone.after.name = rdcstr();    // the variable stopped existing on this step
+    t.Equal(TraceChangeText(gone), std::string("a left scope"), "trace-change-gone");
+
+    // And the same three applied to a running list, which is what `outputs` is: the name comes from
+    // `before` when there is one, a creation lands under the `after` name, and a removal takes the
+    // variable *out* rather than leaving it at its last value.
+    std::map<std::string, std::string> running;
+    TraceApplyChange(running, created);
+    t.Check(running.size() == 1 && running["a"] == "1", "trace-apply-created",
+            "a variable that came into scope is missing from the running list");
+    TraceApplyChange(running, changed);
+    t.Check(running.size() == 1 && running["a"] == "2", "trace-apply-changed",
+            "a changed variable kept its previous value");
+    TraceApplyChange(running, gone);
+    t.Check(running.empty(), "trace-apply-gone",
+            "a variable that stopped existing stayed in the running list");
+
+    // A change with no name on either side says nothing about any variable, and must therefore change
+    // nothing: applying it under the empty name would put a row in `outputs` that no step produced.
+    ShaderVariableChange nameless;
+    TraceApplyChange(running, nameless);
+    t.Check(running.empty(), "trace-apply-nameless-changes-nothing",
+            "a change with no name on either side was applied");
+
+    // `instInfo` sparse and out of order with the instruction asked about: the entry at or below it wins,
+    // the one above it must not, and an instruction below the first mapping has no answer at all.
+    ShaderDebugTrace trace;
+    trace.stage = ShaderStage::Pixel;
+    trace.instInfo.resize(3);
+    trace.instInfo[0].instruction = 4;
+    trace.instInfo[0].lineInfo.fileIndex = 0;
+    trace.instInfo[0].lineInfo.lineStart = 11;
+    trace.instInfo[0].lineInfo.lineEnd = 11;
+    trace.instInfo[1].instruction = 20;
+    trace.instInfo[1].lineInfo.fileIndex = 0;
+    trace.instInfo[1].lineInfo.lineStart = 14;
+    trace.instInfo[1].lineInfo.lineEnd = 16;
+    trace.instInfo[2].instruction = 99;
+    trace.instInfo[2].lineInfo.fileIndex = 1;
+    trace.instInfo[2].lineInfo.lineStart = 3;
+    trace.instInfo[2].lineInfo.lineEnd = 3;
+
+    ShaderReflection refl;
+    refl.debugInfo.files.resize(2);
+    refl.debugInfo.files[0].filename = rdcstr("a.hlsl");
+    refl.debugInfo.files[1].filename = rdcstr("b.hlsl");
+
+    t.Equal(TraceSourceAt(trace, &refl, 4), std::string("a.hlsl:11"), "trace-source-exact-entry");
+    t.Equal(TraceSourceAt(trace, &refl, 19), std::string("a.hlsl:11"),
+            "trace-source-gap-belongs-to-the-entry-below-it");
+    t.Equal(TraceSourceAt(trace, &refl, 20), std::string("a.hlsl:14-16"), "trace-source-line-range");
+    t.Equal(TraceSourceAt(trace, &refl, 200), std::string("b.hlsl:3"),
+            "trace-source-last-entry-covers-past-it");
+    t.Equal(TraceSourceAt(trace, &refl, 3), std::string(), "trace-source-nothing-below-is-empty");
+    // A trace whose reflection the engine did not publish still answers by index: the index is a
+    // fact even when the file name is not, and `file0` is better than an empty column.
+    t.Equal(TraceSourceAt(trace, NULL, 4), std::string("file0:11"),
+            "trace-source-without-reflection");
+
+    // The selector -> stage mapping and the invocation as it is said back: `pixel 12,34` in the
+    // document and in every message about it, from one function (`TraceInvocationText`).
+    TraceRequest req;
+    req.m_Kind = TraceInvocation::Pixel;
+    req.m_X = 12;
+    req.m_Y = 34;
+    t.Equal(TraceInvocationText(req), std::string("pixel 12,34"), "trace-invocation-pixel");
+    t.Equal(TraceInvocationName(req.m_Kind), std::string("pixel"), "trace-invocation-name");
+    t.Check(TraceStage(TraceInvocation::Pixel) == ShaderStage::Pixel, "trace-stage-pixel",
+            "the pixel selector did not name the pixel shader");
+    t.Check(TraceStage(TraceInvocation::Vertex) == ShaderStage::Vertex, "trace-stage-vertex",
+            "the vertex selector did not name the vertex shader");
+    t.Check(TraceStage(TraceInvocation::Thread) == ShaderStage::Compute, "trace-stage-thread",
+            "the thread selector did not name the compute shader");
+    t.Check(TraceStage(TraceInvocation::MeshThread) == ShaderStage::Mesh, "trace-stage-mesh-thread",
+            "the mesh-thread selector did not name the mesh shader");
+
+    req.m_Kind = TraceInvocation::Vertex;
+    req.m_VertId = 3;
+    req.m_InstId = 1;
+    req.m_Index = 7;
+    req.m_VertexView = 0;
+    t.Equal(TraceInvocationText(req), std::string("vertex 3,1,7,0"), "trace-invocation-vertex");
+    req.m_Kind = TraceInvocation::Thread;
+    req.m_Group[0] = 1;
+    req.m_Group[1] = 2;
+    req.m_Group[2] = 3;
+    req.m_Thread[0] = 4;
+    req.m_Thread[1] = 5;
+    req.m_Thread[2] = 6;
+    t.Equal(TraceInvocationText(req), std::string("thread 1,2,3 4,5,6"), "trace-invocation-thread");
+  }
+
   // ------------------------------------------------------------------ the probe's range and cache
   //
   // Also no device: `ProbeUntil` is arithmetic over two numbers, and the cache is a text file. What is

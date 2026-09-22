@@ -1535,6 +1535,7 @@ the answers look like answers, and only the source says what the library should 
 | `mesh <rdc> <eid> [instance] [max] [--stage vsin\|vsout\|gsout\|taskout\|meshout] [--obj <file>]` | one instance's geometry **at one stage**: `vsout` (the default) is what the vertex shader emitted, `vsin` the stream the draw read, and `gsout`/`taskout`/`meshout` what a geometry, task/amplification or mesh shader produced — with the vertices, the index count, the **primitive count** (absent, with `primitivesNote` in its place, when the topology does not fix one from the counts: a strip with adjacency, a meshlet list), and the **position bounds** (the first three components, vertices that are not all finite dropped whole, with `boundsNote` when none was usable). `--obj <file>` exports a Wavefront OBJ for an external viewer — one `v` line per vertex and faces only where the vertex order *is* the primitive's, which the file's own header says |
 | `image <rdc> <eid> <out.bmp> [--overlay <name>] [--mip N] [--slice N] [--sample N] [--cast <type>] [--hdr M] [--gamma]` | the texture display at that event, written as a BMP (no PNG encoder needed). `--overlay` draws the engine's own `DebugOverlay` **into** the picture — `wireframe` is the topology the frame actually rasterised, `quad-draw`/`quad-pass` and `triangle-size-draw`/`triangle-size-pass` are the cost hunches, and a typo is refused with the list of fifteen — and `--hdr <multiplier>`/`--gamma` are the display path's tonemapping for float/HDR content. The subresource and cast options are the same ones `textures --save` takes; the document says which overlay and which subresource the file is |
 | `pixelhistory <rdc> <eid\|last> <resId\|name> <x> <y>` | every event up to `<eid>` that tried to write that pixel: the test that rejected each attempt and the value before, from and after it (below) |
+| `trace <rdc> <eid> --pixel <x,y>` · `--vertex <v[,inst[,idx[,view]]]>` · `--thread <gx,gy,gz,tx,ty,tz>` · `--mesh-thread <gx,gy,gz,tx,ty,tz>` `[--sample N] [--primitive N] [--view N] [--max-steps N] [--all]` | **one shader invocation, stepped** (below): the engine's own debugger runs the shader the selector names — the stage follows from it, pixel=ps, vertex=vs, thread=cs, mesh-thread=ms — and the document holds the values it started with, one row per step (program counter, the `ShaderEvents` that fired, the source line, the callstack, every variable that changed as `before -> after`) and the variable list it ended with. Stepping a **DXIL** shader goes through the debug data DXC emitted, so a capture without it answers with the file the engine went looking for; a **DXBC** shader is stepped from its own bytecode. `sourceDebugInfo` says which of the two, and a refusal distinguishes "no debug data" from "this invocation could not be run" rather than guessing |
 | `counters <rdc> [--per-pass [--passes <file>] [--top N]]` | GPU counters per event. `--per-pass` folds one counter over each pass (`FetchCounters` answers per event and takes no range): the passes come from the frame's markers — consecutive calls sharing a marker path are one — or from `--passes`, one `<first eid> <last eid> [<name>]` line per pass. The counter that is the cost is the engine's choice (`EventGPUDuration` when this replay produced one), named in the document with its unit; a replay that produces no results says so rather than printing a table of zeros, because GPU counters are a driver feature |
 | `crosscheck <rdc> [eid] [--since N] [--until N] [--max-events N] [--max N]` | what the reflections say a shader wants against what the state says it was given: the vs output signature against the ps input signature, each stage's bindings against the root signature's declared ranges, and the render targets' formats against the ps output signature. Every finding names an event and quotes both sides. `linksChecked`, `bindingsChecked`, `bindingsUnmapped`, `targetsChecked` and `noRootParameters` say how much was actually compared — a capture whose shaders were stripped has no reflection, and then an empty findings list means *nothing was checked*, not that the frame is clean |
 | `debug <rdc> [--group] [--fail-on high\|medium\|low\|info]` | the engine's own messages (validation layers, driver complaints). One row per message; `--group` folds each *distinct* message — the engine's own `messageID` plus severity, category and source — into one row with its count and its first/last eid, which is what makes ten thousand messages a table. `--fail-on` is the pass/fail line: the run exits **1** when anything at or above that severity was reported, and `high` is the *most* severe, so `--fail-on medium` means High or Medium. Nothing else in the driver fails on a *finding* rather than on a failure, and the exit code is the point — "did the engine complain about this frame" becomes a line in a script instead of a paragraph someone has to judge |
@@ -1585,6 +1586,61 @@ One limit is deliberately unchanged: a path still arrives as narrow bytes in the
 (that is what `argv` and the ABI hand over), so a capture whose name is not representable there still cannot
 be opened by the exe. Fixing that needs the wide command line (`GetCommandLineW`, or `wmain`) plus an
 explicit encoding convention — a different change from this one, and `FileOpen` is where it would land.
+
+**The trace — one invocation, stepped (`trace`).** Every other command reads what the frame *did*: what was
+bound, what a block held, which pixels a draw wrote. `trace` runs one invocation of one shader and reports what
+happened **inside** it — `DebugPixel`/`DebugVertex`/`DebugThread`/`DebugMeshThread` hand back a
+`ShaderDebugTrace`, `ContinueDebug` steps it (an implementation-defined number of steps per call, an empty list
+meaning the invocation is finished) and `FreeTrace` releases it, and the document is the three lists that holds:
+`inputs`, one row per `steps` entry, and `outputs`. The invocation is *named* rather than discovered, because
+there is no sensible default — a command that picked "the pixel at 0,0" would be answering a question nobody
+asked — so exactly one selector is required, and the stage is not a separate option: a `--stage ps` beside
+`--thread` could only disagree with the call about to be made. `stage` and `stageAsked` are both in the document
+so such a disagreement would be *visible*. `--sample`/`--primitive`/`--view` are `DebugPixelInputs`, whose three
+fields default to `~0U` ("no preference": any fragment writing that co-ordinate, any sample, the first view).
+`--max-steps` (default 200) stops between steps rather than between calls — one call can return thousands, and a
+cap the engine could not see would be no cap at all — and `truncated` says when it stopped, so `outputs` is not
+misread as what the invocation produced when it was cut short.
+
+Three facts about that debugger decide how the command behaves, and the first two were measured rather than
+assumed:
+
+* **A trace is one stage.** A pixel's whole history is two traces (the vertex shader that made its inputs, then
+  the pixel shader), and this runs the one whose invocation was named. The reflection and the debug-info verdict
+  are read for the stage the selector implies, through `BoundReflection` — the shader the engine *bound*, not the
+  entry point it would disassemble by default, because the debug info hangs off that one.
+* **What the engine needs to step a shader depends on what the shader is.** A DXBC (SM5) shader is interpreted
+  from its own bytecode; a **DXIL** shader — DXC, and every shader in this project's UE captures — is stepped
+  *through* the debug data DXC emitted. Measured: `trace 289 --pixel 640,360` on the Android capture answers
+  `sourceDebugInfo is 0` and the engine's own loading log says `Did not find debug data for
+  '<hash>.pdb'`; on the HobbyRenderer capture the same answer is `Found debug data in the shader`, and there
+  `--vertex 0` on eid 1715 traces **31 steps** with source lines (`imgui.hlsl:21` → `:26`) and 29 output
+  variables, while `--pixel` on three of its draws found no fragment at any co-ordinate tried.
+* **A trace that could not be run comes back empty, and says nothing about why.** The engine answers a NULL
+  trace or one whose `debugger` is NULL (the second is what it actually returns — RenderDoc's own Qt viewers all
+  test `trace->debugger == NULL`), and the reason lives in its log and in `ShaderDebugInfo`. So the refusal is
+  built from what the reflection holds and **branches on `sourceDebugInfo`**: no debug data → the file the
+  loading log names, and what to do about it (embed it with `-Zi -Qembed_debug`, or put the PDB beside the
+  capture — RenderDoc's debug search paths, set in its own UI, are where to add a folder); debug data *present* →
+  the *invocation* is what failed, which for a pixel is usually a co-ordinate no fragment wrote or none that
+  passed the depth test there, and `--vertex`/`--thread` on the same event is the cheapest way to tell the two
+  apart because an invocation with no fragment to find cannot fail for want of one. The engine's own
+  `debuggable`/`debugStatus` are checked *before* a trace is asked for, so a shader the engine knows it cannot
+  run is refused in its own words.
+
+`outputs` is accumulated the way RenderDoc's own UI accumulates a debug state
+(`ShaderViewer::AddCurrentState`), which is the one rule here that is wrong *quietly* if it is wrong: a change's
+name is its `before` name when it has one and its `after` name otherwise — a variable that came into scope has
+no `before` — an empty `after` name is a variable that **stopped existing**, which removes it from the list
+rather than leaving it at its last value, and every other change is a new value. The source line per step comes
+from `instInfo`, which is **not** indexed by instruction (the API says so: it holds the unique mappings in
+instruction order and the entry at or below the instruction applies), so it is a lower-bound search — a linear
+scan there would turn a 10,000-step trace into minutes of nothing. All four of those rules are pinned by
+device-free checks in `selftest` (26 of them, `trace-*`), because a trace needs a capture with debug data *and*
+a device, and the rules that go wrong quietly are exactly the ones a machine with neither should still be able
+to falsify. The document's own contract is `schema/trace.schema.json` (28 files after this command), and a real
+trace document from the HobbyRenderer capture validates against it — `stepCount` rather than a second `steps`,
+because two members with one key is the defect `bundle-verify` shipped once.
 
 **The bundle — `dump` and `bundle-verify`.** `dump` is one replay session turned into files, so the offline
 half (and a reader) can work without a device. **A bundle is local state and is never committed**: it belongs
@@ -1646,7 +1702,7 @@ its 2,132 collected ids were one state repeated past the last event; on `desktop
 back, and `--until` can narrow the range but no longer extend it past the frame's end. All of the gaps are
 written into the bundle's own `notInThisBundle` list, so a reader does not conclude that the frame had no
 copies. Nothing offline derives one numbering from the other: the mismatch between event ids and chunk indices is
-one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §3), and no item anywhere in that file
+one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §2), and no item anywhere in that file
 proposes to close it here.
 
 **The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
@@ -1677,7 +1733,7 @@ left in the reported state by earlier replay passes, real rows in every bundle t
 on any per-event reading of a state that sits between command lists -- and the two things that would
 make a parallel sweep honest are both out of reach: reproducing the serial history per worker costs
 the whole prefix (the last worker would pay the entire range), and splitting at command-list
-boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §3, `Upstream`).
+boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §2, `Upstream`).
 The attempt also left
 two Windows findings behind: a spawned child must be given a stdin it can use (an inherited slot it
 cannot takes its whole stdio down -- three "successful" workers once left three empty logs), and

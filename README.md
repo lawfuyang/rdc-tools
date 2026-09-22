@@ -217,6 +217,7 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | What did the pass render? | `image <eid> <out.bmp>`, `sheet` |
 | Is this texture the problem? | `textures --save`, `usage <resId>` |
 | What did the vertex shader emit? | `mesh <eid>` |
+| What does the shader actually *do* with those values? | `trace <eid> --pixel x,y` — one invocation, stepped |
 | How far apart are two images? | `imgdiff <rdc> <a.bmp> <b.bmp>` |
 | Where does the time and the bandwidth go? | `counters`, `counters --per-pass`, `crosscheck` |
 | What if the shader did something else? | `patch <eid> <stage> --from <file>` |
@@ -289,7 +290,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
-| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §2.5) | `dump-shaders 'capture.rdc' .\shaders` |
+| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §1.5) | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
 
 #### The report, the A/B and the corpus
@@ -364,6 +365,7 @@ badly (REFERENCE §9).
 | Command | What it answers | Example |
 |---|---|---|
 | `counters` | GPU counters per event; `--per-pass` folds one counter over each pass (or over `--passes <file>`) and lists the dearest; a replay with no counter results says so rather than printing zeros | `counters 'capture.rdc' --per-pass --top 10` |
+| `trace` | one shader invocation, stepped: the values it started with, one row per step with every variable that changed, and the values it ended with. The stage follows from the selector (`--pixel`=ps, `--vertex`=vs, `--thread`=cs, `--mesh-thread`=ms); `--max-steps`/`--all` bound the run. Stepping a **DXIL** shader goes through its debug data, so a capture without it answers with the file the engine looked for and says why — a DXBC shader steps from its bytecode instead | `trace 'capture.rdc' 1715 --vertex 0 --max-steps 40` |
 | `patch` | builds a shader for this replay target out of a file you edited, substitutes it for the capture's own and replays the frame; `--compare` renders before and after and writes the diff map | `patch 'capture.rdc' 27931 ps --from edited.hlsl --compare` |
 
 #### One session, many questions
@@ -373,7 +375,7 @@ badly (REFERENCE §9).
 | `dump` | the whole frame to disk as a bundle the offline tool reads: `events.json`, `states/`, `cbuffers/`, `resources.json`, `messages.json` and a manifest with every hash; `--with-images`, `--textures`, `--with-counters`, `--since`/`--until`/`--max-events` bound the work | `dump 'capture.rdc' bundle --with-images` |
 | `bundle-verify` | re-hashes a bundle with no device and no DLL, so it can be checked anywhere | `bundle-verify bundle` |
 | `batch` | runs every command in a file against one open capture, paying the open once; each line's output is preceded by `#=== <line>` so a stream can be split again | `batch 'capture.rdc' run.txt > before.txt` |
-| `schema` | the JSON Schema of each `--json` document kind (24 of them); `--out <dir>` writes them, `--check <dir>` fails when the checked-in folder and the driver disagree | `schema --check schema`, `schema state` |
+| `schema` | the JSON Schema of each `--json` document kind (28 of them); `--out <dir>` writes them, `--check <dir>` fails when the checked-in folder and the driver disagree | `schema --check schema`, `schema state` |
 | `selftest` | the driver checking itself — JSON writer, schema table, help text, the DLL it loads — with no capture | `selftest` |
 | `--repl` / `--stdin` | keep the capture open and read commands from the terminal or a pipe, one per line, exactly as a batch file spells them; `help` and `quit` work | `.\bin\replay_dump.exe 'capture.rdc' --repl` |
 
@@ -390,7 +392,7 @@ badly (REFERENCE §9).
    touched what, `passdiff`/`replaydiff` when there is a second capture to compare against (REFERENCE §4.11,
    §4.15, §4.16).
 4. **Targeted engine follow-ups only**, with the eids the offline step produced (`state`, `cb`, `buffer`,
-   `pixelhistory`, `image`): files narrow the question, the engine answers it, files again — never a second
+   `pixelhistory`, `trace`, `image`): files narrow the question, the engine answers it, files again — never a second
    fishing expedition.
 5. **Assemble the answer with evidence**, and state plainly what could not be determined (§2.7).
 
@@ -510,9 +512,10 @@ python src\py\rdc_analysis.py dxbc 'capture.rdc' verbose              # which co
 
 Cross-check the signatures before reading the maths: VS output vs PS input (same semantic, index and width —
 a mismatch is a real bug and a *certain* finding), and each stage's expected bindings vs what the root
-signature actually binds. When debug info exists in the capture, the shader debugger *(ROADMAP §1)* steps one
-invocation and prints the variables; when it does not (usually), say so — that is a limitation to report, not
-a puzzle to keep grinding at.
+signature actually binds. `trace <eid> --pixel x,y` (REFERENCE §9) steps one invocation and prints its
+inputs, every step with the variables that changed, and the values it ended with; it needs the shader's debug
+data for a DXIL shader, so on a capture without it the command says so and names the file the engine looked
+for — that is a limitation to report, not a puzzle to keep grinding at.
 
 **G. "Where does the time and the bandwidth go?"**
 
@@ -576,7 +579,7 @@ self-A/B in that same run: `replaydiff` of one bundle against *itself* must find
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
 with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §2.5):
+this is the one case for the standalone harness (ROADMAP §1.5):
 
 ```powershell
 python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
@@ -694,11 +697,11 @@ built on.
 * **`REFERENCE.md`** — the detail behind this file: §3 how the capture is decoded, §4 the full command
   reference, §5 worked examples, §6 verified payload facts, §7 how to add a command, §8 pitfalls and known
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
-* **`ROADMAP.md`** — what is not implemented yet, in priority order: the driver's navigation and experiment
-  commands (§1–§2), its picture/counter/geometry work (§3), the offline analysis still to come (§4),
-  verification, regression and the bug atlas (§5), the work beyond the local desktop (§6, with the standalone
-  D3D12 harness as §6.5), robustness and scope (§7), and the suggested order (§8), which places every item of
-  §1–§7 in one phased list.
+* **`ROADMAP.md`** — what is not implemented yet, in priority order, each item with its *P* label and its own
+  effort figure: the work beyond the local desktop (§1, with the standalone D3D12 harness as §1.5) and the
+  suggested order (§2), which places every item in one phased list. Landed items are *removed* rather than
+  ticked off, so these numbers move — that is the file's own rule, and its cross-references are updated in
+  the same change.
 * **`AGENTS.md`** — the rules for an AI agent changing this repo: the invariants, the payload-layout
   comments, the determinism contract, and the pitfalls that have already bitten.
 * **`renderdoc-src/`** — fetched into the root folder on first use (§1.1), and also where this project keeps

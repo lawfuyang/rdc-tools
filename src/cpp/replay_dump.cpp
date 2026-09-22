@@ -137,6 +137,22 @@ void Usage()
       "                                    range, and --fail-on exits 1 when anything at or above "
       "that\n"
       "                                    severity was reported\n"
+      "  trace   <rdc> <eid> --pixel <x,y> | --vertex <v[,inst[,idx[,view]]]> | --thread "
+      "<gx,gy,gz,tx,ty,tz>\n"
+      "          | --mesh-thread <gx,gy,gz,tx,ty,tz> [--sample N] [--primitive N] [--view N]\n"
+      "          [--max-steps N] [--all]   one shader invocation, stepped: the inputs it started "
+      "with,\n"
+      "                                    one row per step with every variable that changed, and "
+      "the\n"
+      "                                    values it ended with. The stage follows from the "
+      "selector\n"
+      "                                    (pixel=ps, vertex=vs, thread=cs, mesh-thread=ms). A "
+      "DXIL\n"
+      "                                    shader is stepped through its debug data, so a capture\n"
+      "                                    without it answers with the file the engine looked for; "
+      "a\n"
+      "                                    DXBC one steps from its bytecode, and the output says "
+      "which\n"
       "  usage   <rdc> <resId>             every event that touches a resource\n"
       "  probe   <rdc> [maxEid|last]       which event ids actually have pipeline state; the "
       "whole\n"
@@ -590,6 +606,220 @@ bool PictureOptionsFromArgs(const std::vector<std::string> &args, PictureOptions
   return true;
 }
 
+//: A comma-separated list of numbers from 0 up, as the `trace` selectors are written (`12,34`,
+//: `3,0,7,0`). One parser for all three selectors: a second one is how `--vertex 3,0,7,0` would
+//: come to accept a trailing comma that `--thread 1,0,0,0,0,0` rejects.
+bool ParseIntList(const char *text, std::vector<int> &out, std::string &why, const char *option)
+{
+  const std::string all(text);
+  size_t start = 0;
+  for(size_t i = 0; i <= all.size(); i++)
+  {
+    if(i < all.size() && all[i] != ',')
+      continue;
+    const std::string item = all.substr(start, i - start);
+    start = i + 1;
+    int value = 0;
+    if(item.empty() || !ParseInt(item.c_str(), value) || value < 0)
+    {
+      why = Fmt("%s takes comma-separated numbers from 0 up ('%s' is not one)", option,
+                item.empty() ? text : item.c_str());
+      return false;
+    }
+    out.push_back(value);
+  }
+  return true;
+}
+
+//: One selector's numbers, checked against what its API takes and put where the command reads them.
+//: The counts are the API's own: `DebugPixel` wants a co-ordinate pair, `DebugVertex` a vertex and
+//: instance and then (optionally) the index to read inputs with and the view, `DebugThread` and
+//: `DebugMeshThread` a workgroup index and a thread index within it.
+bool TraceNumbersFromList(TraceInvocation kind, const char *text, TraceRequest &req, std::string &why)
+{
+  const char *option = kind == TraceInvocation::Pixel        ? "--pixel"
+                       : kind == TraceInvocation::Vertex     ? "--vertex"
+                       : kind == TraceInvocation::MeshThread ? "--mesh-thread"
+                                                             : "--thread";
+  std::vector<int> n;
+  if(!ParseIntList(text, n, why, option))
+    return false;
+
+  if(kind == TraceInvocation::Pixel)
+  {
+    if(n.size() != 2)
+    {
+      why = Fmt("--pixel takes two numbers, 'x,y' in the target's own space ('%s' has %d)", text,
+                (int)n.size());
+      return false;
+    }
+    req.m_X = (uint32_t)n[0];
+    req.m_Y = (uint32_t)n[1];
+    return true;
+  }
+
+  if(kind == TraceInvocation::Vertex)
+  {
+    if(n.empty() || n.size() > 4)
+    {
+      why =
+          Fmt("--vertex takes 'v[,inst[,idx[,view]]]' ('%s' has %d number(s))", text, (int)n.size());
+      return false;
+    }
+    req.m_VertId = (uint32_t)n[0];
+    req.m_InstId = n.size() > 1 ? (uint32_t)n[1] : 0;
+    // The third number is the index the vertex *inputs* are read with, with the draw's own offsets
+    // applied -- not something the vertex id tells us, which is why the API asks for it separately.
+    // A caller who gives only the vertex id gets that id, which is right for a non-indexed draw and
+    // wrong for one that reads an index buffer; the command logs which of the two it assumed.
+    req.m_bIndexGiven = n.size() > 2;
+    req.m_Index = req.m_bIndexGiven ? (uint32_t)n[2] : req.m_VertId;
+    req.m_VertexView = n.size() > 3 ? (uint32_t)n[3] : 0;
+    return true;
+  }
+
+  if(n.size() != 6)
+  {
+    why = Fmt("%s takes six numbers, 'gx,gy,gz,tx,ty,tz' ('%s' has %d)", option, text, (int)n.size());
+    return false;
+  }
+  for(int i = 0; i < 3; i++)
+  {
+    req.m_Group[i] = (uint32_t)n[i];
+    req.m_Thread[i] = (uint32_t)n[i + 3];
+  }
+  return true;
+}
+
+//: `trace`'s command line: which of the engine's four debugging entry points to run, and against
+//: which invocation. Parsed here with the other option helpers for the reason this file exists --
+//: one place decides what an option means, so `main`, a batch file and a library session cannot
+//: disagree -- and an option this command does not know is refused rather than ignored, because a
+//: silently dropped
+//: `--pixel` would run *nothing* and a silently dropped `--max-steps` would run to the end.
+bool TraceRequestFromArgs(const std::vector<std::string> &args, TraceRequest &req, std::string &why)
+{
+  const char *const kUsage =
+      "`trace <eid> --pixel <x,y> | --vertex <v[,inst[,idx[,view]]]> | --thread "
+      "<gx,gy,gz,tx,ty,tz> | "
+      "--mesh-thread <gx,gy,gz,tx,ty,tz> [--sample N] [--primitive N] [--view N] [--max-steps N] "
+      "[--all]`";
+
+  int selectors = 0;
+  bool bAll = false, bMaxSteps = false;
+  for(size_t i = 1; i < args.size(); i++)
+  {
+    const std::string &arg = args[i];
+    const bool bHasValue = i + 1 < args.size();
+
+    const TraceInvocation kind = arg == "--pixel"         ? TraceInvocation::Pixel
+                                 : arg == "--vertex"      ? TraceInvocation::Vertex
+                                 : arg == "--thread"      ? TraceInvocation::Thread
+                                 : arg == "--mesh-thread" ? TraceInvocation::MeshThread
+                                                          : TraceInvocation::None;
+    if(kind != TraceInvocation::None)
+    {
+      if(!bHasValue)
+      {
+        why = Fmt("%s needs its numbers: %s", arg.c_str(), kUsage);
+        return false;
+      }
+      if(++selectors > 1)
+      {
+        why =
+            "one invocation at a time: --pixel, --vertex, --thread and --mesh-thread are four ways "
+            "to "
+            "name the same thing (the stage they run follows from which one is given)";
+        return false;
+      }
+      req.m_Kind = kind;
+      if(!TraceNumbersFromList(kind, args[++i].c_str(), req, why))
+        return false;
+    }
+    else if(arg == "--sample" || arg == "--primitive" || arg == "--view")
+    {
+      if(!bHasValue)
+      {
+        why = Fmt("%s takes a number from 0 up", arg.c_str());
+        return false;
+      }
+      int value = 0;
+      if(!ParseInt(args[++i].c_str(), value) || value < 0)
+      {
+        why = Fmt("%s takes a number from 0 up", arg.c_str());
+        return false;
+      }
+      if(arg == "--sample")
+        req.m_Sample = (uint32_t)value;
+      else if(arg == "--primitive")
+        req.m_Primitive = (uint32_t)value;
+      else
+        req.m_PixelView = (uint32_t)value;
+    }
+    else if(arg == "--max-steps")
+    {
+      if(!bHasValue)
+      {
+        why = Fmt("--max-steps takes a number of steps from 1 up (`--all` runs to the end): %s",
+                  kUsage);
+        return false;
+      }
+      int value = 0;
+      if(!ParseInt(args[++i].c_str(), value) || value <= 0)
+      {
+        why =
+            "--max-steps takes a number of steps from 1 up (`--all` runs the invocation to its "
+            "end)";
+        return false;
+      }
+      req.m_MaxSteps = value;
+      bMaxSteps = true;
+    }
+    else if(arg == "--all")
+    {
+      bAll = true;
+    }
+    else if(IsOption(arg))
+    {
+      why = Fmt("unknown option '%s' for trace: %s", arg.c_str(), kUsage);
+      return false;
+    }
+    // Anything else is the event id, which the dispatcher took apart before calling this.
+  }
+
+  if(bAll && bMaxSteps)
+  {
+    why =
+        "--all and --max-steps say different things: one runs the invocation to its end, the other "
+        "stops after N steps";
+    return false;
+  }
+  if(bAll)
+    req.m_MaxSteps = 0;    // no cap, up to `kTraceStepCap`
+
+  if(selectors == 0)
+  {
+    why = Fmt("trace needs exactly one invocation: %s", kUsage);
+    return false;
+  }
+
+  // The pixel-only options are refused rather than ignored when another selector was given: they
+  // are `DebugPixelInputs`' fields, and `--thread 1,0,0,0,0,0 --sample 2` would otherwise look like
+  // it selected a sample of a compute dispatch.
+  if(req.m_Kind != TraceInvocation::Pixel &&
+     (req.m_Sample != kTraceNoPreference || req.m_Primitive != kTraceNoPreference ||
+      req.m_PixelView != kTraceNoPreference))
+  {
+    why = Fmt(
+        "--sample, --primitive and --view choose a fragment, so they belong with --pixel, not with "
+        "%s",
+        TraceInvocationName(req.m_Kind));
+    return false;
+  }
+
+  return true;
+}
+
 //: How many arguments a command needs before it can run, the command itself counted: the same
 //: numbers the dispatch table below enforces (`args.size() > 4` for `pixelhistory` is 5 here). They
 //: are listed once, for the one question that has to be answered *before* dispatch -- whether a
@@ -609,6 +839,8 @@ int MinArgs(const char *cmd)
     return 3;    // <eidA> <eidB>
   if(!strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "mesh"))
     return 2;    // <eid>: `mesh`'s instance and cap are optional, and its id is what comes first
+  if(!strcmp(cmd, "trace"))
+    return 2;    // <eid>: which invocation to run is an option, so the id is the only positional
   return 1;
 }
 
@@ -660,7 +892,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   const bool bTakesEid = !strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "cb") ||
                          !strcmp(cmd, "mesh") || !strcmp(cmd, "image") ||
                          !strcmp(cmd, "statediff") || !strcmp(cmd, "patch") ||
-                         !strcmp(cmd, "pixelhistory") || !strcmp(cmd, "crosscheck");
+                         !strcmp(cmd, "pixelhistory") || !strcmp(cmd, "crosscheck") ||
+                         !strcmp(cmd, "trace");
   if(!atMarkerText.empty())
   {
     std::string matched;
@@ -845,6 +1078,22 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     return CmdWatch(ctrl, file, path, args);
   if(!strcmp(cmd, "debug"))
     return CmdDebug(ctrl, file, path, args);
+  if(!strcmp(cmd, "trace"))
+  {
+    // The event is the only positional and every other argument is an option, so a caller who wrote
+    // `trace --pixel 12,34` gets told what is missing rather than the dispatcher's fall-through
+    // (`unknown command`), which is what a command with no argument at all otherwise ends in.
+    if(args.size() <= 1)
+      return Fail(
+          2,
+          "trace needs the event to run at: `trace <eid> --pixel <x,y>` (or --vertex / --thread "
+          "/ --mesh-thread)");
+    TraceRequest req;
+    std::string why;
+    if(!TraceRequestFromArgs(args, req, why))
+      return Fail(2, "%s", why.c_str());
+    return CmdTrace(ctrl, file, path, ToInt(args[1], 0), req);
+  }
   if(!strcmp(cmd, "usage") && args.size() > 1)
     return CmdUsage(ctrl, file, path, args[1].c_str());
   if(!strcmp(cmd, "probe"))

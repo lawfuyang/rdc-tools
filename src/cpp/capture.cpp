@@ -224,76 +224,87 @@ int Fail(int code, _Printf_format_string_ const char *fmt, ...)
   return code;
 }
 
-//: A path as this process will actually use it. Relative paths are resolved against the *working
-//: directory*, which is not the directory of whatever launched the tool: a runner that starts the
-//: exe from elsewhere gets `can't open ... errno 2` and no clue where it looked. Printing the
-//: absolute form (and the working directory, once) turns that into an answer.
-std::string AbsolutePath(const char *path)
+//: A path as this process will actually use it: absolute, with `.` and `..` collapsed. Relative
+//: paths are resolved against the *working* directory, which is not the directory of whatever
+//: launched the tool: a runner that starts the exe from elsewhere gets `can't open ... errno 2` and
+//: no clue where it looked. Printing the absolute form (and the working directory, once) turns that
+//: into an answer, and the collapsing is `lexically_normal` -- lexically, without asking the
+//: filesystem, because this is called for paths that need not exist yet (`dump`'s destination).
+std::filesystem::path AbsolutePath(const std::filesystem::path &path)
 {
-  if(path == NULL || *path == '\0')
-    return std::string();
+  if(path.empty())
+    return std::filesystem::path();
 
-  char buf[4096];
-  const DWORD len = GetFullPathNameA(path, (DWORD)sizeof(buf), buf, NULL);
-  if(len == 0 || len >= sizeof(buf))
-    return std::string(path);
-  return std::string(buf);
+  std::error_code ec;
+  const std::filesystem::path full = std::filesystem::absolute(path, ec);
+  if(ec)
+    return path;    // could not be resolved at all: the caller's own spelling is more use than nothing
+  return full.lexically_normal();
 }
 
 std::string WorkingDirectory()
 {
-  char buf[4096];
-  const DWORD len = GetCurrentDirectoryA((DWORD)sizeof(buf), buf);
-  return (len == 0 || len >= sizeof(buf)) ? std::string("?") : std::string(buf);
+  std::error_code ec;
+  const std::filesystem::path here = std::filesystem::current_path(ec);
+  return ec ? std::string("?") : here.string();
 }
 
-//: When a file was last written, as the raw `FILETIME` (100 ns ticks since 1601) so two of them can
-//: be compared with `>`; 0 when it is not there, which is the answer a caller has to treat as "no
-//: opinion" rather than "very old".
-long long FileWriteTime(const std::string &path)
+//: When a file was last written, or nothing when it is not there -- the answer a caller has to
+//: treat as "no opinion" rather than "very old". Two of these compare with `>` and a difference is
+//: a duration, so neither the epoch nor the tick size is the driver's business.
+std::optional<FileTime> FileWriteTime(const std::filesystem::path &path)
 {
-  WIN32_FILE_ATTRIBUTE_DATA info;
-  if(!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &info))
-    return 0;
-  return ((long long)info.ftLastWriteTime.dwHighDateTime << 32) | info.ftLastWriteTime.dwLowDateTime;
+  std::error_code ec;
+  const FileTime when = std::filesystem::last_write_time(path, ec);
+  return ec ? std::optional<FileTime>() : when;
 }
 
-//: The file in `dir` whose name ends with one of the `count` suffixes and that was written last,
-//: with its time; 0 when the directory is not there or holds none of them, and then `name` is left
-//: alone. Suffixes rather than a wildcard because `FindFirstFile`'s `*.cpp` also matches `.cpp.swp`
-//: on some systems' rules and this answers "is a source newer than the exe".
-long long NewestSourceTime(const char *dir, const char *const *suffixes, int count, std::string &name)
+//: The file in `dir` whose name ends with one of the `count` suffixes and that was written last, with its
+//: own path; nothing when the directory is not there or holds none of them. Suffixes rather than
+//: `path::extension` because the offline tool's own staleness check matches the same way
+//: (`rdc_driver.SOURCE_SUFFIXES`) and the two have to agree about what a source is: a file named exactly
+//: `.h` is one to both, and `.cpp.swp` to neither.
+std::optional<FileTime> NewestSourceTime(const std::filesystem::path &dir,
+                                         const char *const *suffixes, int count,
+                                         std::filesystem::path &newest)
 {
-  const std::string pattern = std::string(dir) + "\\*";
-  WIN32_FIND_DATAA found;
-  HANDLE search = FindFirstFileA(pattern.c_str(), &found);
-  if(search == INVALID_HANDLE_VALUE)
-    return 0;
+  // The `error_code` overloads throughout, and `increment` by hand rather than a range-for: this
+  // walks a directory of somebody else's files, and a `filesystem_error` thrown out of here would
+  // take the process down for a file that went away between two calls.
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dir, ec);
+  const std::filesystem::directory_iterator end;
+  if(ec)
+    return std::optional<FileTime>();
 
-  long long newest = 0;
-  for(BOOL more = TRUE; more; more = FindNextFileA(search, &found))
+  std::optional<FileTime> best;
+  for(; it != end; it.increment(ec))
   {
-    if((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    if(ec)
+      break;    // cannot be read further: what was seen so far is the answer, as it was before
+    const std::filesystem::directory_entry &entry = *it;
+    std::error_code entryEc;
+    if(!entry.is_regular_file(entryEc))
       continue;
-    const std::string file(found.cFileName);
+    const std::string name = entry.path().filename().string();
     bool bMatch = false;
     for(int i = 0; i < count && !bMatch; i++)
     {
       const size_t len = strlen(suffixes[i]);
-      bMatch = file.size() >= len && file.compare(file.size() - len, len, suffixes[i]) == 0;
+      bMatch = name.size() >= len && name.compare(name.size() - len, len, suffixes[i]) == 0;
     }
     if(!bMatch)
       continue;
-    const long long when = ((long long)found.ftLastWriteTime.dwHighDateTime << 32) |
-                           found.ftLastWriteTime.dwLowDateTime;
-    if(when > newest)
+    const FileTime when = entry.last_write_time(entryEc);
+    if(entryEc)
+      continue;
+    if(!best || when > *best)
     {
-      newest = when;
-      name = file;
+      best = when;
+      newest = entry.path();
     }
   }
-  FindClose(search);
-  return newest;
+  return best;
 }
 
 //: This run's log base name, *without* the extension: `<exe stem>_<date>_<time>` beside the
@@ -312,20 +323,20 @@ long long NewestSourceTime(const char *dir, const char *const *suffixes, int cou
 //: `..._14-32-07.log-2.txt` -- a suffix in the middle of the name.
 std::string DefaultLogStem()
 {
+  // `GetModuleFileName` names this *module* -- a load, not a file on disk -- so it stays a Win32 call.
+  // What it answers with is a path, and the stem is the path type's own business: `replace_extension`
+  // with nothing drops `.exe` and leaves a dot that is part of a *directory* alone.
   char exe[4096];
   const DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
-  std::string path =
-      (len == 0 || len >= sizeof(exe)) ? std::string("replay_dump") : std::string(exe, len);
-
-  const size_t slash = path.find_last_of("\\/");
-  const size_t dot = path.find_last_of('.');
-  if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
-    path = path.substr(0, dot);    // the exe's stem: the extension is dropped
+  std::filesystem::path stem = (len == 0 || len >= sizeof(exe))
+                                   ? std::filesystem::path("replay_dump")
+                                   : std::filesystem::path(std::string(exe, len));
+  stem.replace_extension();
 
   SYSTEMTIME now;
   GetLocalTime(&now);
   char name[4200];
-  snprintf(name, sizeof(name), "%s_%04d-%02d-%02d_%02d-%02d-%02d", path.c_str(), now.wYear,
+  snprintf(name, sizeof(name), "%s_%04d-%02d-%02d_%02d-%02d-%02d", stem.string().c_str(), now.wYear,
            now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
   return name;
 }
@@ -351,17 +362,15 @@ std::string LibraryLogStem()
 
   char module[4096];
   const DWORD len = GetModuleFileNameA(self, module, (DWORD)sizeof(module));
-  std::string path =
-      (len == 0 || len >= sizeof(module)) ? std::string("rdc_replay") : std::string(module, len);
-  const size_t slash = path.find_last_of("\\/");
-  const size_t dot = path.find_last_of('.');
-  if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
-    path = path.substr(0, dot);    // the DLL's stem: the extension is dropped
+  std::filesystem::path stem = (len == 0 || len >= sizeof(module))
+                                   ? std::filesystem::path("rdc_replay")
+                                   : std::filesystem::path(std::string(module, len));
+  stem.replace_extension();    // the DLL's stem: the extension is dropped
 
   SYSTEMTIME now;
   GetLocalTime(&now);
   char name[4200];
-  snprintf(name, sizeof(name), "%s_%04d-%02d-%02d_%02d-%02d-%02d", path.c_str(), now.wYear,
+  snprintf(name, sizeof(name), "%s_%04d-%02d-%02d_%02d-%02d-%02d", stem.string().c_str(), now.wYear,
            now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
   return name;
 }
@@ -375,34 +384,35 @@ void CloseLog()
   }
 }
 
-FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs)
+FILE *OpenLog(const std::filesystem::path &requested, bool bPerRun, std::string &openedAs)
 {
-  const std::string stem = AbsolutePath(requested.c_str());
+  const std::filesystem::path stem = AbsolutePath(requested);
   if(!bPerRun)
   {
-    openedAs = stem;
-    return fopen(openedAs.c_str(), "w");
+    openedAs = stem.string();
+    return FileOpen(stem, "w");
   }
 
+  // The per-run name is built as text before it becomes a path again, because the collision suffix
+  // goes *before* the extension: `.log.txt` is two extensions, and appending `-2` to a completed
+  // name filed the second run of a second as `..._14-32-07.log-2.txt`. `"wx"` is what makes "is
+  // this name free?" atomic rather than a check with a race behind it, and it is the one mode
+  // `std::filesystem` has no equivalent for (`exists` then create is exactly that race).
   for(int n = 1; n <= 99; n++)
   {
-    char name[4200];
-    if(n == 1)
-      snprintf(name, sizeof(name), "%s.log.txt", stem.c_str());
-    else
-      snprintf(name, sizeof(name), "%s-%d.log.txt", stem.c_str(), n);
-
-    FILE *f = fopen(name, "wx");
+    const std::string text = n == 1 ? Fmt("%s.log.txt", stem.string().c_str())
+                                    : Fmt("%s-%d.log.txt", stem.string().c_str(), n);
+    FILE *f = FileOpen(std::filesystem::path(text), "wx");
     if(f != NULL)
     {
-      openedAs = name;
+      openedAs = text;
       return f;
     }
     if(errno != EEXIST)
       break;    // a missing directory, no permission, ...
   }
 
-  openedAs = stem;    // the refused name, for the warning
+  openedAs = stem.string();    // the refused name, for the warning
   return NULL;
 }
 
@@ -535,9 +545,9 @@ void PrintCaptureHeader(ICaptureFile *file, const char *path)
 // guard that guesses about a capture it cannot read is worse than no guard at all. So: older is
 // refused, equal and newer are allowed, unknown is said and passed on.
 
-bool ReadCaptureVersion(const char *path, CaptureVersion &out)
+bool ReadCaptureVersion(const std::filesystem::path &path, CaptureVersion &out)
 {
-  FILE *f = fopen(path, "rb");
+  FILE *f = FileOpen(path, "rb");
   if(f == NULL)
     return false;
   unsigned char header[32] = {0};
@@ -594,7 +604,8 @@ int CompareMajorMinor(const std::string &engine, const std::string &capture, boo
   return 0;
 }
 
-int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::string *why)
+int GuardCaptureVersion(const std::filesystem::path &pathAbs,
+                        const std::filesystem::path &pathAsGiven, std::string *why)
 {
   if(g_GetVersionString == NULL)
     return 0;    // no version to compare with: the engine's own checks are all there is
@@ -603,6 +614,9 @@ int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::strin
   if(!ReadCaptureVersion(pathAbs, capture))
     return 0;    // not a container this can read: `OpenFile` says so, with the engine's own message
 
+  // The messages use the caller's own spelling rather than the resolved path -- and `%s` wants
+  // bytes, so the narrow form is taken once here instead of at each of the three.
+  const std::string shown = pathAsGiven.string();
   const std::string engine = g_GetVersionString();
   bool known = false;
   const int order = CompareMajorMinor(engine, capture.program, known);
@@ -610,7 +624,7 @@ int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::strin
   {
     Log("note: cannot compare versions: %s says '%s' (logfile version %u) and this engine says "
         "'%s'",
-        pathAsGiven, capture.program.c_str(), (unsigned)capture.logfile, engine.c_str());
+        shown.c_str(), capture.program.c_str(), (unsigned)capture.logfile, engine.c_str());
     return 0;
   }
   if(order < 0)
@@ -622,7 +636,7 @@ int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::strin
             "least the capture's version, because an older engine answers from another version's "
             "decoding rather than reporting an error. Install a newer RenderDoc, or point at one "
             "with `--dll <path>` or $RDC_RENDERDOC_DLL.",
-            pathAsGiven, capture.program.c_str(), engine.c_str());
+            shown.c_str(), capture.program.c_str(), engine.c_str());
     if(why != NULL)
     {
       *why = text;
@@ -634,7 +648,7 @@ int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::strin
     Log("note: %s was recorded by RenderDoc %s; this engine is %s -- newer than the capture, which "
         "is "
         "allowed (replaying an older capture is the tested direction)",
-        pathAsGiven, capture.program.c_str(), engine.c_str());
+        shown.c_str(), capture.program.c_str(), engine.c_str());
   return 0;
 }
 

@@ -81,23 +81,23 @@ void SetErr(char *err, int errLen, const char *fmt, ...)
 
 //: A unique file for one command's stdout. `%TEMP%` rather than the cache directory: this is
 //: scratch that lives for one call, and the cache is a place a reader is meant to be able to trust.
-std::string TempOutputPath()
+std::filesystem::path TempOutputPath()
 {
   static int counter = 0;
-  char dir[4096];
-  const DWORD len = GetTempPathA((DWORD)sizeof(dir), dir);
-  const std::string base = (len == 0 || len >= sizeof(dir)) ? std::string(".") : std::string(dir);
-  char name[4300];
-  snprintf(name, sizeof(name), "%s\\rdc_replay_%lu_%d.out", base.c_str(),
-           (unsigned long)GetCurrentProcessId(), ++counter);
-  return name;
+  // `temp_directory_path` is `%TMP%`, then `%TEMP%`, then `%USERPROFILE%` -- the same order
+  // `GetTempPath` uses. A machine with none of them set gets the working directory, where the file
+  // is at least somewhere the caller has already been told about.
+  std::error_code ec;
+  const std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+  return (ec ? std::filesystem::path(".") : base) /
+         Fmt("rdc_replay_%lu_%d.out", (unsigned long)GetCurrentProcessId(), ++counter);
 }
 
 //: The whole file as a `malloc`'d NUL-terminated buffer, or NULL when it cannot be read. The caller
 //: frees it with `RdcReplayFree`, which is `free`.
-char *ReadWholeFileMalloc(const std::string &path)
+char *ReadWholeFileMalloc(const std::filesystem::path &path)
 {
-  FILE *f = fopen(path.c_str(), "rb");
+  FILE *f = FileOpen(path, "rb");
   if(f == NULL)
     return NULL;
   std::string text;
@@ -129,9 +129,9 @@ char *ReadWholeFileMalloc(const std::string &path)
 //:  * the file is read back *after* the scope ends, so the last flush has happened.
 char *RunCaptured(const std::function<int()> &body, int *code)
 {
-  const std::string path = TempOutputPath();
+  const std::filesystem::path path = TempOutputPath();
   {
-    const CaptureStdout capture(path.c_str());
+    const CaptureStdout capture(path);
     if(!capture.Ok())
     {
       *code = 1;
@@ -141,7 +141,7 @@ char *RunCaptured(const std::function<int()> &body, int *code)
     *code = body();
   }
   char *text = ReadWholeFileMalloc(path);
-  remove(path.c_str());
+  RemoveQuiet(path);    // best effort: a scratch file left behind is not a failed call
   return text;
 }
 
@@ -207,7 +207,7 @@ void *RdcReplayOpen(const char *capturePath, const char *logPath, char *err, int
     return NULL;
   }
 
-  std::string pathAbs;
+  std::filesystem::path pathAbs;
   if(bWithCapture)
   {
     WarnIfRenderdocSrcMissing();
@@ -216,7 +216,7 @@ void *RdcReplayOpen(const char *capturePath, const char *logPath, char *err, int
 
     // Before the capture is opened and the device created, exactly as the CLI does: a capture recorded
     // by a newer RenderDoc is refused by name rather than handed to an engine that does not know it.
-    if(GuardCaptureVersion(pathAbs.c_str(), capturePath, &why) != 0)
+    if(GuardCaptureVersion(pathAbs, capturePath, &why) != 0)
     {
       SetErr(err, errLen, "%s", why.c_str());
       return NULL;
@@ -245,16 +245,20 @@ void *RdcReplayOpen(const char *capturePath, const char *logPath, char *err, int
   session->m_File.emplace(file);
   session->m_pFile = file;
 
-  Log("reading the container of %s", pathAbs.c_str());
+  // The engine's ABI is `rdcstr`-based, so the narrow form goes across the boundary and the same
+  // bytes are handed over that the driver resolved: `pathAbs` is the path, and this is where it
+  // becomes text again.
+  const std::string pathAbsText = pathAbs.string();
+  Log("reading the container of %s", pathAbsText.c_str());
   Trace("OpenFile");
-  const ResultDetails res = file->OpenFile(pathAbs.c_str(), "rdc", NULL);
+  const ResultDetails res = file->OpenFile(pathAbsText.c_str(), "rdc", NULL);
   if(!res.OK())
   {
     // The message is copied out before anything unwinds: RenderDoc's own documentation says a result's
     // text lives only until the replay system is shut down, so it is not a string to hold on to.
     const std::string text = ResultText(res);
     delete session;
-    SetErr(err, errLen, "cannot open %s: %s", pathAbs.c_str(), text.c_str());
+    SetErr(err, errLen, "cannot open %s: %s", pathAbsText.c_str(), text.c_str());
     return NULL;
   }
 

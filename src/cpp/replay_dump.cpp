@@ -304,26 +304,23 @@ void WarnIfRenderdocSrcMissing()
   const DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
   if(len == 0 || len >= sizeof(exe))
     return;
-  std::string dir(exe, len);
-  const size_t slash = dir.find_last_of("\\/");
-  if(slash == std::string::npos)
-    return;
-  dir = dir.substr(0, slash);    // <root>\bin
-  const size_t parent = dir.find_last_of("\\/");
-  const std::string root = parent == std::string::npos ? dir : dir.substr(0, parent);
+  // Where this module lives is a load's own path, which only Win32 can answer; from there the tree
+  // is two levels up, which is what the chain of `find_last_of` calls was spelling out by hand.
+  const std::filesystem::path root =
+      std::filesystem::path(std::string(exe, len)).parent_path().parent_path();
 
-  const std::string core = root + "\\renderdoc-src\\renderdoc\\core\\core.h";
-  if(GetFileAttributesA(core.c_str()) != INVALID_FILE_ATTRIBUTES)
+  const std::filesystem::path core = root / "renderdoc-src" / "renderdoc" / "core" / "core.h";
+  std::error_code ec;
+  if(std::filesystem::exists(core, ec) && !ec)
     return;
 
-  fprintf(
-      stderr,
-      "note: %s\\renderdoc-src has no RenderDoc source, so the offline tool will print chunk ids\n"
-      "      rather than chunk names. It fetches the tree on demand -- the first command that "
-      "needs\n"
-      "      one, or `python src\\py\\rdc_analysis.py bootstrap` to do it now (README section "
-      "1.1).\n",
-      root.c_str());
+  fprintf(stderr,
+          "note: %s has no RenderDoc source, so the offline tool will print chunk ids\n"
+          "      rather than chunk names. It fetches the tree on demand -- the first command that "
+          "needs\n"
+          "      one, or `python src\\py\\rdc_analysis.py bootstrap` to do it now (README section "
+          "1.1).\n",
+          (root / "renderdoc-src").string().c_str());
 }
 
 //: Says so, in the log, when this executable is older than the sources it was built from.
@@ -348,48 +345,43 @@ void WarnIfDriverIsStale()
   const DWORD len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
   if(len == 0 || len >= sizeof(exe))
     return;
-  const std::string exePath(exe, len);
-  const long long exeTime = FileWriteTime(exePath);
-  if(exeTime == 0)
-    return;
+  const std::filesystem::path exePath(std::string(exe, len));
+  const std::optional<FileTime> exeTime = FileWriteTime(exePath);
+  if(!exeTime)
+    return;    // no answer about this binary, so whatever came next would be a guess
 
-  const size_t slash = exePath.find_last_of("\\/");
-  if(slash == std::string::npos)
-    return;
-  const std::string binDir = exePath.substr(0, slash);    // <root>\bin
-  const size_t parent = binDir.find_last_of("\\/");
-  if(parent == std::string::npos)
-    return;
-  const std::string root = binDir.substr(0, parent);
+  const std::filesystem::path root = exePath.parent_path().parent_path();    // <root>\bin\<exe>
 
   // The driver's own translation units and headers, and the build file that can change the binary
-  // without touching either (`/WX` off, a new source glob, a different renderdoc.dll path).
-  const char kSrcDir[] = "src\\cpp";
+  // without touching either (`/WX` off, a new source glob, a different renderdoc.dll path). Both
+  // sides are `file_time_type`s from the same filesystem, and the difference becomes seconds below:
+  // neither the epoch nor the tick size has to be assumed anywhere.
   const char *const kSuffixes[] = {".cpp", ".h"};
-  std::string newest;
-  long long newestTime = NewestSourceTime((root + "\\" + kSrcDir).c_str(), kSuffixes, 2, newest);
+  std::filesystem::path newest;
+  std::optional<FileTime> newestTime = NewestSourceTime(root / "src" / "cpp", kSuffixes, 2, newest);
   // What to print: the *name* is what the comparison needed, but a warning that says `common.h` is
   // one path-guess away from being useless, so the folder goes in front of it here.
-  std::string where = newest.empty() ? std::string() : (std::string(kSrcDir) + "\\" + newest);
+  std::filesystem::path where =
+      newest.empty() ? std::filesystem::path() : std::filesystem::path("src") / "cpp" / newest;
   const char *const kBuildFile[] = {"CMakeLists.txt"};
-  std::string buildFile;
-  const long long buildTime = NewestSourceTime(root.c_str(), kBuildFile, 1, buildFile);
-  if(buildTime > newestTime)
+  std::filesystem::path buildFile;
+  const std::optional<FileTime> buildTime = NewestSourceTime(root, kBuildFile, 1, buildFile);
+  if(buildTime && (!newestTime || *buildTime > *newestTime))
   {
     newestTime = buildTime;
     where = buildFile;
   }
 
-  if(newestTime <= exeTime)
+  if(!newestTime || *newestTime <= *exeTime)
     return;
 
-  // Seconds, because the difference is what a reader wants to judge it by, and whole seconds
-  // because a raw FILETIME count is unreadable. The remainder is dropped rather than rounded: "0 s
-  // newer" next to a warning would read as a false alarm.
-  const long long newer = (newestTime - exeTime) / 10000000LL;
+  // Seconds, because the difference is what a reader wants to judge it by. The remainder is dropped
+  // rather than rounded: "0 s newer" next to a warning would read as a false alarm.
+  const long long newer =
+      std::chrono::duration_cast<std::chrono::seconds>(*newestTime - *exeTime).count();
   Log("warning: this replay_dump.exe is older than its sources: %s was written %lld s later, so "
       "every answer from this run is the previous build's",
-      where.c_str(), newer);
+      where.string().c_str(), newer);
   Log("         build it with: cmake --build build --config Release");
 }
 
@@ -783,11 +775,12 @@ std::string WithoutBom(const std::string &text)
 //: Runs a file of command lines against one open capture. The point is the cost of a replay
 //: session, not the cost of the commands: standing the engine up and opening the capture is ~4 s on
 //: a small capture and ~11 s on a 1.4 GB one, and this pays it once for the whole file.
-int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *batchPath)
+int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::filesystem::path &batchPath)
 {
-  FILE *f = fopen(batchPath, "rb");
+  FILE *f = FileOpen(batchPath, "rb");
   if(f == NULL)
-    return Fail(2, "cannot read batch file %s", batchPath);
+    return Fail(2, "cannot read batch file %s", batchPath.string().c_str());
 
   int ret = 0, ran = 0;
   bool bSawProbe = false, sawOther = false;
@@ -1040,10 +1033,14 @@ int main(int argc, char **argv)
   WarnIfDriverIsStale();
 
   // Every path is made absolute here, and the working directory is logged: a path that only works
-  // from one directory is otherwise indistinguishable from a missing file.
-  const std::string pathAbs = AbsolutePath(args[1].c_str());
+  // from one directory is otherwise indistinguishable from a missing file. What the *engine* is
+  // handed is the narrow form of a path the driver resolved once (`pathAbsText`), because its ABI
+  // takes `const char *`
+  // -- and `path` stays the caller's own spelling, which is what the output shows them.
+  const std::filesystem::path pathAbs = AbsolutePath(args[1].c_str());
+  const std::string pathAbsText = pathAbs.string();
   const char *path = args[1].c_str();    // as given: what the output shows
-  std::string saveDirAbs, batchPathAbs;
+  std::filesystem::path saveDirAbs, batchPathAbs;
   if(saveDir != NULL)
     saveDirAbs = AbsolutePath(saveDir);
   if(args.size() > 2 && !strcmp(cmd, "batch"))
@@ -1058,7 +1055,7 @@ int main(int argc, char **argv)
   // Before the replay system and the device: a capture recorded by a newer RenderDoc than the
   // engine just loaded is refused here, with both versions named, rather than by whatever the
   // engine would otherwise do with a file it does not know.
-  const int versionCode = GuardCaptureVersion(pathAbs.c_str(), path);
+  const int versionCode = GuardCaptureVersion(pathAbsText.c_str(), path);
   if(versionCode != 0)
     return versionCode;
 
@@ -1077,11 +1074,11 @@ int main(int argc, char **argv)
   // while the *output* keeps the path as it was given, so a command's text is the same however it
   // was invoked. The absolute form and the working directory go to the log, where a wrong path is
   // the thing being diagnosed.
-  Log("reading the container of %s", pathAbs.c_str());
+  Log("reading the container of %s", pathAbsText.c_str());
   Trace("OpenFile");
-  const ResultDetails res = file->OpenFile(pathAbs.c_str(), "rdc", NULL);
+  const ResultDetails res = file->OpenFile(pathAbsText.c_str(), "rdc", NULL);
   if(!res.OK())
-    return Fail(1, "cannot open %s: %s", pathAbs.c_str(), ResultText(res).c_str());
+    return Fail(1, "cannot open %s: %s", pathAbsText.c_str(), ResultText(res).c_str());
 
   // This is where a run looks stuck, and it is worth saying so before it happens: the engine builds
   // its own copy of the frame and creates a replay device, which is ~3 s for a small capture and
@@ -1109,7 +1106,7 @@ int main(int argc, char **argv)
   }
   else if(!strcmp(cmd, "batch") && args.size() > 2)
   {
-    ret = CmdBatch(ctrl, file, path, batchPathAbs.c_str());
+    ret = CmdBatch(ctrl, file, path, batchPathAbs);
   }
   else
   {
@@ -1119,7 +1116,7 @@ int main(int argc, char **argv)
     cmdArgs.push_back(args[0]);
     cmdArgs.insert(cmdArgs.end(), args.begin() + 2, args.end());
     ret = DispatchCommand(ctrl, file, path, cmdArgs, bWantDisasm,
-                          saveDirAbs.empty() ? NULL : saveDirAbs.c_str());
+                          saveDirAbs.empty() ? NULL : saveDirAbs.string().c_str());
   }
   Log("done: exit %d after %.1fs", ret, (Millis() - started) / 1000.0);
 

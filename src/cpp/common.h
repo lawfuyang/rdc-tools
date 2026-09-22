@@ -38,8 +38,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>    // every path and every filesystem operation: no raw Win32 path calls
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -170,7 +172,7 @@ const size_t kDocBuffer = 1 << 20;
 class CaptureStdout
 {
 public:
-  explicit CaptureStdout(const char *path);
+  explicit CaptureStdout(const std::filesystem::path &path);
   ~CaptureStdout();
   CaptureStdout(const CaptureStdout &) = delete;
   CaptureStdout &operator=(const CaptureStdout &) = delete;
@@ -257,21 +259,35 @@ private:
   bool m_Logged;
 };
 int Fail(int code, _Printf_format_string_ const char *fmt, ...);
-std::string AbsolutePath(const char *path);
+//: A path as this process will actually use it: absolute, with `.` and `..` collapsed, so a relative
+//: path works from any directory. Nothing for a NULL or empty path, and the given path when it cannot
+//: be resolved at all -- a path that only works from one directory is otherwise indistinguishable from
+//: a missing file, which is why the callers print this form rather than what they were given.
+std::filesystem::path AbsolutePath(const std::filesystem::path &path);
 std::string WorkingDirectory();
-//: When a file was last written (a raw `FILETIME`, comparable with `>`), or 0 when it is not there.
-long long FileWriteTime(const std::string &path);
-//: The newest file in `dir` whose name ends with one of the `count` suffixes, or 0 when there is
-//: none; `name` receives it. The primitive behind the driver's own staleness check, and
-//: device-free, so `selftest` pins it.
-long long NewestSourceTime(const char *dir, const char *const *suffixes, int count,
-                           std::string &name);
+//: When a file was last written, or nothing when it is not there. The epoch of a `file_time_type`
+//: is the filesystem's business and not the driver's (a raw `FILETIME` count used to be returned
+//: and compared, which only worked because Windows is what MSVC builds for), so two of these are
+//: compared with `<` and
+//: `>` and a difference is turned into seconds at the one place that prints one.
+using FileTime = std::filesystem::file_time_type;
+std::optional<FileTime> FileWriteTime(const std::filesystem::path &path);
+//: The newest file in `dir` whose name ends with one of the `count` suffixes, with its own path
+//: when there is one; nothing when there is none. Suffix rather than `path::extension` on purpose:
+//: the offline tool's own staleness check (`rdc_driver.SOURCE_SUFFIXES`) matches the same way, and
+//: the two have to agree about what a source is. The primitive behind the driver's staleness check,
+//: and device-free, so `selftest` pins it.
+std::optional<FileTime> NewestSourceTime(const std::filesystem::path &dir,
+                                         const char *const *suffixes, int count,
+                                         std::filesystem::path &newest);
 std::string DefaultLogStem();
 //: The log stem for a *library* session: `GetModuleFileName` of the library itself rather than of the
 //: host process, because a DLL loaded by `python.exe` would otherwise write `python.exe_<date>.log.txt`
 //: next to the interpreter -- a directory the caller may not even be able to write to.
 std::string LibraryLogStem();
-FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs);
+//: `openedAs` is the name for the *log's own lines* and for the warning when it cannot be opened: a
+//: `std::string` because it is printed, not opened (`FileOpen` is handed the path).
+FILE *OpenLog(const std::filesystem::path &requested, bool bPerRun, std::string &openedAs);
 //: Flush and close the log, and forget it, so a library session leaves one finished file behind.
 //: `Log` after this goes nowhere, which is what a closed log means.
 void CloseLog();
@@ -290,7 +306,7 @@ struct CaptureVersion
   std::string program;     // "1.46 e4bd23": the RenderDoc that recorded it, and its commit
 };
 
-bool ReadCaptureVersion(const char *path, CaptureVersion &out);
+bool ReadCaptureVersion(const std::filesystem::path &path, CaptureVersion &out);
 //: `1.46`, `1.46 e4bd23` and `v1.9.2` all name a release; anything else does not, and says so.
 bool ParseMajorMinor(const std::string &text, int &major, int &minor);
 //: -1 engine older, 0 equal, +1 engine newer; `known` false when either side does not parse, which
@@ -301,7 +317,10 @@ int CompareMajorMinor(const std::string &engine, const std::string &capture, boo
 //: `why` (nullable) receives the refusal's own sentence instead of it being printed: the CLI passes
 //: NULL and gets the message on stderr with exit 1, the library passes a string and returns it
 //: through the ABI's `err` (api.h). Same wording either way, written once.
-int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::string *why = NULL);
+//: `pathAsGiven` is what the *message* uses (`AbsolutePath` collapses `..` and would otherwise hand
+//: the reader a path they never typed), and the two are the same file by construction.
+int GuardCaptureVersion(const std::filesystem::path &pathAbs,
+                        const std::filesystem::path &pathAsGiven, std::string *why = NULL);
 bool ParseInt(const char *text, int &value);
 int ToInt(const std::string &text, int fallback);
 
@@ -550,7 +569,8 @@ int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path,
              const std::vector<std::string> &args);
 int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what);
 int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid);
-int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *batchPath);
+int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::filesystem::path &batchPath);
 
 // --------------------------------------------------------------------------- the CLI (replay_dump.cpp)
 //
@@ -649,20 +669,48 @@ int ProbeUntil(int cap, int lastEvent);
 //: The probe cache's file path for this capture, or an empty string when caching is off or the
 //: engine version is not known. Lives with the sweep cache (bundle.cpp) because it is the same
 //: idea, the same directory and the same text format.
-std::string ProbeCachePath(const char *path);
-bool ReadProbeCache(const std::string &cachePath, const char *path, int lastEvent, ProbeCache &out);
-void WriteProbeCache(const std::string &cachePath, const char *path, int lastEvent,
-                     const ProbeCache &cache);
+std::filesystem::path ProbeCachePath(const std::filesystem::path &path);
+bool ReadProbeCache(const std::filesystem::path &cachePath, const std::filesystem::path &path,
+                    int lastEvent, ProbeCache &out);
+void WriteProbeCache(const std::filesystem::path &cachePath, const std::filesystem::path &path,
+                     int lastEvent, const ProbeCache &cache);
 
-//: The small file helpers the bundle (and the self-check reading a schema off disk) share.
-std::string Sha256File(const char *path);
+//: The small file helpers the bundle (and the self-check reading a schema off disk) share. Each
+//: takes a `std::filesystem::path`: a path is the thing these operate on, and a `std::string` is
+//: how one is *printed* -- `.string()` at the `printf` is the only way back, which is what keeps a
+//: path from being taken apart and rebuilt by hand (a `"\\"` between two halves is a path separator
+//: only on Windows, and only when neither half already ends in one). Opens a file for the
+//: byte-level work below: the one place a path becomes a `FILE *`. The CRT's narrow `fopen` reads
+//: its bytes in the machine's ANSI codepage while a `path` carries the form Windows actually uses,
+//: so opening through the path is what keeps the two consistent -- a path `std::filesystem` can see
+//: is a path this can open. `mode` is a narrow ASCII mode (`"rb"`, `"wb"`, `"wx"`); NULL when it
+//: fails.
+FILE *FileOpen(const std::filesystem::path &path, const char *mode);
+std::string Sha256File(const std::filesystem::path &path);
 //: The same digest over a buffer in memory: `shaders` identifies a shader by its bytes with this.
 std::string Sha256Bytes(const void *data, size_t size);
-bool ReadWholeFile(const char *path, std::string &text);
-bool FileBytes(const char *path, unsigned long long &bytes);
-bool MakeDir(const std::string &path);
-bool DirIsEmpty(const std::string &path, bool &bEmpty);
-std::string BundleRelative(const std::string &root, const std::string &full);
+bool ReadWholeFile(const std::filesystem::path &path, std::string &text);
+bool FileBytes(const std::filesystem::path &path, unsigned long long &bytes);
+//: The folder, and every one above it that is not there yet: a destination a caller names is one to make
+//: (`dump cap.rdc out/frames/cap1`, `sheet cap.rdc shots/frame12`, `patch ... out/tries/fix1`) rather than
+//: one to prepare by hand. False when a component cannot be created, which is what the callers'
+//: `cannot create <what>` messages report. An existing folder is success, and so is a trailing separator.
+bool MakeDir(const std::filesystem::path &path);
+//: Removes a file or an empty folder and ignores why it could not be, for the places that are
+//: cleaning up scratch of their own: "already gone" is the state the caller wanted. Anything that
+//: has to know why uses `std::filesystem::remove` with its own `error_code`.
+void RemoveQuiet(const std::filesystem::path &path);
+//: Whether a path exists, with the error dropped. `exists` has a throwing overload and the driver
+//: never lets an exception out of a helper: a directory that cannot be read is "not there" to a
+//: caller cleaning up after itself, and anything that has to tell those apart asks with its own
+//: `error_code`.
+bool ExistsQuiet(const std::filesystem::path &path);
+//: True when the folder could be read and holds nothing; false when it could not be read at all,
+//: which the caller has to tell apart from "empty" before it writes into it.
+bool DirIsEmpty(const std::filesystem::path &path, bool &bEmpty);
+//: A path inside the bundle, relative to its root and with forward slashes, so the manifest reads
+//: the same whichever way the root was spelled.
+std::string BundleRelative(const std::filesystem::path &root, const std::filesystem::path &full);
 
 // --------------------------------------------------------------------------- images (image.cpp)
 

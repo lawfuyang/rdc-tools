@@ -271,6 +271,13 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   crashed every session after the first), and **one session means one batch file**: the library produces the
   same text as a `batch` run of the same lines, byte for byte, and never promises a fresh engine per command
   (REFERENCE §9).
+- **Paths are `std::filesystem::path`, and every filesystem operation is `std::filesystem`'s** — with the
+  `error_code` overloads, always: an exception must never leave a helper, and a `filesystem_error` out of a
+  directory walk is a crash for a file that went away between two calls. A `std::string` is how a path is
+  *printed* (`.string()`/`.generic_string()` at the `printf`), never how one is taken apart, joined, made
+  relative or resolved; the one place a path becomes a `FILE *` is `FileOpen`. What stays Win32, and why:
+  `GetModuleFileName` (a module, not a file), `CaptureStdout`'s `_dup2`, and `_wfopen` inside `FileOpen`
+  (REFERENCE §9 has the whole account, including the encoding limit that is deliberately unchanged).
 - **A bundle is local state: never commit one, and never let one be written where it can be committed.** It
   belongs to one `.rdc` on this machine, and it records that capture's **absolute path** (`capture.json`'s
   `absPath`), so a bundle in `git status` is a leak rather than an artefact. The destinations that need no

@@ -51,7 +51,7 @@ std::string Sha256Bytes(const void *data, size_t size)
   return bOk ? DigestText(digest) : std::string();
 }
 
-std::string Sha256File(const char *path)
+std::string Sha256File(const std::filesystem::path &path)
 {
   BCRYPT_ALG_HANDLE alg = NULL;
   BCRYPT_HASH_HANDLE hash = NULL;
@@ -70,7 +70,7 @@ std::string Sha256File(const char *path)
   std::vector<unsigned char> object(objectBytes);
   unsigned char digest[32];
 
-  FILE *f = fopen(path, "rb");
+  FILE *f = FileOpen(path, "rb");
   bool bOk = false;
   if(f != NULL)
   {
@@ -100,16 +100,16 @@ std::string Sha256File(const char *path)
 
   if(!bOk)
   {
-    fprintf(stderr, "warning: cannot hash %s\n", path);
+    fprintf(stderr, "warning: cannot hash %s\n", path.string().c_str());
     return std::string();
   }
 
   return DigestText(digest);
 }
 
-bool ReadWholeFile(const char *path, std::string &text)
+bool ReadWholeFile(const std::filesystem::path &path, std::string &text)
 {
-  FILE *f = fopen(path, "rb");
+  FILE *f = FileOpen(path, "rb");
   if(f == NULL)
     return false;
   text.clear();
@@ -121,52 +121,70 @@ bool ReadWholeFile(const char *path, std::string &text)
   return true;
 }
 
-bool FileBytes(const char *path, unsigned long long &bytes)
+bool FileBytes(const std::filesystem::path &path, unsigned long long &bytes)
 {
-  WIN32_FILE_ATTRIBUTE_DATA info;
-  if(GetFileAttributesExA(path, GetFileExInfoStandard, &info) == 0)
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size(path, ec);
+  if(ec)
     return false;
-  bytes = ((unsigned long long)info.nFileSizeHigh << 32) | (unsigned long long)info.nFileSizeLow;
+  bytes = (unsigned long long)size;
   return true;
 }
 
-bool MakeDir(const std::string &path)
+bool MakeDir(const std::filesystem::path &path)
 {
-  if(CreateDirectoryA(path.c_str(), NULL) != 0)
+  // One call, and the reason this is `std::filesystem` rather than `CreateDirectoryA` per
+  // component: `create_directories` walks the path itself, so `C:\`, a UNC share, a trailing
+  // separator, `/` where Windows wants `\` and a `..` in the middle are the library's problem
+  // instead of ours. A destination a caller names is allowed to be several levels deep (`dump
+  // cap.rdc out/frames/cap1`, `sheet cap.rdc shots/frame12`, `patch ... out/tries/fix1`), and the
+  // folder that already exists is the normal case rather than an error: `create_directories`
+  // answers false with no error for it. False here therefore means what the callers' `cannot create
+  // <what>` messages say -- a file in the way, a drive that is not there, no permission.
+  if(path.empty())
+    return false;
+  std::error_code ec;
+  if(std::filesystem::create_directories(path, ec))
     return true;
-  return GetLastError() == ERROR_ALREADY_EXISTS;
+  if(ec)
+    return false;
+  return std::filesystem::is_directory(path, ec) && !ec;
 }
 
-bool DirIsEmpty(const std::string &path, bool &bEmpty)
+void RemoveQuiet(const std::filesystem::path &path)
 {
-  const std::string pattern = path + "\\*";
-  WIN32_FIND_DATAA entry;
-  HANDLE find = FindFirstFileA(pattern.c_str(), &entry);
-  if(find == INVALID_HANDLE_VALUE)
-    return false;
-  bEmpty = true;
-  do
-  {
-    if(strcmp(entry.cFileName, ".") != 0 && strcmp(entry.cFileName, "..") != 0)
-    {
-      bEmpty = false;
-      break;
-    }
-  } while(FindNextFileA(find, &entry) != 0);
-  FindClose(find);
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+}
+
+bool ExistsQuiet(const std::filesystem::path &path)
+{
+  std::error_code ec;
+  return std::filesystem::exists(path, ec) && !ec;
+}
+
+bool DirIsEmpty(const std::filesystem::path &path, bool &bEmpty)
+{
+  // One entry is one thing too many, so the iterator is asked for its first and not walked: the
+  // answer is whether the glob `path\*` used to return anything beyond `.` and `..`, which an
+  // iterator does not offer in the first place.
+  std::error_code ec;
+  const std::filesystem::directory_iterator first(path, ec);
+  if(ec)
+    return false;    // cannot be read at all, which is not the same answer as "empty"
+  bEmpty = first == std::filesystem::directory_iterator();
   return true;
 }
 
 //: A path inside the bundle, relative to its root and with forward slashes, so the manifest reads
 //: the same whichever way the root was spelled.
-std::string BundleRelative(const std::string &root, const std::string &full)
+std::string BundleRelative(const std::filesystem::path &root, const std::filesystem::path &full)
 {
-  std::string rel = full.size() > root.size() ? full.substr(root.size()) : full;
-  for(size_t i = 0; i < rel.size(); i++)
-  {
-    if(rel[i] == '\\')
-      rel[i] = '/';
-  }
+  // `lexically_relative` rather than a byte count: the version before this cut `root.size()` bytes off
+  // the front of `full`, which is not a relative path at all unless the root is a literal prefix of it
+  // (`out` and `outer\a.txt` gave `er/a.txt`). `/` separators because the manifest is read by the
+  // offline tool on either platform, which is what `generic_string` writes.
+  std::string rel = full.lexically_relative(root).generic_string();
   while(!rel.empty() && rel[0] == '/')
     rel.erase(0, 1);
   return rel;
@@ -216,15 +234,18 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
                         const D3D12Pipe::State *st, int eid, bool bWantDisasm,
                         const std::string &bundle, std::vector<std::string> &written)
 {
-  const std::string statesDir = bundle + "\\states";
-  const std::string cbuffersDir = bundle + "\\cbuffers";
-  const std::string stem = Fmt("%s\\%d", statesDir.c_str(), eid);
+  // The names under the bundle are paths, built by the path type rather than by hand: a caller may
+  // have named the bundle with a trailing separator, which `+ "\\states"` would have doubled.
+  const std::filesystem::path statesDir = std::filesystem::path(bundle) / "states";
+  const std::filesystem::path cbuffersDir = std::filesystem::path(bundle) / "cbuffers";
+  const std::filesystem::path stem = statesDir / Fmt("%d", eid);
 
   {
     const ULONGLONG tDoc = Millis();
     const JsonDocument bJson;
-    const std::string target = stem + ".state.json";
-    const CaptureStdout out(target.c_str());
+    std::filesystem::path target = stem;
+    target += ".state.json";
+    const CaptureStdout out(target);
     if(!out.Ok())
       return 1;
     CmdState(ctrl, file, path, eid);
@@ -235,8 +256,9 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
   {
     const ULONGLONG tDoc = Millis();
     const JsonDocument bJson;
-    const std::string target = stem + ".shaders.json";
-    const CaptureStdout out(target.c_str());
+    std::filesystem::path target = stem;
+    target += ".shaders.json";
+    const CaptureStdout out(target);
     if(!out.Ok())
       return 1;
     CmdShaders(ctrl, file, path, eid, bWantDisasm);
@@ -260,9 +282,9 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
     {
       const ULONGLONG tDoc = Millis();
       const JsonDocument bJson;
-      const std::string target =
-          Fmt("%s\\%d_%s_%d.json", cbuffersDir.c_str(), eid, StageName(stage), (int)b);
-      const CaptureStdout out(target.c_str());
+      const std::filesystem::path target =
+          cbuffersDir / Fmt("%d_%s_%d.json", eid, StageName(stage), (int)b);
+      const CaptureStdout out(target);
       if(!out.Ok())
         return 1;
       CmdCbuffer(ctrl, file, path, eid, stage, (int)b);
@@ -323,13 +345,13 @@ struct SweepCache
 
 //: `%LOCALAPPDATA%\rdc-tools\cache` unless `$RDC_CACHE_DIR` says otherwise: the offline tool's
 //: directory, so both halves of the tool have one cache to inspect or clear.
-std::string CacheDir()
+std::filesystem::path CacheDir()
 {
   const char *override = getenv("RDC_CACHE_DIR");
   if(override != NULL && *override != '\0')
-    return override;
+    return std::filesystem::path(override);
   const char *local = getenv("LOCALAPPDATA");
-  return std::string(local != NULL ? local : ".") + "\\rdc-tools\\cache";
+  return std::filesystem::path(local != NULL ? local : ".") / "rdc-tools" / "cache";
 }
 
 bool CacheDisabled()
@@ -342,19 +364,24 @@ bool CacheDisabled()
 //: size, modification time), the engine that produced the frame, and the scan range. FNV-1a,
 //: because this is a cache key and not a signature -- a collision would also have to pass the
 //: header check below, which compares the fields themselves.
-std::string SweepCacheKey(const DumpOptions &opts, const std::string &absolute)
+std::string SweepCacheKey(const DumpOptions &opts, const std::filesystem::path &absolute)
 {
-  WIN32_FILE_ATTRIBUTE_DATA info;
+  // The capture's size and write time, through the same two helpers the rest of the tool asks with
+  // -- this used to read the attributes itself, which is how a cache key and a staleness check can
+  // come to disagree about what "the same file" means. The write time is hashed as this
+  // filesystem's own count rather than Windows' 100 ns ticks (`file_time_type` fixes no epoch), and
+  // a key that changes is a cache *miss* and never a wrong answer: the header lines below compare
+  // the fields themselves.
   unsigned long long bytes = 0, written = 0;
-  std::string identity = absolute;
+  FileBytes(absolute, bytes);
+  std::error_code ec;
+  const FileTime time = std::filesystem::last_write_time(absolute, ec);
+  if(!ec)
+    written = (unsigned long long)time.time_since_epoch().count();
+
+  std::string identity = absolute.string();
   for(size_t i = 0; i < identity.size(); i++)
     identity[i] = (char)tolower((unsigned char)identity[i]);
-  if(GetFileAttributesExA(absolute.c_str(), GetFileExInfoStandard, &info))
-  {
-    bytes = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
-    written = ((unsigned long long)info.ftLastWriteTime.dwHighDateTime << 32) |
-              info.ftLastWriteTime.dwLowDateTime;
-  }
   const std::string material = Fmt("%s|%llu|%llu|%s|%d|%d|%d|%d", identity.c_str(), bytes, written,
                                    g_GetVersionString != NULL ? g_GetVersionString() : "?",
                                    opts.m_Since, opts.m_Until, opts.m_MaxEvents, opts.m_Bound);
@@ -367,27 +394,27 @@ std::string SweepCacheKey(const DumpOptions &opts, const std::string &absolute)
   return Fmt("%016llx", hash);
 }
 
-//: The cache file for this capture and range, or an empty string when caching is off.
-std::string SweepCachePath(const char *path, const DumpOptions &opts)
+//: The cache file for this capture and range, or an empty path when caching is off.
+std::filesystem::path SweepCachePath(const std::filesystem::path &path, const DumpOptions &opts)
 {
   if(CacheDisabled())
-    return std::string();
-  return CacheDir() + "\\sweep-" + SweepCacheKey(opts, AbsolutePath(path)) + ".txt";
+    return std::filesystem::path();
+  return CacheDir() / Fmt("sweep-%s.txt", SweepCacheKey(opts, AbsolutePath(path)).c_str());
 }
 
 //: Reads a cache file, refusing it unless every header line says what this run is asking for. A
 //: missing file, a stale one, a truncated one and one for another range are all the same answer --
 //: sweep -- which is always correct and only slow.
-bool ReadSweepCache(const std::string &cachePath, const char *path, const DumpOptions &opts,
-                    SweepCache &out)
+bool ReadSweepCache(const std::filesystem::path &cachePath, const std::filesystem::path &path,
+                    const DumpOptions &opts, SweepCache &out)
 {
   if(cachePath.empty())
     return false;
-  FILE *f = fopen(cachePath.c_str(), "rb");
+  FILE *f = FileOpen(cachePath, "rb");
   if(f == NULL)
     return false;
   char line[1024];
-  const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).c_str());
+  const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).string().c_str());
   const std::string wantRange = Fmt("# range: since %d until %d maxEvents %d bound %d",
                                     opts.m_Since, opts.m_Until, opts.m_MaxEvents, opts.m_Bound);
   const std::string wantEngine =
@@ -444,18 +471,22 @@ bool ReadSweepCache(const std::string &cachePath, const char *path, const DumpOp
 //: Writes the cache, best effort: one that cannot be written is not a failure, it is a run that
 //: sweeps again next time. Written to a temporary name and renamed, so a killed run cannot leave a
 //: half file behind.
-void WriteSweepCache(const std::string &cachePath, const char *path, const DumpOptions &opts,
-                     const std::vector<int> &ids, int scanned, const char *stopped)
+void WriteSweepCache(const std::filesystem::path &cachePath, const std::filesystem::path &path,
+                     const DumpOptions &opts, const std::vector<int> &ids, int scanned,
+                     const char *stopped)
 {
   if(cachePath.empty())
     return;
   MakeDir(CacheDir());
-  const std::string temp = cachePath + ".part";
-  FILE *f = fopen(temp.c_str(), "wb");
+  // `path +=` rather than building the name as a string: the temporary is the cache's own name with
+  // an extension, whatever that name is.
+  std::filesystem::path temp = cachePath;
+  temp += ".part";
+  FILE *f = FileOpen(temp, "wb");
   if(f == NULL)
     return;
   fprintf(f, "# rdc-tools sweep cache v1\n");
-  fprintf(f, "# capture: %s\n", AbsolutePath(path).c_str());
+  fprintf(f, "# capture: %s\n", AbsolutePath(path).string().c_str());
   fprintf(f, "# engine: %s\n", g_GetVersionString != NULL ? g_GetVersionString() : "?");
   fprintf(f, "# range: since %d until %d maxEvents %d bound %d\n", opts.m_Since, opts.m_Until,
           opts.m_MaxEvents, opts.m_Bound);
@@ -463,8 +494,12 @@ void WriteSweepCache(const std::string &cachePath, const char *path, const DumpO
   for(size_t i = 0; i < ids.size(); i++)
     fprintf(f, "%d\n", ids[i]);
   fclose(f);
-  remove(cachePath.c_str());
-  rename(temp.c_str(), cachePath.c_str());
+  // The remove is explicit even though Windows' rename replaces: this is the one thing a cache
+  // write does to a name another run may already have open, and an error code is cheaper to reason
+  // about than an implementation's replace semantics.
+  std::error_code ec;
+  std::filesystem::remove(cachePath, ec);
+  std::filesystem::rename(temp, cachePath, ec);
 }
 
 // --------------------------------------------------------------------------- the probe cache
@@ -493,25 +528,23 @@ void WriteSweepCache(const std::string &cachePath, const char *path, const DumpO
 // Rows are `eid shaders rootSig params`: the four fields the row prints, so the cache reprints the
 // line the scan would have. `rootSig` is `IdText`'s decimal, and holds no space.
 
-//: The cache file for this capture, or an empty string when caching is off. Keyed like the sweep's
+//: The cache file for this capture, or an empty path when caching is off. Keyed like the sweep's
 //: -- path, size, write time and engine -- because a capture edited in place is a different capture
 //: whose ids mean something else, and the size and write time are what say so.
-std::string ProbeCachePath(const char *path)
+std::filesystem::path ProbeCachePath(const std::filesystem::path &path)
 {
   if(CacheDisabled())
-    return std::string();
-  const std::string identity = AbsolutePath(path);
-  std::string lower = identity;
+    return std::filesystem::path();
+  const std::filesystem::path identity = AbsolutePath(path);
+  std::string lower = identity.string();
   for(size_t i = 0; i < lower.size(); i++)
     lower[i] = (char)tolower((unsigned char)lower[i]);
-  WIN32_FILE_ATTRIBUTE_DATA info;
   unsigned long long bytes = 0, written = 0;
-  if(GetFileAttributesExA(identity.c_str(), GetFileExInfoStandard, &info))
-  {
-    bytes = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
-    written = ((unsigned long long)info.ftLastWriteTime.dwHighDateTime << 32) |
-              info.ftLastWriteTime.dwLowDateTime;
-  }
+  FileBytes(identity, bytes);
+  std::error_code ec;
+  const FileTime time = std::filesystem::last_write_time(identity, ec);
+  if(!ec)
+    written = (unsigned long long)time.time_since_epoch().count();
   const std::string material = Fmt("%s|%llu|%llu|%s", lower.c_str(), bytes, written,
                                    g_GetVersionString != NULL ? g_GetVersionString() : "?");
   unsigned long long hash = 1469598103934665603ULL;
@@ -520,22 +553,23 @@ std::string ProbeCachePath(const char *path)
     hash ^= (unsigned char)material[i];
     hash *= 1099511628211ULL;
   }
-  return CacheDir() + "\\probe-" + Fmt("%016llx", hash) + ".txt";
+  return CacheDir() / Fmt("probe-%016llx.txt", hash);
 }
 
 //: Reads the cache, refusing anything that is not this capture's answer. A missing file, another
 //: capture's, another engine's, a truncated one and one with no rows are all the same answer -- sweep
 //: -- which is always correct and only slow.
-bool ReadProbeCache(const std::string &cachePath, const char *path, int lastEvent, ProbeCache &out)
+bool ReadProbeCache(const std::filesystem::path &cachePath, const std::filesystem::path &path,
+                    int lastEvent, ProbeCache &out)
 {
   out.m_Rows.clear();
   out.m_Scanned = 0;
   if(cachePath.empty())
     return false;
-  FILE *f = fopen(cachePath.c_str(), "rb");
+  FILE *f = FileOpen(cachePath, "rb");
   if(f == NULL)
     return false;
-  const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).c_str());
+  const std::string wantCapture = Fmt("# capture: %s", AbsolutePath(path).string().c_str());
   const std::string wantEngine =
       Fmt("# engine: %s", g_GetVersionString != NULL ? g_GetVersionString() : "?");
   // The frame's own extent is part of the answer's meaning (`probe` stops at it), so a file swept
@@ -596,18 +630,19 @@ bool ReadProbeCache(const std::string &cachePath, const char *path, int lastEven
 
 //: Writes the cache, best effort: one that cannot be written is a run that sweeps again next time.
 //: Temporary name, then rename, so an interrupted write cannot leave a half file behind.
-void WriteProbeCache(const std::string &cachePath, const char *path, int lastEvent,
-                     const ProbeCache &cache)
+void WriteProbeCache(const std::filesystem::path &cachePath, const std::filesystem::path &path,
+                     int lastEvent, const ProbeCache &cache)
 {
   if(cachePath.empty() || cache.m_Scanned <= 0)
     return;
   MakeDir(CacheDir());
-  const std::string temp = cachePath + ".part";
-  FILE *f = fopen(temp.c_str(), "wb");
+  std::filesystem::path temp = cachePath;
+  temp += ".part";
+  FILE *f = FileOpen(temp, "wb");
   if(f == NULL)
     return;
   fprintf(f, "# rdc-tools probe cache v1\n");
-  fprintf(f, "# capture: %s\n", AbsolutePath(path).c_str());
+  fprintf(f, "# capture: %s\n", AbsolutePath(path).string().c_str());
   fprintf(f, "# engine: %s\n", g_GetVersionString != NULL ? g_GetVersionString() : "?");
   fprintf(f, "# bound: %d\n", lastEvent);
   fprintf(f, "# scanned: %d\n", cache.m_Scanned);
@@ -617,8 +652,9 @@ void WriteProbeCache(const std::string &cachePath, const char *path, int lastEve
     fprintf(f, "%d %d %s %d\n", row.m_Eid, row.m_Shaders, row.m_RootSig.c_str(), row.m_Params);
   }
   fclose(f);
-  remove(cachePath.c_str());
-  rename(temp.c_str(), cachePath.c_str());
+  std::error_code ec;
+  std::filesystem::remove(cachePath, ec);
+  std::filesystem::rename(temp, cachePath, ec);
 }
 
 //: The ids `probe` should scan: the caller's cap, the frame's own last event when that is smaller,
@@ -806,7 +842,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   static const char *kSubDirs[] = {"states", "cbuffers", "rt", "textures"};
   for(size_t i = 0; i < sizeof(kSubDirs) / sizeof(kSubDirs[0]); i++)
   {
-    if(!MakeDir(opts.m_OutDir + "\\" + kSubDirs[i]))
+    if(!MakeDir(std::filesystem::path(opts.m_OutDir) / kSubDirs[i]))
       return Fail(1, "cannot create %s\\%s", opts.m_OutDir.c_str(), kSubDirs[i]);
   }
 
@@ -865,7 +901,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // the capture and the range (see the sweep cache above). A hit saves the scan and nothing else --
   // the pass below still walks every collected id, because the state it reads there is not the
   // state the sweep saw.
-  const std::string sweepCache = SweepCachePath(path, opts);
+  const std::filesystem::path sweepCache = SweepCachePath(path, opts);
   SweepCache cached;
   if(ReadSweepCache(sweepCache, path, opts, cached))
   {
@@ -875,7 +911,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     stopped = cached.m_Stopped;
     Log("bundle: sweep answered from the cache: %d id(s) out of %d scanned (%s)", (int)ids.size(),
         scanned, stopped.c_str());
-    Log("bundle:   (set $RDC_NO_CACHE, or delete %s, to scan again)", sweepCache.c_str());
+    Log("bundle:   (set $RDC_NO_CACHE, or delete %s, to scan again)", sweepCache.string().c_str());
     // The sweep also left the engine at the *end* of the scan, and the writing pass depends on
     // that: its first `SetFrameEvent` has to move *backwards* for the state to come out complete
     // (see the note above the sweep -- a forward step onto the first event gives one bound shader
@@ -912,7 +948,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // ------------------------------------------------------------------ capture.json
   {
     const JsonDocument bJson;
-    const CaptureStdout out((opts.m_OutDir + "\\capture.json").c_str());
+    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "capture.json");
     if(!out.Ok())
       return Fail(1, "cannot write capture.json in %s", opts.m_OutDir.c_str());
 
@@ -930,9 +966,8 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("textures", (long long)ctrl->GetTextures().size());
     Field("buffers", (long long)ctrl->GetBuffers().size());
     Field("debugMessages", (long long)ctrl->GetDebugMessages().size());
-    Field("captureBytes",
-          FileBytes(AbsolutePath(path).c_str(), captureBytes) ? (long long)captureBytes : 0);
-    Field("absPath", AbsolutePath(path),
+    Field("captureBytes", FileBytes(AbsolutePath(path), captureBytes) ? (long long)captureBytes : 0);
+    Field("absPath", AbsolutePath(path).string(),
           true);    // the object's last member: a comma here is not JSON
     g_Indent = 0;
     printf("}\n");
@@ -961,7 +996,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   size_t stateFiles = 0;
   {
     const JsonDocument bJson;
-    const CaptureStdout out((opts.m_OutDir + "\\events.json").c_str());
+    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "events.json");
     if(!out.Ok())
       return Fail(1, "cannot write events.json in %s", opts.m_OutDir.c_str());
 
@@ -1078,7 +1113,8 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
             // resource is ~10x smaller than the BMP the display path writes (a 1920x1080 target is
             // 6 MB as BMP), and the bundle wants the target as it is, not as a viewer would
             // tone-map it.
-            const std::string png = Fmt("%s\\rt\\%d_%d.png", opts.m_OutDir.c_str(), eid, (int)slot);
+            const std::string png =
+                (std::filesystem::path(opts.m_OutDir) / "rt" / Fmt("%d_%d.png", eid, (int)slot)).string();
             TextureSave save;
             save.resourceId = rt;
             save.destType = FileType::PNG;
@@ -1124,7 +1160,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // ------------------------------------------------------------------ resources.json
   {
     const JsonDocument bJson;
-    const CaptureStdout out((opts.m_OutDir + "\\resources.json").c_str());
+    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "resources.json");
     if(!out.Ok())
       return Fail(1, "cannot write resources.json in %s", opts.m_OutDir.c_str());
 
@@ -1209,7 +1245,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // ------------------------------------------------------------------ messages.json
   {
     const JsonDocument bJson;
-    const CaptureStdout out((opts.m_OutDir + "\\messages.json").c_str());
+    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "messages.json");
     if(!out.Ok())
       return Fail(1, "cannot write messages.json in %s", opts.m_OutDir.c_str());
 
@@ -1241,7 +1277,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   {
     Log("bundle: fetching counters (the slow part, when the driver supports them)");
     const JsonDocument bJson;
-    const CaptureStdout out((opts.m_OutDir + "\\counters.json").c_str());
+    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "counters.json");
     if(!out.Ok())
       return Fail(1, "cannot write counters.json in %s", opts.m_OutDir.c_str());
 
@@ -1272,7 +1308,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       TextureSave save;
       save.resourceId = t.resourceId;
       save.destType = FileType::PNG;
-      const std::string out = opts.m_OutDir + "\\textures\\" + IdText(t.resourceId) + ".png";
+      // A `std::string` because the engine wants one (`rdcstr`), built as a path because this is a
+      // path: the join is the tool's, and the engine is handed the same bytes it always was.
+      const std::string out =
+          (std::filesystem::path(opts.m_OutDir) / "textures" / (IdText(t.resourceId) + ".png")).string();
       const ResultDetails res = ctrl->SaveTexture(save, rdcstr(out.c_str()));
       // A successful `SaveTexture` can still leave an empty file (measured: one texture in the Android
       // capture), and a 0-byte PNG in the manifest is worse than a line saying it could not be decoded.
@@ -1292,12 +1331,12 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // ------------------------------------------------------------------ manifest.json
   {
     const JsonDocument bJson;
-    const CaptureStdout out((opts.m_OutDir + "\\manifest.json").c_str());
+    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "manifest.json");
     if(!out.Ok())
       return Fail(1, "cannot write manifest.json in %s", opts.m_OutDir.c_str());
 
     unsigned long long captureBytes = 0;
-    const std::string captureAbs = AbsolutePath(path);
+    const std::filesystem::path captureAbs = AbsolutePath(path);
     printf("{\n");    // this writer builds its own document
     g_Indent = 1;
     Field("schemaVersion", (long long)kSchemaVersion);
@@ -1305,9 +1344,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("driver", std::string("replay_dump"));
     Field("renderdoc", std::string(g_GetVersionString ? g_GetVersionString() : "?"));
     Field("capture", std::string(path));
-    Field("captureAbsolute", captureAbs);
-    Field("captureBytes", FileBytes(captureAbs.c_str(), captureBytes) ? (long long)captureBytes : 0);
-    Field("captureSha256", Sha256File(captureAbs.c_str()));
+    Field("captureAbsolute", captureAbs.string());
+    Field("captureBytes", FileBytes(captureAbs, captureBytes) ? (long long)captureBytes : 0);
+    Field("captureSha256", Sha256File(captureAbs));
     Field("since", (long long)opts.m_Since);
     Field("until", (long long)opts.m_Until);
     Field("maxEvents", (long long)opts.m_MaxEvents);
@@ -1356,10 +1395,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     unsigned long long totalBytes = 0;
     for(size_t i = 0; i < written.size(); i++)
     {
-      const std::string full = opts.m_OutDir + "\\" + written[i];
+      const std::filesystem::path full = std::filesystem::path(opts.m_OutDir) / written[i];
       unsigned long long bytes = 0;
-      FileBytes(full.c_str(), bytes);    // a '/' in the path is accepted by the Win32 API
-      const std::string hash = Sha256File(full.c_str());
+      FileBytes(full, bytes);    // `written[i]` is `/`-separated; Windows accepts either
+      const std::string hash = Sha256File(full);
       ObjectRow(Fmt("{\"path\": \"%s\", \"bytes\": %llu, \"sha256\": \"%s\"}", written[i].c_str(),
                     bytes, hash.c_str()));
       totalBytes += bytes;
@@ -1397,16 +1436,16 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
 //: the README's playbook).
 int CmdBundleVerify(const char *dir)
 {
-  const std::string manifestPath = std::string(dir) + "\\manifest.json";
+  const std::filesystem::path manifestPath = std::filesystem::path(dir) / "manifest.json";
   std::string text;
-  if(!ReadWholeFile(manifestPath.c_str(), text))
-    return Fail(1, "cannot read %s", manifestPath.c_str());
+  if(!ReadWholeFile(manifestPath, text))
+    return Fail(1, "cannot read %s", manifestPath.string().c_str());
 
   if(g_bJson)
     printf("{\n");
   g_Indent = g_bJson ? 1 : 0;
   Field("schemaVersion", (long long)kSchemaVersion);
-  Field("manifest", manifestPath);
+  Field("manifest", manifestPath.string());
 
   int checked = 0, bad = 0;
   ArrayOpen("files");
@@ -1427,15 +1466,12 @@ int CmdBundleVerify(const char *dir)
       break;
     }
 
-    std::string full = std::string(dir) + "\\" + rel;
-    for(size_t i = 0; i < full.size(); i++)
-    {
-      if(full[i] == '/')
-        full[i] = '\\';
-    }
+    // `rel` is the manifest's own `/`-separated path and a path takes either separator, so the loop
+    // that rewrote every `/` to `\` was the driver doing by hand what Windows already does.
+    const std::filesystem::path full = std::filesystem::path(dir) / rel;
 
     unsigned long long onDisk = 0;
-    if(!FileBytes(full.c_str(), onDisk))
+    if(!FileBytes(full, onDisk))
     {
       Row(Fmt("%-46s MISSING", rel));
       bad++;
@@ -1447,7 +1483,7 @@ int CmdBundleVerify(const char *dir)
     }
     else
     {
-      const std::string hash = Sha256File(full.c_str());
+      const std::string hash = Sha256File(full);
       if(hash.empty() || hash != digest)
       {
         Row(Fmt("%-46s sha256 %s, the manifest says %s", rel,

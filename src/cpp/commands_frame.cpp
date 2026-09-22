@@ -206,6 +206,14 @@ const char *VarTypeText(VarType t)
 int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *filter,
                 const char *saveDir)
 {
+  // Before the header, so a failure to make the destination prints nothing rather than half a
+  // document. The folder is one the tool makes for the same reason `dump`'s, `sheet`'s and
+  // `patch`'s are: a caller names a destination, and `textures --save shots/frame12` used to warn
+  // once per texture instead ("could not save res271") and exit 0 -- the files that were asked for
+  // are not there, and the run says it succeeded, which is the one combination a script cannot see.
+  if(saveDir != NULL && *saveDir != '\0' && !MakeDir(saveDir))
+    return Fail(1, "cannot create %s", saveDir);
+
   PrintCaptureHeader(file, path);
   const rdcarray<TextureDescription> &texs = ctrl->GetTextures();
 
@@ -1092,7 +1100,7 @@ int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
         "that "
         "have nothing bound (run `probe` first)");
 
-  const std::string cachePath = ProbeCachePath(path);
+  const std::filesystem::path cachePath = ProbeCachePath(path);
   ProbeCache cache;
   const bool bHit = ReadProbeCache(cachePath, path, lastEvent, cache);
   if(bHit && cache.m_Scanned < until)

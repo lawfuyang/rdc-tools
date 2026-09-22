@@ -201,7 +201,7 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
                   IdText(original).c_str());
     const rdcstr asmText = ctrl->DisassembleShader(pipeline, refl, rdcstr());
     const std::string text(asmText.c_str(), asmText.size());
-    FILE *f = fopen(dumpPath.c_str(), "wb");
+    FILE *f = FileOpen(dumpPath, "wb");
     if(f == NULL)
       return Fail(1, "cannot write %s", dumpPath.c_str());
     const bool bOk = fwrite(text.data(), 1, text.size(), f) == text.size();
@@ -289,9 +289,9 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
       const std::string dir = outDir.empty() ? std::string("patch") : outDir;
       if(!MakeDir(dir))
         return Fail(1, "cannot create %s", dir.c_str());
-      const std::string beforePath = dir + "\\before.bmp";
-      const std::string afterPath = dir + "\\after.bmp";
-      const std::string heatPath = dir + "\\diff.bmp";
+      const std::string beforePath = (std::filesystem::path(dir) / "before.bmp").string();
+      const std::string afterPath = (std::filesystem::path(dir) / "after.bmp").string();
+      const std::string heatPath = (std::filesystem::path(dir) / "diff.bmp").string();
       ImageData heat;
       int maxDelta = 0;
       long long sumDelta = 0;

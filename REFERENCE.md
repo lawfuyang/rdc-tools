@@ -1529,7 +1529,7 @@ the answers look like answers, and only the source says what the library should 
 | `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, the SHA-256 of the shader's own bytes per stage, and the disassembly on request |
 | `cb <rdc> <eid> <stage> <slot>` | the **named values** of one constant buffer, structs and arrays expanded |
 | `watch <rdc> <name> [--since A] [--until B] [--max-events N] [--stage <stage>] [--all]` | one reflection member's value at every event of a range, as one row per *change* — see below |
-| `textures <rdc> [filter] [--save <dir>]` | the texture list; `--save` decodes each one to PNG through `SaveTexture` |
+| `textures <rdc> [filter] [--save <dir>]` | the texture list; `--save` decodes each one to PNG through `SaveTexture`, into a folder the tool creates (parents included, like `dump`/`sheet`/`patch` destinations) and **fails** on if it cannot — it used to warn once per texture and exit 0, which left the files a caller asked for missing behind a run that said it succeeded |
 | `mesh <rdc> <eid> [instance] [max]` | post-VS geometry: what the vertex shader actually emitted |
 | `image <rdc> <eid> <out.bmp>` | the texture display at that event, written as a BMP (no PNG encoder needed) |
 | `pixelhistory <rdc> <eid\|last> <resId\|name> <x> <y>` | every event up to `<eid>` that tried to write that pixel: the test that rejected each attempt and the value before, from and after it (below) |
@@ -1554,13 +1554,49 @@ fails when that folder and the driver disagree — which is how a committed copy
 capture cannot: the JSON writer's escaping, separators and balance, the schema table, the help text, and the
 `renderdoc.dll` it would load — skipping the DLL checks, rather than failing, when RenderDoc is not installed.
 
+**Paths are `std::filesystem`'s.** Every filesystem operation in the driver — directories, existence, sizes,
+write times, iteration, absolute resolution, joins — goes through `std::filesystem`, with the `error_code`
+overloads throughout: an exception must not leave a helper, and a `filesystem_error` thrown out of a
+directory walk would take the process down for a file that went away between two calls. What that replaced:
+`MakeDir` is now one `create_directories` call (the drive/UNC/trailing-separator walk it did by hand was
+`root_name`/`root_directory` spelled out), `DirIsEmpty` is one `directory_iterator`, `FileBytes` is
+`file_size`, `FileWriteTime`/`NewestSourceTime` return `file_time_type` (so `>` compares two of them and the
+difference becomes seconds at the one place that prints one) and `AbsolutePath` is
+`absolute(...).lexically_normal()`. Three things stay Win32 on purpose, each saying so where it is:
+`GetModuleFileName` (a *module*'s path, not a file's), `CaptureStdout`'s `_dup2` (the documents have to stay
+byte-identical to the command line's), and `_wfopen` inside `FileOpen` — the one place a path becomes a
+`FILE *`, because a printf-style writer has no `std::filesystem` equivalent.
+
+The pass paid for itself in three places where the hand-written version was *wrong* rather than merely
+long: `BundleRelative` cut `root.size()` bytes off the front of a path, which is not a relative path at all
+unless the root is a literal prefix of it (`out` and `outer\a.txt` gave `er/a.txt`); `bundle-verify` rewrote
+`/` to `\` by hand, which is what Windows already does; and `MakeDir` re-derived a path's root component by
+component. Measured: the two bundles dumped before and after the change are **byte-identical**, file for
+file (`--until 1` on the Android capture, including `capture.json`'s `absPath`, the manifest's
+`captureAbsolute` and its `/`-separated file list, and a capture spelled
+`renderdoc-src/../renderdoc-src/./Android Renderer.rdc`); the corpus's byte-for-byte comparison of the
+driver's text passes unchanged, and the driver's 154 self-checks pass with two of them renamed
+(`newest-source-of-an-empty-dir-is-zero` → `-is-none` and `file-write-time-of-a-missing-file-is-zero` →
+`-is-none`, because 0 was the old sentinel and `std::optional` is the new one).
+
+One limit is deliberately unchanged: a path still arrives as narrow bytes in the machine's ANSI codepage
+(that is what `argv` and the ABI hand over), so a capture whose name is not representable there still cannot
+be opened by the exe. Fixing that needs the wide command line (`GetCommandLineW`, or `wmain`) plus an
+explicit encoding convention — a different change from this one, and `FileOpen` is where it would land.
+
 **The bundle — `dump` and `bundle-verify`.** `dump` is one replay session turned into files, so the offline
 half (and a reader) can work without a device. **A bundle is local state and is never committed**: it belongs
 to one `.rdc` on this machine, and the first two files below carry the capture's **absolute path** — which is
 the point (a bundle says which file it came from) and also why it must not be shared. The destination with no
 argument is `bundle`, relative to the *working directory*, and it is in `.gitignore` beside the sweep's
 `bundles/` (§4.21); the driver will not write into a directory that is not empty unless `--overwrite` is
-passed, so the accident to guard against is a *new* directory, not an existing one. It writes:
+passed, so the accident to guard against is a *new* directory, not an existing one. Finally, the destination
+and **every folder above it that is not there yet are created** — `dump cap.rdc out/frames/cap1` needs no
+`mkdir` first, and the same is true of the other two commands whose destination is a folder a caller names,
+`sheet <rdc> [outDir=sheet]` and `patch <rdc> <eid> <stage> [outDir=patch]` (the table above). `MakeDir`
+walks the path one separator at a time for it, skipping the part that is not the caller's (`C:\`, a UNC
+share) and treating a component that already exists as the normal case; a *file* where a component must be is
+still the failure those commands report as `cannot create <what>`. It writes:
 
 | File | Content |
 |---|---|

@@ -20,11 +20,33 @@
 
 #include "common.h"
 
-CaptureStdout::CaptureStdout(const char *path)
+//: The one place a path becomes a `FILE *`. The CRT's narrow `fopen` reads its bytes in the
+//: machine's ANSI codepage, while a `std::filesystem::path` carries the form Windows actually uses
+//: -- so a path that `std::filesystem` can see is a path this can open, and every byte-level read
+//: and write in the driver goes through here rather than through `fopen` with a path converted back
+//: to bytes.
+//:
+//: `_wfopen` rather than a stream: the log, the bundle's documents and `--dump` all feed a shared
+//: printf-style writer, and replacing `fprintf` with iostreams to gain nothing but a different
+//: spelling is not what this is for. `mode` stays narrow because every mode in the driver is ASCII
+//: (`"r"`, `"rb"`,
+//: `"w"`, `"wb"`, `"wx"`), and it is widened here with a bound rather than trusting the caller.
+FILE *FileOpen(const std::filesystem::path &path, const char *mode)
+{
+  const size_t len = mode != NULL ? strlen(mode) : 0;
+  if(len == 0 || len >= 4)
+    return NULL;
+  wchar_t wide[4] = {0};
+  for(size_t i = 0; i < len; i++)
+    wide[i] = (wchar_t)(unsigned char)mode[i];
+  return _wfopen(path.c_str(), wide);
+}
+
+CaptureStdout::CaptureStdout(const std::filesystem::path &path)
 {
   const int fd = _fileno(stdout);
   m_Saved = _dup(fd);
-  m_File = fopen(path, "wb");
+  m_File = FileOpen(path, "wb");
   if(m_File != NULL && m_Saved >= 0)
   {
     _dup2(_fileno(m_File), fd);

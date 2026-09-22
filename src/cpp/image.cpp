@@ -80,7 +80,7 @@ bool WriteBMP(const char *path, const bytebuf &rgba, int32_t width, int32_t heig
   PutLE16(header + 28, 24u);
   PutLE32(header + 34, (uint32_t)imageSize);
 
-  FILE *f = fopen(path, "wb");
+  FILE *f = FileOpen(path, "wb");
   if(f == NULL)
     return false;
 
@@ -113,7 +113,7 @@ bool WriteBMPImage(const char *path, const ImageData &img)
 //: what it is, because a half-read image would be a wrong difference rather than a missing one.
 bool ReadBMPImage(const char *path, ImageData &img, std::string &why)
 {
-  FILE *f = fopen(path, "rb");
+  FILE *f = FileOpen(path, "rb");
   if(f == NULL)
   {
     why = Fmt("cannot read %s", path);

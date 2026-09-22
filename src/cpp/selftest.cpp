@@ -54,23 +54,25 @@ int CheckSchemasAgainstDir(const std::string &dir, bool bReport)
     }
   }
 
-  WIN32_FIND_DATAA found;
-  const std::string pattern = dir + "\\*.schema.json";
-  HANDLE search = FindFirstFileA(pattern.c_str(), &found);
-  if(search != INVALID_HANDLE_VALUE)
+  // A file in `dir` the table does not know: walked with an iterator and the `error_code` overload,
+  // so a folder that cannot be read is "no extras" rather than an exception out of the self-check.
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dir, ec);
+  const std::filesystem::directory_iterator end;
+  for(; it != end; it.increment(ec))
   {
-    do
+    if(ec)
+      break;
+    const std::string name = it->path().filename().string();
+    const size_t cut = name.rfind(".schema.json");
+    if(cut == std::string::npos)
+      continue;    // not one of ours: the table's own files are the only shape this looks for
+    if(FindSchema(name.substr(0, cut).c_str()) == NULL)
     {
-      const std::string name = found.cFileName;
-      const size_t cut = name.rfind(".schema.json");
-      if(FindSchema(name.substr(0, cut).c_str()) == NULL)
-      {
-        if(bReport)
-          printf("extra   %s (no document kind of that name any more)\n", name.c_str());
-        differences++;
-      }
-    } while(FindNextFileA(search, &found));
-    FindClose(search);
+      if(bReport)
+        printf("extra   %s (no document kind of that name any more)\n", name.c_str());
+      differences++;
+    }
   }
   return differences;
 }
@@ -85,7 +87,7 @@ int WriteSchemasTo(const std::string &dir, const char *name, bool bReport)
       continue;
 
     const std::string path = dir + "\\" + kSchemas[i].m_Name + ".schema.json";
-    FILE *f = fopen(path.c_str(), "wb");
+    FILE *f = FileOpen(path, "wb");
     if(f == NULL)
       return Fail(1, "cannot write %s", path.c_str());
     fputs(kSchemas[i].text, f);
@@ -283,7 +285,7 @@ int CmdSelftest()
 
     std::string text;
     const bool bRead = ReadWholeFile(path.c_str(), text);
-    remove(path.c_str());
+    RemoveQuiet(path);
     t.Check(bRead, "writer-document-written", "the selftest could not read back what it wrote");
     t.Check(JsonBalanced(text), "writer-document-balanced", "the writer's document is not balanced");
 
@@ -344,14 +346,14 @@ int CmdSelftest()
     const std::string dir = DefaultLogStem() + ".schemacheck";
     const std::string stale = dir + "\\state.schema.json";
     const std::string extra = dir + "\\gone.schema.json";
-    CreateDirectoryA(dir.c_str(), NULL);
+    MakeDir(dir);
 
     t.Check(WriteSchemasTo(dir, NULL, false) == 0, "schema-check-writes",
             "the selftest could not write the schemas to a folder of its own");
     t.Check(CheckSchemasAgainstDir(dir, false) == 0, "schema-check-clean",
             "a folder written from this driver's own table does not check clean");
 
-    FILE *f = fopen(stale.c_str(), "wb");
+    FILE *f = FileOpen(stale, "wb");
     if(f != NULL)
     {
       fputs("{}", f);
@@ -360,11 +362,11 @@ int CmdSelftest()
     t.Check(CheckSchemasAgainstDir(dir, false) > 0, "schema-check-detects-stale",
             "a file that disagrees with the table was reported as matching");
 
-    remove(stale.c_str());
+    RemoveQuiet(stale);
     t.Check(CheckSchemasAgainstDir(dir, false) > 0, "schema-check-detects-missing",
             "a missing file was reported as matching");
 
-    f = fopen(extra.c_str(), "wb");
+    f = FileOpen(extra, "wb");
     if(f != NULL)
     {
       fputs("{}", f);
@@ -377,9 +379,9 @@ int CmdSelftest()
     // another day, in a directory nobody connects to this one.
     for(int i = 0; i < kSchemaCount; i++)
       remove((dir + "\\" + kSchemas[i].m_Name + ".schema.json").c_str());
-    remove(extra.c_str());
-    RemoveDirectoryA(dir.c_str());
-    t.Check(GetFileAttributesA(dir.c_str()) == INVALID_FILE_ATTRIBUTES, "schema-check-cleanup",
+    RemoveQuiet(extra);
+    RemoveQuiet(dir);
+    t.Check(!ExistsQuiet(dir), "schema-check-cleanup",
             "the selftest left its scratch folder behind");
   }
 
@@ -468,7 +470,7 @@ int CmdSelftest()
             "two images of different sizes were compared anyway");
 
     const std::string notBmp = DefaultLogStem() + ".selftest.txt";
-    FILE *f = fopen(notBmp.c_str(), "wb");
+    FILE *f = FileOpen(notBmp, "wb");
     if(f != NULL)
     {
       fputs("this is not a bitmap", f);
@@ -478,9 +480,9 @@ int CmdSelftest()
     t.Check(!ReadBMPImage(notBmp.c_str(), rejected, why), "image-rejects-non-bmp",
             "a text file was read as an image");
 
-    remove(bmp.c_str());
-    remove(oddBmp.c_str());
-    remove(notBmp.c_str());
+    RemoveQuiet(bmp);
+    RemoveQuiet(oddBmp);
+    RemoveQuiet(notBmp);
   }
 
   // ------------------------------------------------------------------ the pixel-history vocabulary
@@ -599,22 +601,22 @@ int CmdSelftest()
     // found in the field. Two details the check has to get right: a suffix decides what counts as a
     // source (`.txt` next to the sources is not one), and the *newest* wins rather than the first
     // or the last one seen.
-    const std::string dir = DefaultLogStem() + ".srcdir";
-    CreateDirectoryA(dir.c_str(), NULL);
-    const std::string older = dir + "\\zz-old.cpp";
-    const std::string newer = dir + "\\aa-new.h";
-    const std::string notes = dir + "\\notes.txt";
+    const std::filesystem::path dir(DefaultLogStem() + ".srcdir");
+    MakeDir(dir);
+    const std::filesystem::path older = dir / "zz-old.cpp";
+    const std::filesystem::path newer = dir / "aa-new.h";
+    const std::filesystem::path notes = dir / "notes.txt";
 
     const char *const kSuffixes[] = {".cpp", ".h"};
-    std::string name;
-    t.Check(NewestSourceTime(dir.c_str(), kSuffixes, 2, name) == 0,
-            "newest-source-of-an-empty-dir-is-zero", "an empty folder answered with a file");
+    std::filesystem::path name;
+    t.Check(!NewestSourceTime(dir, kSuffixes, 2, name).has_value(),
+            "newest-source-of-an-empty-dir-is-none", "an empty folder answered with a file");
 
-    for(const std::string *path : {&older, &newer, &notes})
+    for(const std::filesystem::path *path : {&older, &newer, &notes})
     {
-      FILE *f = fopen(path->c_str(), "wb");
+      FILE *f = FileOpen(*path, "wb");
       if(f == NULL)
-        return Fail(1, "cannot write %s for the selftest", path->c_str());
+        return Fail(1, "cannot write %s for the selftest", path->string().c_str());
       fputs("x", f);
       fclose(f);
       // The clock interrupt this machine's file times are taken from ticks every ~15 ms, so two
@@ -624,26 +626,76 @@ int CmdSelftest()
       Sleep(50);
     }
 
-    const long long when = NewestSourceTime(dir.c_str(), kSuffixes, 2, name);
-    t.Check(when > 0 && name == "aa-new.h", "newest-source-is-the-newest-source",
+    const std::optional<FileTime> when = NewestSourceTime(dir, kSuffixes, 2, name);
+    t.Check(when.has_value() && name.filename() == "aa-new.h", "newest-source-is-the-newest-source",
             "the file that won is not the newest one the suffixes name");
     // `notes.txt` was written last and is newer than every source: a checker that ignored the
     // suffixes would have answered with it.
-    const long long notesWhen = FileWriteTime(notes);
-    t.Check(notesWhen > when, "newest-source-ignores-what-is-not-a-source",
+    const std::optional<FileTime> notesWhen = FileWriteTime(notes);
+    t.Check(notesWhen && when && *notesWhen > *when, "newest-source-ignores-what-is-not-a-source",
             "a file the suffixes do not name was counted as a source");
-    t.Equal(name, std::string("aa-new.h"), "newest-source-is-not-the-newest-file");
-    t.Check(FileWriteTime(older) > 0 && FileWriteTime(older) < when,
-            "file-write-time-orders-two-files", "two files written 50 ms apart do not compare");
-    t.Check(FileWriteTime(dir + "\\nope.cpp") == 0, "file-write-time-of-a-missing-file-is-zero",
+    t.Equal(name.filename().string(), std::string("aa-new.h"),
+            "newest-source-is-not-the-newest-file");
+    const std::optional<FileTime> olderWhen = FileWriteTime(older);
+    t.Check(olderWhen && when && *olderWhen < *when, "file-write-time-orders-two-files",
+            "two files written 50 ms apart do not compare");
+    t.Check(!FileWriteTime(dir / "nope.cpp").has_value(),
+            "file-write-time-of-a-missing-file-is-none",
             "a file that is not there answered with a time");
-    t.Check(NewestSourceTime((dir + "\\nope").c_str(), kSuffixes, 2, name) == 0,
-            "newest-source-of-a-missing-dir-is-zero", "a missing folder answered with a file");
+    t.Check(!NewestSourceTime(dir / "nope", kSuffixes, 2, name).has_value(),
+            "newest-source-of-a-missing-dir-is-none", "a missing folder answered with a file");
 
-    remove(older.c_str());
-    remove(newer.c_str());
-    remove(notes.c_str());
-    RemoveDirectoryA(dir.c_str());
+    std::error_code cleanupEc;
+    std::filesystem::remove(older, cleanupEc);
+    std::filesystem::remove(newer, cleanupEc);
+    std::filesystem::remove(notes, cleanupEc);
+    std::filesystem::remove(dir, cleanupEc);
+  }
+
+  // -------------------------------------------------------- `MakeDir` makes the parents (bundle.cpp)
+  {
+    // `CreateDirectoryA` makes a single level, and the destinations a caller *names* are several:
+    // `dump cap.rdc out/frames/cap1`, `sheet cap.rdc shots/frame12`, `patch ... out/tries/fix1`.
+    // Refusing those until the caller makes the parents is what `dump` used to do ("cannot create the
+    // bundle directory") -- for a path the tool can make itself, and while the Python sweep made the
+    // same chain with `os.makedirs`, so one half of the tool was making a destination the other refused.
+    const std::filesystem::path outer(DefaultLogStem() + ".makedir");
+    const std::filesystem::path deep = outer / "one" / "two" / "three";
+    t.Check(MakeDir(deep), "makedir-creates-parents",
+            "a destination three levels down was not created");
+    std::error_code ec;
+    t.Check(std::filesystem::is_directory(deep, ec) && !ec, "makedir-created-a-directory",
+            "the deepest component is not a directory");
+    // Every caller may be looking at a folder it made on an earlier run (`dump --overwrite`), so
+    // the second call is the normal case rather than the exception.
+    t.Check(MakeDir(deep), "makedir-existing-is-success",
+            "a folder that is already there was reported as a failure");
+    std::filesystem::path trailing = deep;
+    trailing +=
+        "\\";    // a caller may spell a destination this way, so the path type has to as well
+    t.Check(MakeDir(trailing), "makedir-trailing-separator",
+            "a folder named with a trailing separator was reported as a failure");
+
+    // A *file* where a component has to be is a real failure, and the callers' own messages
+    // ("cannot create the bundle directory") are the ones that should keep being printed for it.
+    const std::filesystem::path blocked = outer / "blocked.txt";
+    FILE *f = FileOpen(blocked, "wb");
+    if(f != NULL)
+    {
+      fputs("x", f);
+      fclose(f);
+    }
+    t.Check(!MakeDir(blocked / "below"), "makedir-refuses-a-file-in-the-way",
+            "a path through a file was reported as created");
+
+    std::filesystem::remove(blocked, ec);
+    // Innermost first: `remove` takes an empty folder and nothing else, as `RemoveDirectory` did.
+    std::filesystem::remove(deep, ec);
+    std::filesystem::remove(outer / "one" / "two", ec);
+    std::filesystem::remove(outer / "one", ec);
+    std::filesystem::remove(outer, ec);
+    t.Check(!std::filesystem::exists(outer, ec), "makedir-cleanup",
+            "the selftest left its scratch folder behind");
   }
 
   // -------------------------------------------------------- the version guard (capture.cpp)
@@ -685,7 +737,7 @@ int CmdSelftest()
     header[9] = 0x01;    // logfile version 258, little-endian, as every capture in the corpus has it
     memcpy(header + 16, "1.46 e4bd23", 11);
 
-    FILE *f = fopen(path.c_str(), "wb");
+    FILE *f = FileOpen(path, "wb");
     if(f == NULL)
       return Fail(1, "cannot write %s for the selftest", path.c_str());
     fwrite(header, 1, sizeof(header), f);
@@ -698,14 +750,14 @@ int CmdSelftest()
     t.Check(!ReadCaptureVersion((path + ".missing").c_str(), capture),
             "capture-version-refuses-a-missing-file", "a file that is not there produced a version");
 
-    FILE *notCapture = fopen(path.c_str(), "wb");
+    FILE *notCapture = FileOpen(path, "wb");
     if(notCapture == NULL)
       return Fail(1, "cannot write %s for the selftest", path.c_str());
     fwrite("RDX!", 1, 4, notCapture);    // 4 of the 32 bytes: neither the magic nor the length
     fclose(notCapture);
     t.Check(!ReadCaptureVersion(path.c_str(), capture), "capture-version-refuses-not-a-capture",
             "a file that is not a container produced a version");
-    remove(path.c_str());
+    RemoveQuiet(path);
   }
 
   // ------------------------------------------------------------------ per-pass folding
@@ -748,7 +800,7 @@ int CmdSelftest()
 
     const std::string path = DefaultLogStem() + ".passes.txt";
     {
-      FILE *f = fopen(path.c_str(), "wb");
+      FILE *f = FileOpen(path, "wb");
       if(f == NULL)
         return Fail(1, "cannot write %s for the selftest", path.c_str());
       fprintf(f, "# one pass per line\n");
@@ -761,7 +813,7 @@ int CmdSelftest()
     std::vector<PassRange> ranges;
     std::string why;
     const bool bRead = ReadPassRanges(path.c_str(), ranges, why);
-    remove(path.c_str());
+    RemoveQuiet(path);
     t.Check(bRead, "read-pass-ranges", why.c_str());
     if(bRead)
     {
@@ -777,7 +829,7 @@ int CmdSelftest()
       }
     }
     {
-      FILE *f = fopen(path.c_str(), "wb");
+      FILE *f = FileOpen(path, "wb");
       if(f == NULL)
         return Fail(1, "cannot write %s for the selftest", path.c_str());
       fprintf(f, "100\n");
@@ -786,7 +838,7 @@ int CmdSelftest()
     std::vector<PassRange> bad;
     std::string badWhy;
     const bool bBad = ReadPassRanges(path.c_str(), bad, badWhy);
-    remove(path.c_str());
+    RemoveQuiet(path);
     t.Check(!bBad, "read-pass-ranges-rejects-a-line-that-is-not-a-range",
             "a line with one id was read as a pass");
     t.Check(badWhy.find("line 1") != std::string::npos, "read-pass-ranges-says-which-line",
@@ -993,7 +1045,7 @@ int CmdSelftest()
         Usage();
       }
       ReadWholeFile(path.c_str(), usage);
-      remove(path.c_str());
+      RemoveQuiet(path);
     }
     t.Check(usage.find("schema") != std::string::npos, "usage-lists-schema",
             "the usage text omits schema");
@@ -1138,7 +1190,7 @@ int CmdSelftest()
 
     const std::string cachePath = DefaultLogStem() + ".probe";
     const std::string capturePath = DefaultLogStem() + ".probe.rdc";
-    FILE *captureFile = fopen(capturePath.c_str(), "wb");
+    FILE *captureFile = FileOpen(capturePath, "wb");
     if(captureFile == NULL)
       return Fail(1, "cannot write %s for the selftest", capturePath.c_str());
     fwrite("RDOC", 1, 4, captureFile);
@@ -1176,7 +1228,7 @@ int CmdSelftest()
 
     // A file cut short: the header is there, the rows are not. Refused rather than half-believed.
     {
-      FILE *f = fopen(cachePath.c_str(), "rb");
+      FILE *f = FileOpen(cachePath, "rb");
       std::string text;
       char line[1024];
       while(f != NULL && fgets(line, sizeof(line), f) != NULL)
@@ -1184,7 +1236,7 @@ int CmdSelftest()
       if(f != NULL)
         fclose(f);
       const size_t cut = text.size() / 2;
-      FILE *out = fopen(cachePath.c_str(), "wb");
+      FILE *out = FileOpen(cachePath, "wb");
       if(out == NULL)
         return Fail(1, "cannot rewrite %s for the selftest", cachePath.c_str());
       fwrite(text.data(), 1, cut, out);
@@ -1193,8 +1245,8 @@ int CmdSelftest()
               "probe-cache-refuses-a-truncated-file", "a truncated cache was believed");
     }
 
-    remove(cachePath.c_str());
-    remove(capturePath.c_str());
+    RemoveQuiet(cachePath);
+    RemoveQuiet(capturePath);
   }
 
   printf("\n%d passed, %d failed, %d skipped\n", t.passed, t.failed, t.skipped);

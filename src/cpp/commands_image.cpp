@@ -228,7 +228,7 @@ int CmdSheet(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
     else
     {
       tile.m_File = Fmt("%02d-%s.bmp", (int)i + 1, SlugOf(chosen[i].m_Name).c_str());
-      const std::string full = dir + "\\" + tile.m_File;
+      const std::string full = (std::filesystem::path(dir) / tile.m_File).string();
       if(!WriteBMPImage(full.c_str(), img))
       {
         tile.m_File.clear();
@@ -253,13 +253,13 @@ int CmdSheet(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
 
   // The montage and the index, both written even when a pass or two could not be shown: the index
   // says which is which, and that is the difference between a sheet and a pile of files.
-  const std::string montage = dir + "\\sheet.bmp";
+  const std::string montage = (std::filesystem::path(dir) / "sheet.bmp").string();
   const ImageData sheet =
       MakeMontage(thumbs, ColumnsFor((int)thumbs.size()), tileWidth, tileWidth, 6);
   const bool bMontage = sheet.Valid() && WriteBMPImage(montage.c_str(), sheet);
 
-  const std::string indexPath = dir + "\\sheet.md";
-  FILE *md = fopen(indexPath.c_str(), "wb");
+  const std::string indexPath = (std::filesystem::path(dir) / "sheet.md").string();
+  FILE *md = FileOpen(indexPath, "wb");
   if(md == NULL)
     return Fail(1, "cannot write the sheet index %s", indexPath.c_str());
 

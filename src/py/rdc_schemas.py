@@ -312,9 +312,46 @@ AB_SCHEMA: Dict[str, Any] = _obj({
 })
 AB_SCHEMA['title'] = 'replaydiff'
 AB_SCHEMA['description'] = ('The A/B of two bundles the offline tool writes: each side\'s frame, the aligned '
-                            'passes with what differs inside them, and the counts the summary line prints. '
-                            'Written by `replaydiff <bundleA> <bundleB>`; validated by '
-                            '`validate <replaydiff.json> <schemaDir> replaydiff`.')
+                           'passes with what differs inside them, and the counts the summary line prints. '
+                           'Written by `replaydiff <bundleA> <bundleB>`; validated by '
+                           '`validate <replaydiff.json> <schemaDir> replaydiff`.')
+
+#: The **sweep's** index, for the same reason as the report's and the A/B's: `sweep <dir>` is the offline
+#: tool writing a document, so `schema/` -- which is what the *driver* publishes -- cannot hold it. It is
+#: also the one document of the three about a *folder* rather than a frame, and `captures` is the whole
+#: point of it: one row per capture, with the key its bundle sits under and the numbers a corpus entry
+#: needs (`bytes`, `sha256`, `renderdoc`), taken from that bundle's own manifest rather than from a second
+#: reading of the file. `status` is `swept`, `present` (its bundle was already there) or `failed`, and a
+#: failed row carries whatever the engine said in `note` -- so an index with a failure in it can be read
+#: without the log.
+SWEEP_SCHEMA: Dict[str, Any] = _obj({
+    'schemaVersion': {'const': 1},
+    'source': _text(),
+    'out': _text(),
+    'renderdoc': _text(),
+    'captures': _arr(_obj({
+        'key': _text(),
+        'bundle': _text(),
+        'status': _text(),
+        'seconds': _num(),
+        'bytes': {'type': 'integer'},
+        'sha256': _text(),
+        'renderdoc': _text(),
+        'fileCount': {'type': 'integer'},
+        'fileBytes': {'type': 'integer'},
+        'note': _text(),
+    })),
+    'swept': {'type': 'integer'},
+    'present': {'type': 'integer'},
+    'failed': {'type': 'integer'},
+    'bytes': {'type': 'integer'},
+})
+SWEEP_SCHEMA['title'] = 'sweep'
+SWEEP_SCHEMA['description'] = ('What a folder of captures is: one row per `.rdc` under `sweep <dir>`, each '
+                               'with the key its bundle is under, the capture\'s size and SHA-256, and what '
+                               'its bundle holds -- read from the bundle\'s own manifest. Written by '
+                               '`sweep <dir> [--out <root>]`; validated by '
+                               '`validate sweep.json <schemaDir> sweep`.')
 
 class SchemaError(Exception):
     """A schema file that cannot be used: unreadable, not JSON, or not an object."""
@@ -441,11 +478,13 @@ def load_schemas(schema_dir: str) -> Dict[str, Dict[str, Any]]:
         if not isinstance(schema, dict):
             raise SchemaError('%s is not a JSON object' % name)
         schemas[kind] = schema
-    # Two of the documents are this module's own data (see `REPORT_SCHEMA` and `AB_SCHEMA`), not files the
-    # driver publishes: the offline tool writes both. A folder that carries a `report.schema.json` of its own
-    # wins, so a consumer can pin a different revision without a code change -- the same for `replaydiff`.
+    # Three of the documents are this module's own data (see `REPORT_SCHEMA`, `AB_SCHEMA` and
+    # `SWEEP_SCHEMA`), not files the driver publishes: the offline tool writes all three. A folder that
+    # carries a `report.schema.json` of its own wins, so a consumer can pin a different revision without a
+    # code change -- the same for `replaydiff` and for the sweep's index.
     schemas.setdefault('report', REPORT_SCHEMA)
     schemas.setdefault('replaydiff', AB_SCHEMA)
+    schemas.setdefault('sweep', SWEEP_SCHEMA)
     return schemas
 
 #: Which schema a bundle file's *name* identifies. The rest of a bundle (PNGs, `cbuffers/`) is not a
@@ -466,6 +505,8 @@ def schema_for_file(name: str) -> Optional[str]:
         return 'report'
     if base == 'replaydiff.json':
         return 'replaydiff'    # the A/B's own document, which the offline tool writes
+    if base == 'sweep.json':
+        return 'sweep'         # the sweep's index, likewise: a folder of captures, not a frame
     if base in BUNDLE_SCHEMAS:
         return BUNDLE_SCHEMAS[base]
     if base.endswith('.state.json'):
@@ -497,12 +538,17 @@ def cmd_validate(path: str, schema_dir: str, name: Optional[str] = None) -> int:
                 if kind:
                     targets.append((full, kind))
     elif os.path.isfile(path):
-        if not name:
+        # A file whose *name* is a document's is recognised the way a directory's files are: `report.json`,
+        # `replaydiff.json` and `sweep.json` are written by name, so a reader who has one in hand does not
+        # have to be told which kind it is. A name that identifies nothing still needs one stated -- a
+        # document saved from a command's stdout has a name that says nothing, e.g. `textures --json > t.json`.
+        kind = name or schema_for_file(os.path.basename(path))
+        if not kind:
             print('error: %s is a file, so it needs a schema kind: validate <%s> <schemaDir> <kind>'
                   % (path, os.path.basename(path)))
             print('       the kinds are: %s' % ', '.join(sorted(schemas)))
             return 2
-        targets.append((path, name))
+        targets.append((path, kind))
     else:
         print('error: no such file or directory: %s' % path)
         return 2

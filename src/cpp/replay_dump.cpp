@@ -103,6 +103,14 @@ void Usage()
       "                                    state says it was given: the vs->ps link, each stage's\n"
       "                                    bindings against the root signature, and the render\n"
       "                                    targets against the pixel shader's outputs\n"
+      "  watch   <rdc> <name> [--since A] [--until B] [--max-events N] [--stage <stage>] [--all]\n"
+      "                                    one reflection member's value at every event of a "
+      "range:\n"
+      "                                    one row per *change*, so a uniform that is right at "
+      "one\n"
+      "                                    draw and wrong at the next is one command. A name is a\n"
+      "                                    member path (`Light.intensity`) or a bare member\n"
+      "                                    (`intensity`); a matched struct reports its members\n"
       "  debug   <rdc> [--group] [--fail-on high|medium|low|info]\n"
       "                                    debug messages (validation layer, etc.); --group folds "
       "each\n"
@@ -117,8 +125,9 @@ void Usage()
       "                                    frame by default, or the first <maxEid> ids, and the\n"
       "                                    answer is cached beside the stream (a repeat is "
       "seconds)\n"
-      "  dump    <rdc> [outDir=bundle]     the whole frame to disk, for the offline tool (ROADMAP "
-      "§1)\n"
+      "  dump    <rdc> [outDir=bundle]     the whole frame to disk, for the offline tool "
+      "(REFERENCE "
+      "§9)\n"
       "  bundle-verify <dir>               check a bundle's hashes and sizes (no device, no DLL)\n"
       "  batch   <rdc> <file>              run every command in <file> against one open capture\n"
       "  schema  [<name>] [--out|--check <dir>]   the JSON Schema for each --json document (no "
@@ -691,6 +700,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
         ctrl, file, path, CommandHasPositionalId(cmd, args) ? ToInt(args[1], 0) : 0,
         ToInt(OptValue(args, "--since", "0"), 0), ToInt(OptValue(args, "--until", "0"), 0),
         ToInt(OptValue(args, "--max-events", "0"), 0), ToInt(OptValue(args, "--max", "200"), 200));
+  if(!strcmp(cmd, "watch") && args.size() > 1)
+    return CmdWatch(ctrl, file, path, args);
   if(!strcmp(cmd, "debug"))
     return CmdDebug(ctrl, file, path, args);
   if(!strcmp(cmd, "usage") && args.size() > 1)

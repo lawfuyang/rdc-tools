@@ -46,7 +46,7 @@ def run_cmd(argv: List[str]) -> str:
 
 
 class CheckoutCase(unittest.TestCase):
-    """A scratch checkout: both artefacts and both source trees, each at a time the test chooses."""
+    """A scratch checkout: every artefact and both source trees, each at a time the test chooses."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix='rdc-driver-')
@@ -61,6 +61,9 @@ class CheckoutCase(unittest.TestCase):
         self.write(os.path.join(driver.SOURCE_DIR, 'one.cpp'), 1000)
         self.write(os.path.join(driver.SOURCE_DIR, 'notes.txt'), 9000)
         self.write(driver.EXE_PATH, 2000)
+        # The replay library is built from the driver's own sources, so it sits beside the exe in time --
+        # and *after* it, which is the order the two are built in.
+        self.write(driver.REPLAY_LIB_PATH, 2050)
         self.write(os.path.join(driver.LIB_SOURCE_DIR, 'lz4.c'), 1100)
         self.write(os.path.join(driver.LIB_SOURCE_DIR, 'lz4.h'), 1200)
         self.write(driver.LIB_PATH, 2100)
@@ -81,10 +84,15 @@ class CheckoutCase(unittest.TestCase):
         with mock.patch.object(driver, 'repo_root', lambda: self.root):
             return driver.staleness()
 
+    def replay_library(self) -> driver.TargetVerdict:
+        """The replay library's verdict (`bin/rdc_replay.dll`), read the same way."""
+        with mock.patch.object(driver, 'repo_root', lambda: self.root):
+            return driver.verdicts()[1]
+
     def library(self) -> driver.TargetVerdict:
         """The LZ4 library's verdict, read the same way."""
         with mock.patch.object(driver, 'repo_root', lambda: self.root):
-            return driver.verdicts()[1]
+            return driver.verdicts()[2]
 
 
 class Staleness(CheckoutCase):
@@ -178,6 +186,21 @@ class Library(CheckoutCase):
         self.assertTrue(self.verdict()['stale'])
         self.assertFalse(self.library()['stale'])
 
+    def test_the_replay_library_is_compared_against_the_drivers_own_tree(self) -> None:
+        """Two artefacts from one tree, and that is deliberate: `bin/rdc_replay.dll` *is* the driver as a
+        library, so a source change is a change to both, and a library answering from one revision beside
+        an exe from another is the drift that makes a library worse than a subprocess (REFERENCE §9).
+
+        The decoder is the other half of the rule -- it is built from its own tree, so a new `one.cpp` must
+        leave it alone.
+        """
+        self.write(os.path.join(driver.SOURCE_DIR, 'zzz.cpp'), 3000)
+        self.assertTrue(self.verdict()['stale'])
+        self.assertTrue(self.replay_library()['stale'])
+        self.assertFalse(self.library()['stale'])
+        self.assertEqual(self.replay_library()['name'], 'replay library')
+        self.assertEqual(self.replay_library()['source'], os.path.join(driver.SOURCE_DIR, 'zzz.cpp'))
+
     def test_the_newest_library_source_wins_and_only_c_and_h_count(self) -> None:
         # A `.cpp` in the decoder's folder is not compiled by its target, so it is not a source of it --
         # and the file that is newest among the ones that *are* still wins.
@@ -264,8 +287,8 @@ class Command(CheckoutCase):
         self.assertEqual(code, 0)
         self.assertIn('building', text.getvalue())
         # The verdicts are printed again afterwards, so the reader sees what the build did rather than
-        # having to re-run the check to find out: two artefacts, before and after.
-        self.assertEqual(text.getvalue().count('verdict'), 4)
+        # having to re-run the check to find out: every artefact, before and after.
+        self.assertEqual(text.getvalue().count('verdict'), 2 * len(driver.TARGETS))
 
     def test_a_stale_library_is_built_even_though_the_binary_is_current(self) -> None:
         # The regression that made this a task: the exe is newer than every source of its own, and this

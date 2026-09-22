@@ -67,6 +67,10 @@ extern int g_Indent;         // output.cpp: the writer's nesting level
 extern FILE *g_LogFile;      // capture.cpp: the log, or NULL for stderr
 extern ULONGLONG g_Start;    // capture.cpp: the process start, for the timing column
 extern pGetVersionString g_GetVersionString;    // capture.cpp: resolved from the DLL, printed in headers
+//: capture.cpp: the engine's shutdown entry point, resolved once by `InitialiseReplay`. The exe shuts
+//: the system down through its guard at the end of `main`; the library (api.cpp) does it when its DLL
+//: unloads, because the system is the *process's* and a session must not take it down (`api.h`).
+extern pShutdownReplay g_ShutdownReplay;
 extern std::string g_DllOverride;    // capture.cpp: `--dll <path>`, ahead of $RDC_RENDERDOC_DLL
 
 // --------------------------------------------------------------------------- limits
@@ -263,7 +267,14 @@ long long FileWriteTime(const std::string &path);
 long long NewestSourceTime(const char *dir, const char *const *suffixes, int count,
                            std::string &name);
 std::string DefaultLogStem();
+//: The log stem for a *library* session: `GetModuleFileName` of the library itself rather than of the
+//: host process, because a DLL loaded by `python.exe` would otherwise write `python.exe_<date>.log.txt`
+//: next to the interpreter -- a directory the caller may not even be able to write to.
+std::string LibraryLogStem();
 FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs);
+//: Flush and close the log, and forget it, so a library session leaves one finished file behind.
+//: `Log` after this goes nowhere, which is what a closed log means.
+void CloseLog();
 HMODULE LoadReplayDLL();
 bool InitialiseReplay(HMODULE dll, int argc, char **argv);
 ICaptureFile *OpenCaptureFile(HMODULE dll);
@@ -287,7 +298,10 @@ bool ParseMajorMinor(const std::string &text, int &major, int &minor);
 int CompareMajorMinor(const std::string &engine, const std::string &capture, bool &known);
 //: Refuse a capture recorded by a newer RenderDoc than the engine about to replay it, before the
 //: engine is asked to do anything: a `Fail` code (1) when it refuses, 0 otherwise.
-int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven);
+//: `why` (nullable) receives the refusal's own sentence instead of it being printed: the CLI passes
+//: NULL and gets the message on stderr with exit 1, the library passes a string and returns it
+//: through the ABI's `err` (api.h). Same wording either way, written once.
+int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::string *why = NULL);
 bool ParseInt(const char *text, int &value);
 int ToInt(const std::string &text, int fallback);
 
@@ -362,7 +376,7 @@ int ResolveMarkerPath(IReplayController *ctrl, const char *text, std::string &ma
 
 //: One pass, as a range of event ids with the marker path its events sit inside.
 //:
-//: `FetchCounters` answers per event and there is no event-range parameter (ROADMAP 3), so folding
+//: `FetchCounters` answers per event and there is no event-range parameter (ROADMAP 2), so folding
 //: a counter over a pass means folding it over `[first, last]` here. Two ways to get the ranges:
 //:
 //: * `PassesFromActions`: the engine's own action tree, grouped into maximal runs of consecutive
@@ -459,6 +473,38 @@ int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, in
                bool bWantDisasm);
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
                ShaderStage stage, int slot);
+
+//: One constant block's bytes and the variables over them, at the *current* event: what `CmdCbuffer`
+//: prints and what `watch` reads at every event of a range. The two share this rather than the
+//: resolution, because a second copy of it is exactly how a `watch` row and a `cb` document would come to
+//: disagree about which buffer a block is (`BlockRead`'s own comment, commands_state.cpp).
+struct BlockValues
+{
+  ResourceId m_Buffer = ResourceId::Null();
+  uint64_t m_Offset = 0;
+  uint64_t m_Length = 0;
+  rdcarray<ShaderVariable> m_Variables;
+};
+
+//: The reflection of the shader that is actually bound, rather than of the entry point the engine
+//: would disassemble by default (`commands_state.cpp` has why that difference is not cosmetic).
+const ShaderReflection *BoundReflection(IReplayController *ctrl, const D3D12Pipe::State *st,
+                                        ShaderStage stage, const D3D12Pipe::Shader *sh);
+void BlockRead(IReplayController *ctrl, const D3D12Pipe::State *st, const ShaderReflection *refl,
+               ShaderStage stage, const D3D12Pipe::Shader *sh, int slot, BlockValues &out);
+
+//: `watch <name> [--since A] [--until B] [--max-events N] [--stage <stage>] [--all]`: one reflection
+//: member's value at every event of a range, as one row per *change* (commands_watch.cpp).
+int CmdWatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::vector<std::string> &args);
+//: `watch`'s two name rules, on their own because both are wrong *quietly*: a substring match would
+//: watch `intensityScale` alongside `Light.intensity`, and a case-sensitive one would miss a name
+//: the reader typed in their own casing. The selftest pins them on a hand-built reflection tree,
+//: which needs no device: `WatchPaths` is the whole collection step, and `WatchNameMatches` is one
+//: path's rule.
+bool WatchSameName(const std::string &a, const std::string &b);
+bool WatchNameMatches(const std::string &path, const std::string &want);
+std::vector<std::string> WatchPaths(const rdcarray<ShaderVariable> &vars, const std::string &want);
 int CmdTextures(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *filter,
                 const char *saveDir);
 int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int instance,
@@ -467,7 +513,7 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
              const char *outPath);
 int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPerPass,
                 const char *passesPath, int topN);
-//: The cross-checks (ROADMAP 2): what the reflections say a shader wants against what the state says
+//: The cross-checks (ROADMAP 1): what the reflections say a shader wants against what the state says
 //: it was given. Deterministic, because both sides are in the capture -- no heuristic and no guess.
 //:
 //: `SignatureLinkText` is declared here because the device-free selftest checks it directly: an
@@ -505,6 +551,30 @@ int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path,
 int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what);
 int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid);
 int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *batchPath);
+
+// --------------------------------------------------------------------------- the CLI (replay_dump.cpp)
+//
+// One line of the command language, and one command run from it, in the module that owns the syntax.
+// They are declared here because they have *three* callers now -- `batch`, `--repl` and the library
+// (api.cpp) -- and a second copy of the syntax is exactly how a batch line and a library line would
+// come to mean different things.
+
+//: Splits one line into arguments, taking the options out as it goes. Quoted tokens group, which
+//: `--save` and `image` need for a path with spaces; `--json` and `--disasm` come back as flags
+//: rather than as arguments, and `--save`'s value in `saveDir`.
+void SplitLine(const std::string &line, std::vector<std::string> &args, bool &bJson, bool &bDisasm,
+               std::string &saveDir);
+//: `text` without a leading UTF-8 BOM, which an editor's "UTF-8 with BOM" save leaves in a script.
+std::string WithoutBom(const std::string &text);
+//: One command, from its own name onwards (`args[0]` is the command, never the capture). Prints the
+//: command's document to stdout and returns its exit code -- 2 for an unknown command, which is
+//: also what a caller that spelled the command wrong needs to see.
+int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *path,
+                    const std::vector<std::string> &args, bool bWantDisasm, const char *saveDir);
+//: One warning when the RenderDoc source tree is not where the chunk names come from, said once per
+//: process; the library says it too, because a session's ids are named the same way a run's are.
+void WarnIfRenderdocSrcMissing();
+
 bool SaveTargetImage(IReplayController *ctrl, ResourceId target, const char *outBase,
                      std::string &written, int32_t &width, int32_t &height);
 

@@ -57,7 +57,7 @@ def report_caveats() -> List[str]:
         'debugging is a capture property, not a bundle one: nothing here can say what a shader computed from '
         'its inputs, only what it was bound to.',
         'The frame was replayed on this machine\'s GPU: the capture properties in the bundle say whether the '
-        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §4, '
+        'replay was local and which vendor it was, and device-specific behaviour is out of reach (ROADMAP §3, '
         'remote replay). A pass is also not a *dispatch* of work in the engine\'s own terms -- the report groups '
         'events, and the engine\'s own pass structure is only as close as its markers are.',
         'The usage chain is the engine\'s record, not the frame\'s intention: one row is one usage (a buffer '

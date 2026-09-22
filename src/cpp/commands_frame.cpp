@@ -384,7 +384,7 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 // --------------------------------------------------------------------------- per-pass counters
 //
 // `FetchCounters` answers per event and takes no range, so a pass's cost is folded here out of the
-// per-event list (ROADMAP 3). Three things about that are worth saying rather than assuming:
+// per-event list (ROADMAP 2). Three things about that are worth saying rather than assuming:
 //
 // * Which counter *is* the cost is the engine's choice, not ours: `EventGPUDuration` when this
 //   replay produced one, and the first counter it did produce otherwise. It is named in the
@@ -1145,7 +1145,9 @@ int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   Field("scanned", (long long)until);
   Field("withState", (long long)shown);
   Field("lastEvent", (long long)lastEvent);
-  Field("cached", bHit, true);
+  // `Flag`, not `Field`: the schema says boolean and a `1` there is a document that does not
+  // validate against its own schema -- which is exactly what the offline validator exists to catch.
+  Flag("cached", bHit, true);
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");

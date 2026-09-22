@@ -29,11 +29,11 @@ from rdc_report_render import *  # noqa: F401,F403  (re-exported for the CLI and
 # ---------------------------------------------------------------------------
 # The frame report (`report`).
 #
-# ROADMAP section 1, skeleton: a bundle written by `replay_dump dump` (REFERENCE §9) in, a deterministic
-# Markdown report out. What is here is deliberately structural -- it says what the engine reported,
-# every claim carries the event id it came from, and the report states in its own text what it cannot
-# say. The detectors, the notable lists and the engine-name interpretation are the later items in that
-# section, and the report names them as absent rather than guessing at them.
+# REFERENCE §4.11, the frame report: a bundle written by `replay_dump dump` (REFERENCE §9) in, a
+# deterministic Markdown report out. What is here is deliberately structural -- it says what the engine
+# reported, every claim carries the event id it came from, and the report states in its own text what it
+# cannot say. The detectors, the notable lists and the engine-name interpretation landed on top of it,
+# and the report says which detector ran and which did not rather than guessing at either.
 #
 # Byte-stable for a fixed bundle: no timestamps, no absolute paths, every table sorted, and nothing
 # iterated out of a set. That is what lets two runs be diffed against each other and the output be

@@ -63,7 +63,11 @@ Usage:
                                                           #   bin/rdc_lz4.dll) older than their sources,
                                                           #   and build them (`--check` only reports)
   python rdc_analysis.py goldens  [--check|--write] [--capture <name>] [--corpus <file>] [--verbose]
-                                                         # the corpus's transcripts and labels (goldens/)
+                                                        # the corpus's transcripts and labels (goldens/)
+  python rdc_analysis.py sweep    <dir> [--out <root>] [--commands <file>] [--overwrite]
+                                  [--min-bytes N] [--limit N] [--exe]
+                                                        # a bundle per capture in a folder, plus an index
+                                                        #   of them: the corpus's GPU half, one process
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
   python rdc_analysis.py <cmd> <rdc> ... [--format table|csv|markdown]
                                                          # `draws`, `resources`, `descriptors`,
@@ -129,13 +133,17 @@ from rdc_renderdoc_src import (BootstrapError as BootstrapError,
                                missing_parts as missing_parts, target_dir as target_dir,
                                version as tree_version)
 from rdc_schemas import (AB_SCHEMA as AB_SCHEMA, BUNDLE_SCHEMAS as BUNDLE_SCHEMAS,
-                         REPORT_SCHEMA as REPORT_SCHEMA,
+                         REPORT_SCHEMA as REPORT_SCHEMA, SWEEP_SCHEMA as SWEEP_SCHEMA,
                          SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,
                          load_document as load_document, load_schemas as load_schemas,
                          no_duplicate_keys as no_duplicate_keys,
                          schema_for_file as schema_for_file,
                          validate_document as validate_document)
+# `sweep` is the one command here that asks the *engine* a folder's worth of questions, through the
+# library (`rdc_replay`); it is imported by name rather than star-wise because `cmd_sweep` is the whole
+# list of what it offers the CLI (its constants are reachable as `rdc_sweep.<name>`).
+from rdc_sweep import cmd_sweep as cmd_sweep
 
 from rdc_types import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_stream import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -331,6 +339,8 @@ def _dispatch() -> None:
         sys.exit(cmd_build(argv[2:]))
     if len(argv) > 1 and argv[1] == 'goldens':
         sys.exit(cmd_goldens(argv[2:]))
+    if len(argv) > 1 and argv[1] == 'sweep':
+        sys.exit(cmd_sweep(argv[2:]))
     if len(argv) < 3:
         print(__doc__)
         return

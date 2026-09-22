@@ -293,6 +293,17 @@ class TestValidateCommand(unittest.TestCase):
         self.assertIn('textures', line_with(out, 't.json'))
         self.assertEqual(code, 1)
 
+    def test_a_file_whose_name_is_a_documents_is_recognised_without_a_kind(self):
+        """`report.json`, `replaydiff.json` and `sweep.json` are written by name, so one in hand says what
+        it is; `t.json` above is the other half of the rule, and it still needs a kind stated."""
+        path = self.write('sweep.json', {'schemaVersion': 1, 'source': 'x', 'out': 'y',
+                                         'renderdoc': '1.46', 'captures': [], 'swept': 0, 'present': 0,
+                                         'failed': 0, 'bytes': 0})
+        out, code = self.validate(path, SCHEMA_DIR)
+        self.assertEqual(code, 0)
+        self.assertTrue(line_with(out, 'sweep.json').startswith('ok'), out)
+        self.assertIn('(sweep)', line_with(out, 'sweep.json'))
+
     def test_a_missing_schema_directory_is_reported_not_ignored(self):
         out, code = self.validate(self.tmp, os.path.join(self.tmp, 'nowhere'))
         self.assertIn('no *.schema.json files', out)

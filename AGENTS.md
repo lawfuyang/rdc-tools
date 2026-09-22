@@ -130,7 +130,10 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   and on the report side `rdc_bundle` → `rdc_detect_common` → `rdc_passes`/the detectors →
   `rdc_notable`/`rdc_recommend` → `rdc_report_render` → `rdc_report` → `rdc_analysis`, with the A/B chain
   beside it: `rdc_image` (a leaf) → `rdc_ab_render` → `rdc_ab` → `rdc_analysis`, and `rdc_passdiff` on the
-  capture side, above `rdc_payloads`. A cycle breaks
+  capture side, above `rdc_payloads`. Two more sit beside `rdc_commands`: `rdc_replay` (the driver as a
+  library, `ctypes` over `bin/rdc_replay.dll`; a leaf beyond `rdc_driver`) and `rdc_sweep` (a folder of
+  captures, above `rdc_replay`/`rdc_schemas`), each imported by `rdc_analysis` by name rather than star-wise
+  because its public surface is one `cmd_*`. A cycle breaks
   `from X import *` at import time (a partially initialised module exports only what it has defined so far), so
   put a shared helper *below* the modules that need it instead of importing upwards — that is why `_name_suffix`
   lives in `rdc_resources` and the loaders in `rdc_cache`.
@@ -260,6 +263,25 @@ Enforced by `pyrightconfig.json` (`"typeCheckingMode": "standard"`) plus the tes
   reads, and `probe` is the command that needs it: its answer is only true on a *cold* engine, so a
   non-first probe warns on stderr and its answer is deliberately **not** cached (REFERENCE §9). A new
   command that calls `SetFrameEvent` itself silently breaks both.
+- **`bin/rdc_replay.dll` is the same code as the exe, as a library**, and a change to `src/cpp` is a change to
+  both (they share the source list in `CMakeLists.txt`, so `build --check` compares both against it). The
+  ABI is `src/cpp/api.h`; the Python caller is `src/py/rdc_replay.py`; the first in-repo caller is `sweep`
+  (REFERENCE §4.21). Two rules go with it: the **replay system is the process's** and is initialised once
+  (`api.cpp`'s `Process()` — a session owns a capture and its controller, nothing more; doing it per session
+  crashed every session after the first), and **one session means one batch file**: the library produces the
+  same text as a `batch` run of the same lines, byte for byte, and never promises a fresh engine per command
+  (REFERENCE §9).
+- **A bundle is local state: never commit one, and never let one be written where it can be committed.** It
+  belongs to one `.rdc` on this machine, and it records that capture's **absolute path** (`capture.json`'s
+  `absPath`), so a bundle in `git status` is a leak rather than an artefact. The destinations that need no
+  argument are the ones to watch — `dump <rdc>` writes `bundle/` in the working directory, `sweep <dir>`
+  writes `bundles/` — and both are in `.gitignore`, with a test that keeps them there
+  (`tests/test_rdc_sweep.py`). A destination you pass yourself is yours to ignore. Two ways one has landed
+  outside those names: a `dump` line whose path was **unquoted** (a key with a space becomes two arguments,
+  and `dump` takes the last positional as its destination — that is how 257 files once appeared in
+  `Renderer/` at the repository root), and a relative path resolved against whatever the working directory
+  happened to be. Both are why `rdc_sweep.dump_line` quotes and why the sweep checks for the manifest it
+  asked for rather than trusting the exit code.
 - Every `--json` document carries `schemaVersion` (REFERENCE §9, and §4.12 for the validator), and the schema for it lives in the
   driver's `kSchemas` table. A new document, or a new member on an existing one, updates that schema **and**
   the checked-in `schema/` folder in the same change (`replay_dump schema --out schema`, then

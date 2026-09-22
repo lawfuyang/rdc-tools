@@ -337,6 +337,44 @@ std::string DefaultLogStem()
 //:
 //: `--log <file>` names one exact file, which is opened the ordinary way: truncated, since it is
 //: still *this* run's log and nothing else's.
+std::string LibraryLogStem()
+{
+  // The library's own module, not the host process's executable: `GetModuleFileNameA(NULL, ...)` from
+  // inside a DLL loaded by `python.exe` is `python.exe`, and the per-run log would land next to the
+  // interpreter -- a directory a caller on a normal install cannot write to. The address of one of our
+  // own functions is what names this DLL, which works whether it was loaded by name or by path.
+  HMODULE self = NULL;
+  if(!GetModuleHandleExA(
+         GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+         (LPCSTR)&LibraryLogStem, &self))
+    self = NULL;
+
+  char module[4096];
+  const DWORD len = GetModuleFileNameA(self, module, (DWORD)sizeof(module));
+  std::string path =
+      (len == 0 || len >= sizeof(module)) ? std::string("rdc_replay") : std::string(module, len);
+  const size_t slash = path.find_last_of("\\/");
+  const size_t dot = path.find_last_of('.');
+  if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
+    path = path.substr(0, dot);    // the DLL's stem: the extension is dropped
+
+  SYSTEMTIME now;
+  GetLocalTime(&now);
+  char name[4200];
+  snprintf(name, sizeof(name), "%s_%04d-%02d-%02d_%02d-%02d-%02d", path.c_str(), now.wYear,
+           now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+  return name;
+}
+
+void CloseLog()
+{
+  if(g_LogFile != NULL)
+  {
+    fclose(g_LogFile);
+    g_LogFile = NULL;
+  }
+}
+
 FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs)
 {
   const std::string stem = AbsolutePath(requested.c_str());
@@ -436,8 +474,10 @@ ICaptureFile *OpenCaptureFile(HMODULE dll)
 // are out of line because only this file sees `g_ShutdownReplay`, resolved from the DLL here.
 ReplaySystemGuard::~ReplaySystemGuard()
 {
+  Trace("shutting the replay system down");
   if(g_ShutdownReplay != NULL)
     g_ShutdownReplay();
+  Trace("replay system down");
 }
 
 CaptureFileGuard::CaptureFileGuard(ICaptureFile *capture) : file(capture)
@@ -446,8 +486,10 @@ CaptureFileGuard::CaptureFileGuard(ICaptureFile *capture) : file(capture)
 
 CaptureFileGuard::~CaptureFileGuard()
 {
+  Trace("closing the capture file");
   if(file != NULL)
     file->Shutdown();
+  Trace("capture file closed");
 }
 
 ControllerGuard::ControllerGuard(IReplayController *replay) : ctrl(replay)
@@ -456,8 +498,10 @@ ControllerGuard::ControllerGuard(IReplayController *replay) : ctrl(replay)
 
 ControllerGuard::~ControllerGuard()
 {
+  Trace("shutting the controller down");
   if(ctrl != NULL)
     ctrl->Shutdown();
+  Trace("controller down");
 }
 
 // --------------------------------------------------------------------------- the capture header
@@ -550,7 +594,7 @@ int CompareMajorMinor(const std::string &engine, const std::string &capture, boo
   return 0;
 }
 
-int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven)
+int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven, std::string *why)
 {
   if(g_GetVersionString == NULL)
     return 0;    // no version to compare with: the engine's own checks are all there is
@@ -570,13 +614,22 @@ int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven)
     return 0;
   }
   if(order < 0)
-    return Fail(
-        1,
-        "%s was recorded by RenderDoc %s, and this replay engine is %s: replay must be at "
-        "least the capture's version, because an older engine answers from another version's "
-        "decoding rather than reporting an error. Install a newer RenderDoc, or point at one "
-        "with `--dll <path>` or $RDC_RENDERDOC_DLL.",
-        pathAsGiven, capture.program.c_str(), engine.c_str());
+  {
+    // One sentence, two destinations: the CLI prints it with `Fail`, the library returns it through
+    // the ABI's `err` buffer (api.cpp), and the wording is therefore written once.
+    const std::string text =
+        Fmt("%s was recorded by RenderDoc %s, and this replay engine is %s: replay must be at "
+            "least the capture's version, because an older engine answers from another version's "
+            "decoding rather than reporting an error. Install a newer RenderDoc, or point at one "
+            "with `--dll <path>` or $RDC_RENDERDOC_DLL.",
+            pathAsGiven, capture.program.c_str(), engine.c_str());
+    if(why != NULL)
+    {
+      *why = text;
+      return 1;
+    }
+    return Fail(1, "%s", text.c_str());
+  }
   if(order > 0)
     Log("note: %s was recorded by RenderDoc %s; this engine is %s -- newer than the capture, which "
         "is "

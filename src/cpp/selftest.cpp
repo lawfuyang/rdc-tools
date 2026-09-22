@@ -1069,6 +1069,55 @@ int CmdSelftest()
     }
   }
 
+  // ------------------------------------------------------------------ watch's name rules
+  //
+  // Device-free, and both rules are the kind that go wrong *quietly*: a substring match watches the
+  // wrong variable (`intensityScale` for `intensity`), and a case-sensitive one misses the variable
+  // the reader typed. The reflection tree is built by hand for the same reason -- a rule that only
+  // a real capture can exercise is a rule nobody can falsify.
+  {
+    const auto leaf = [](const char *name) {
+      ShaderVariable v;
+      v.name = rdcstr(name);
+      v.type = VarType::Float;
+      v.rows = 1;
+      v.columns = 1;
+      return v;
+    };
+
+    ShaderVariable light = leaf("Light");
+    light.members.push_back(leaf("intensity"));
+    light.members.push_back(leaf("intensityScale"));
+    rdcarray<ShaderVariable> vars;
+    vars.push_back(light);
+    vars.push_back(leaf("Scene"));
+
+    const std::vector<std::string> full = WatchPaths(vars, "Light.intensity");
+    t.Check(full.size() == 1 && full[0] == "Light.intensity", "watch-name-full-path",
+            "a dotted member path did not match itself");
+    const std::vector<std::string> bare = WatchPaths(vars, "intensity");
+    t.Check(bare.size() == 1 && bare[0] == "Light.intensity", "watch-name-bare-member",
+            "a bare member name did not match the member it names");
+    t.Check(WatchPaths(vars, "Intensity").size() == 1, "watch-name-ignores-case",
+            "a name typed in another case did not match");
+    t.Check(WatchPaths(vars, "intensityScale").size() == 1, "watch-name-is-not-a-substring",
+            "a substring of a longer member name matched it");
+
+    // A request for a *struct* is a request for its leaves: a struct's own value text is `-`, which
+    // is not an answer to "watch Light".
+    const std::vector<std::string> whole = WatchPaths(vars, "Light");
+    t.Check(whole.size() == 2 && whole[0] == "Light.intensity" && whole[1] == "Light.intensityScale",
+            "watch-name-struct-reports-its-members",
+            "watching a struct did not report the members underneath it");
+
+    // The whole path is the whole path: `Light` is not a prefix match for `Light.intensity` unless
+    // the request is a bare member *name*, which this one is not.
+    t.Check(!WatchNameMatches("Light.intensity", "Light.foo"), "watch-name-no-prefix-match",
+            "a path matched a different member path");
+    t.Check(WatchPaths(vars, "Nothing").empty(), "watch-name-nothing-matches-nothing",
+            "a name that is not in the tree matched something");
+  }
+
   // ------------------------------------------------------------------ the probe's range and cache
   //
   // Also no device: `ProbeUntil` is arithmetic over two numbers, and the cache is a text file. What is

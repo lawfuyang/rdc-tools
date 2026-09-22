@@ -401,7 +401,7 @@ class TestReportDocument(BundleCase):
         # ranking's unavailable inputs (the action list) and the counters (the frame's pictures and counters).
         # The marker path is no longer one of the gaps -- the driver records it -- so the caveat speaks of the
         # *bundle's* age instead, which is what the last needle checks.
-        for needle in ('REFERENCE §4.17', 'REFERENCE §9', 'ROADMAP §4'):
+        for needle in ('REFERENCE §4.17', 'REFERENCE §9', 'ROADMAP §3'):
             self.assertIn(needle, text)
         self.assertIn('as of 2026-09-17', text)
         # The vocabulary's own two limits: what a name can say, and which names exist at all.

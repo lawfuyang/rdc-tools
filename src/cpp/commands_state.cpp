@@ -661,43 +661,57 @@ int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, in
 
 //: The named values of one constant buffer at one event: the answer to "what is actually in the
 //: buffer bound at rp7", which the offline tool cannot give at all.
-int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-               ShaderStage stage, int slot)
+//: The reflection of the shader that is *actually* bound, rather than of the entry point the engine
+//: would disassemble by default: the pipe state hands over the bound entry's own reflection
+//: (`D3D12Pipe::Shader::reflection`), and asking `GetShader` with an empty entry-point name instead
+//: returns the shader's default entry, whose constant-block *layout* need not be the bound one's --
+//: which lays a block's members out against the wrong offsets and prints the right bytes under the
+//: wrong names. `GetShader` stays as the fallback for a state the engine did not fill in.
+const ShaderReflection *BoundReflection(IReplayController *ctrl, const D3D12Pipe::State *st,
+                                        ShaderStage stage, const D3D12Pipe::Shader *sh)
 {
-  MoveToEvent(ctrl, eid);
-  const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
-  const D3D12Pipe::Shader *sh = StageShader(d3d12, stage);
-  if(sh == NULL || sh->resourceId == ResourceId::Null())
-    return Fail(1, "no %s shader is bound at eid %d", StageName(stage), eid);
+  if(sh->reflection != NULL)
+    return sh->reflection;
+  return ctrl->GetShader(st->pipelineResourceId, sh->resourceId, ShaderEntryPoint(rdcstr(), stage));
+}
 
-  // The bound shader's own reflection first: the pipe state hands it over
-  // (`D3D12Pipe::Shader::reflection`), so it is the reflection of the entry point that is *actually
-  // bound*. Asking `GetShader` with an empty entry-point name instead returns the shader's default
-  // entry, whose constant-block *layout* need not be the bound one's -- which lays a block's
-  // members out against the wrong offsets and prints the right bytes under the wrong names.
-  // `GetShader` stays as the fallback for a state the engine did not fill in.
-  const ShaderReflection *refl = sh->reflection;
-  if(refl == NULL)
-    refl = ctrl->GetShader(d3d12->pipelineResourceId, sh->resourceId,
-                           ShaderEntryPoint(rdcstr(), stage));
-  rdcstr entry = refl ? refl->entryPoint : rdcstr();
+//: One constant block read at the current event: the resource its bytes come from, and the
+//: variables the reflection lays over them. Extracted out of `CmdCbuffer` because `watch` asks the
+//: same question at every event of a range, and a second copy of the resolution below is exactly
+//: how a `watch` row and a `cb` row would come to disagree about which buffer a block *is*.
+//:
+//: The resolution, and why it is this one:
+//:
+//:  * `GetDescriptorAccess` is the engine's own list of what this event's shaders read -- stage,
+//:  binding
+//:    *index* (the reflection's own constant-block index), array element, store and offset -- built
+//:    for the event by the replay device. A constant block is bound either as a root descriptor or
+//:    as a slot of a descriptor table, and a bindless engine (UE) binds its cbuffers through
+//:    tables: asking only for the root descriptor reported "values will be zero" for *every* one of
+//:    them (measured: all 312 cbuffer documents of the PC capture came back zeroed). The root
+//:    signature cannot answer it for a table -- it holds a heap and an offset, not a resource. The
+//:    RenderDoc GUI resolves its cbuffers through this same list (`PipeState::GetConstantBlock`),
+//:    and `DescriptorRange(access)` is the matching way to ask for the descriptor itself, so this
+//:    is the same resolution and not an imitation of it;
+//:  * the root-descriptor half is the fallback for an API or a driver that publishes no access
+//:  list: a
+//:    CBV bound directly on a root parameter *is* in the pipe state as a resource. The lookup key
+//:    is the block's own bind point -- the register and space the reflection declares -- not the
+//:    block's index, which only happens to equal the register in the common case;
+//:  * `length` is not optional: the engine fetches the bytes only when it is non-zero
+//:    (`ReplayController::GetCBufferVariableContents` reads `if(length > 0) GetBufferData(...)`),
+//:    and a zero length left every variable at its *default* of zero -- which is how every cbuffer
+//:    document this tool wrote before that fix came out zeroed, for a block that was bound and
+//:    full. A CBV's declared size is the right answer, and the reflection's block size is the
+//:    fallback for a binding whose descriptor does not carry one.
+void BlockRead(IReplayController *ctrl, const D3D12Pipe::State *st, const ShaderReflection *refl,
+               ShaderStage stage, const D3D12Pipe::Shader *sh, int slot, BlockValues &out)
+{
+  out.m_Variables.clear();
+  out.m_Buffer = ResourceId::Null();
+  out.m_Offset = 0;
+  out.m_Length = 0;
 
-  // Which buffer to read: the engine wants the resource explicitly, and a constant block is bound
-  // either as a root descriptor or as a slot of a descriptor table -- a bindless engine (UE) binds
-  // its cbuffers through tables, and asking only for the root descriptor reported "values will be
-  // zero" for *every* one of them (measured: all 312 cbuffer documents of the PC capture came back
-  // zeroed). The root signature cannot answer this: for a table it holds a heap and an offset, not
-  // a resource.
-  //
-  // `GetDescriptorAccess` is the engine's own list of what this event's shaders read -- stage,
-  // binding *index* (the reflection's own constant-block index), array element, store and offset --
-  // built for the event by the replay device. The RenderDoc GUI resolves its cbuffers through
-  // exactly this list
-  // (`PipeState::GetConstantBlock`), and `DescriptorRange(access)` is the matching way to ask for
-  // the descriptor itself, so this is the same resolution and not an imitation of it.
-  ResourceId buffer = ResourceId::Null();
-  uint64_t bufferOffset = 0;
-  uint64_t bufferLength = 0;
   const rdcarray<DescriptorAccess> &access = ctrl->GetDescriptorAccess();
   for(size_t i = 0; i < access.size(); i++)
   {
@@ -716,9 +730,9 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
     const rdcarray<Descriptor> contents = ctrl->GetDescriptors(a.descriptorStore, request);
     if(!contents.empty() && contents[0].resource != ResourceId::Null())
     {
-      buffer = contents[0].resource;
-      bufferOffset = contents[0].byteOffset;
-      bufferLength = contents[0].byteSize;
+      out.m_Buffer = contents[0].resource;
+      out.m_Offset = contents[0].byteOffset;
+      out.m_Length = contents[0].byteSize;
     }
     // Whether or not the slot held anything, this is the row the reflection means: a second row for
     // the same index would be a different array element, which is not what the slot asked for.
@@ -731,9 +745,9 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
   // two can be told apart without a rebuild.
   if(getenv("RDC_REPLAY_DEBUG") != NULL)
   {
-    Log("cb: %d descriptor access row(s) at eid %d, %d root parameter(s), %d block(s) in the "
+    Log("cb: %d descriptor access row(s) for %s slot %d, %d root parameter(s), %d block(s) in the "
         "reflection",
-        (int)access.size(), eid, (int)d3d12->rootSignature.parameters.size(),
+        (int)access.size(), StageName(stage), slot, (int)st->rootSignature.parameters.size(),
         refl != NULL ? (int)refl->constantBlocks.size() : -1);
     for(size_t i = 0; i < access.size(); i++)
       Log("cb:   %s type=%u cat=%u index=%u elem=%u store=%s off=%llu size=%llu",
@@ -743,39 +757,43 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
           (unsigned long long)access[i].byteOffset, (unsigned long long)access[i].byteSize);
   }
 
-  // The root-descriptor half, for the case the access list does not cover (an API or a driver that
-  // does not publish one): a CBV bound directly on a root parameter *is* in the pipe state as a
-  // resource. The lookup key is the block's own bind point -- the register and space the reflection
-  // declares -- not the block's index, which only happens to equal the register in the common case.
-  if(buffer == ResourceId::Null() && refl != NULL && (size_t)slot < refl->constantBlocks.size())
+  if(out.m_Buffer == ResourceId::Null() && refl != NULL && (size_t)slot < refl->constantBlocks.size())
   {
     const uint32_t reg = refl->constantBlocks[(size_t)slot].fixedBindNumber;
     const uint32_t space = refl->constantBlocks[(size_t)slot].fixedBindSetOrSpace;
-    for(size_t i = 0; i < d3d12->rootSignature.parameters.size(); i++)
+    for(size_t i = 0; i < st->rootSignature.parameters.size(); i++)
     {
-      const D3D12Pipe::RootParam &rp = d3d12->rootSignature.parameters[i];
+      const D3D12Pipe::RootParam &rp = st->rootSignature.parameters[i];
       if(rp.space == space && rp.reg == reg && rp.descriptor.resource != ResourceId::Null())
       {
-        buffer = rp.descriptor.resource;
-        bufferOffset = rp.descriptor.byteOffset;
-        bufferLength = rp.descriptor.byteSize;
+        out.m_Buffer = rp.descriptor.resource;
+        out.m_Offset = rp.descriptor.byteOffset;
+        out.m_Length = rp.descriptor.byteSize;
         break;
       }
     }
   }
 
-  // `length` is not optional: the engine fetches the bytes only when it is non-zero
-  // (`ReplayController:: GetCBufferVariableContents` reads `if(length > 0) GetBufferData(...)`),
-  // and a zero length left every variable at its *default* of zero -- which is how every cbuffer
-  // document this tool ever wrote came out zeroed, for a block that was bound and full. A CBV's
-  // declared size is the right answer, and the reflection's block size is the fallback for a
-  // binding whose descriptor does not carry one.
-  if(bufferLength == 0 && refl != NULL && (size_t)slot < refl->constantBlocks.size())
-    bufferLength = (uint64_t)refl->constantBlocks[(size_t)slot].byteSize;
+  if(out.m_Length == 0 && refl != NULL && (size_t)slot < refl->constantBlocks.size())
+    out.m_Length = (uint64_t)refl->constantBlocks[(size_t)slot].byteSize;
 
-  rdcarray<ShaderVariable> vars =
-      ctrl->GetCBufferVariableContents(d3d12->pipelineResourceId, sh->resourceId, stage, entry,
-                                       (uint32_t)slot, buffer, bufferOffset, bufferLength);
+  const rdcstr entry = refl ? refl->entryPoint : rdcstr();
+  out.m_Variables =
+      ctrl->GetCBufferVariableContents(st->pipelineResourceId, sh->resourceId, stage, entry,
+                                       (uint32_t)slot, out.m_Buffer, out.m_Offset, out.m_Length);
+}
+
+int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+               ShaderStage stage, int slot)
+{
+  MoveToEvent(ctrl, eid);
+  const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
+  const D3D12Pipe::Shader *sh = StageShader(d3d12, stage);
+  if(sh == NULL || sh->resourceId == ResourceId::Null())
+    return Fail(1, "no %s shader is bound at eid %d", StageName(stage), eid);
+
+  BlockValues block;
+  BlockRead(ctrl, d3d12, BoundReflection(ctrl, d3d12, stage, sh), stage, sh, slot, block);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -785,12 +803,12 @@ int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, in
   Field("shader", IdText(sh->resourceId));
   Field(
       "buffer",
-      buffer == ResourceId::Null()
+      block.m_Buffer == ResourceId::Null()
           ? std::string("(no root descriptor or table slot binds this block: values will be zero)")
-          : Fmt("res%s+0x%llx", IdText(buffer).c_str(), (unsigned long long)bufferOffset));
+          : Fmt("res%s+0x%llx", IdText(block.m_Buffer).c_str(), (unsigned long long)block.m_Offset));
 
   ArrayOpen("variables");
-  PrintVariables(vars, 0);
+  PrintVariables(block.m_Variables, 0);
   ArrayClose();
   g_Indent = 0;
   if(g_bJson)
@@ -1192,7 +1210,7 @@ int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *pat
 //   bindings    what a stage's reflection says it binds, against what the root signature declares
 //   rt-format   the bound render targets' formats, against what the pixel shader writes
 //
-// Deterministic by construction, which is the point (ROADMAP 2): every finding names an event and
+// Deterministic by construction, which is the point (ROADMAP 1): every finding names an event and
 // quotes both sides, so `state <eid>` and `shaders <eid>` show the reader the same two things.
 //
 // All three need shader reflection, and a capture whose shaders were stripped has none -- on those

@@ -564,7 +564,7 @@ class TestDecodeChunk(unittest.TestCase):
     def test_initial_contents(self):
         # `chunk <N>` still reports the resource id and header bytes for these chunks; the old
         # `initial` command that tried to guess where the data starts is gone (replay reads
-        # resource contents properly, see ROADMAP section 1)
+        # resource contents properly: see `ROADMAP.md`'s what-is-deliberately-not-on-this-list)
         blob = F.u64b(342) + b'\xab' * 48
         expected = 'id=342 hdr=%s' % blob[8:40].hex()
         self.assertEqual(R.decode_chunk('InitialContents', blob), [expected])

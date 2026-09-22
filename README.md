@@ -111,10 +111,14 @@ and `CMakeLists.txt` at startup and says so in its log when it is behind (never 
 build on purpose is how a bundle from the previous revision gets reproduced), and the tool reports and
 rebuilds it, which is the only place that can: a running image cannot be overwritten on Windows.
 
-The same `cmake --build` writes `bin\rdc_lz4.dll`, and that one is the offline tool's decoder (§1), so
-`python src\py\rdc_analysis.py build [--check]` compares **both** artefacts against their own sources — each in
-its own block, and independently, because a new `lz4.c` does not make the exe stale. The driver's own warning
-stays about the exe: it never loads the library.
+The same `cmake --build` writes two more artefacts. `bin\rdc_lz4.dll` is the offline tool's decoder (§1), and
+`bin\rdc_replay.dll` is **the same driver as a library** — the same sources, one command language, a session
+you can hold open and ask several questions of (REFERENCE §9) — which is what `sweep` (§2.2) uses. So
+`python src\py\rdc_analysis.py build [--check]` compares **all three** against their own sources, each in its
+own block and independently, because a new `lz4.c` makes neither of the others stale; the exe and the replay
+library share a source tree and are compared against the same one on purpose, since a library answering from
+a different revision than the command line is worse than no library at all. The driver's own warning stays
+about the exe: it never loads either library.
 
 ```powershell
 & $py src\py\rdc_analysis.py build --check       # is bin\replay_dump.exe older than src\cpp? (exit 1 = yes)
@@ -208,6 +212,7 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | What was bound at eid E? | `state <eid>`, by number or marker path |
 | What changed between two events? | `statediff <eidA> <eidB>` |
 | What are the values behind "the light is too bright"? | `cb`, `buffer` |
+| Is this uniform right here and wrong at the next draw? | `watch <name>` — one row per change over a range |
 | Why is this pixel this colour? | `pixelhistory <eid\|last> <resId> <x> <y>` |
 | What did the pass render? | `image <eid> <out.bmp>`, `sheet` |
 | Is this texture the problem? | `textures --save`, `usage <resId>` |
@@ -284,7 +289,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
-| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §4.5) | `dump-shaders 'capture.rdc' .\shaders` |
+| `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or the D3D12 harness (ROADMAP §3.5) | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
 
 #### The report, the A/B and the corpus
@@ -297,6 +302,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 | `replaydiff` | the A/B of two bundles: structure, state rows, every named constant member by member, each shader's hash, and with `--with-images` the renders, per pixel up to `--image-detail` | `replaydiff ab\mobile ab\desktop --with-images --out ab\diff` |
 | `validate` | documents against the schemas the driver publishes (plus the report's own): a whole bundle, or one saved `--json` file with the `kind` it is | `validate bundle schema`, `validate t.json schema textures` |
 | `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts, the A/B documents and the **driver's own text** for that capture byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare). It also carries what is *known* about each capture — notes, and the **causes** the report matches findings against (REFERENCE §4.17) | `goldens --check`, `goldens --write` |
+| `sweep` | a folder of captures, swept: one bundle per `.rdc` and an index of what they are (key, size, SHA-256, what each bundle holds). One process, one replay session per capture — the driver as a library (REFERENCE §4.21, §9) — and a capture whose bundle is already there is reported `present` rather than replayed, so it is resumable | `sweep captures --out bundles`, `sweep captures --commands driver.txt` |
 
 #### Upkeep
 
@@ -304,7 +310,7 @@ as a spreadsheet or an issue wants them and moves the prose around them to stder
 |---|---|---|
 | `bootstrap` | fetches the RenderDoc source tree the chunk names come from, or checks it, optionally pinned to a tag; every command does this on demand (§1.1) | `bootstrap v1.46` |
 | `chunk-names` | the bundled enum table against a source tree: `--check` reports drift, `--write` regenerates `src/py/rdc_chunknames.py` | `chunk-names --check` |
-| `build` | whether `bin\replay_dump.exe` and `bin\rdc_lz4.dll` are older than their sources, and builds them unless `--check` | `build --check` |
+| `build` | whether `bin\replay_dump.exe`, `bin\rdc_replay.dll` and `bin\rdc_lz4.dll` are older than their sources, and builds them unless `--check` | `build --check` |
 | `selftest` | the hermetic unittest suite — no GPU, no capture, seconds long | `selftest`, `selftest -k goldens -v` |
 
 ### 2.3 The replay driver — every command, with an example
@@ -337,6 +343,7 @@ badly (REFERENCE §9).
 |---|---|---|
 | `shaders` | reflection: cbuffers, bindings and signatures, plus the disassembly with `--disasm` — the names that turn a root parameter into a meaning | `shaders 'capture.rdc' 27931 --disasm` |
 | `cb` | the named values of one constant buffer, structs and arrays expanded, member by member | `cb 'capture.rdc' 27931 ps 3` |
+| `watch` | one reflection member's value **at every event** of a range, as one row per *change* — a uniform that is right at one draw and wrong at the next, in one command instead of forty `cb` calls. A name is a dotted path (`Light.intensity`) or a bare member; `--since`/`--until`/`--max-events`/`--stage` bound the read, `--all` prints every event, and the counters say what was actually read (`found` false means the name matched nothing, which is not the same as "it never changed") | `watch 'capture.rdc' Light.intensity --since 1000 --until 1300` |
 | `buffer` | a buffer's contents, read through the engine at the current event | `buffer 'capture.rdc' res1234 0 256 --as f32` |
 | `usage` | every event that touches a resource: who writes it, who reads it, and when | `usage 'capture.rdc' res1234` |
 | `crosscheck` | what the reflections say a shader wants against what the state says it was given: the vs→ps link, each stage's bindings against the root signature, the render targets against the pixel shader's outputs | `crosscheck 'capture.rdc' --max 40` |
@@ -456,7 +463,7 @@ what the engine saw for the passes that matched: their structure, the state rows
 every named constant value member by member, each shader's **hash** (so "a different shader" is a fact), and —
 with `--with-images` — each pass's readback, by bytes first and pixel by pixel up to `--image-detail`, with a
 heat map per compared pair. It writes `replaydiff.md` and `replaydiff.json` and prints a summary. Then narrow
-by name rather than by index: the named cbuffer values that moved (`watch <name>` *(ROADMAP §1)* turns that
+by name rather than by index: the named cbuffer values that moved (`watch <name>` §2.2 turns that
 into a table over the whole frame), and the tables in `engine-schemas/` *(REFERENCE §4.11)* to say which
 *concept* the differing block is (`IndirectLightingCache`, `Material`, …). Where the two engines' reflections
 disagree on names entirely, the offline `resources`, `rootsig` and `rootsig-check` views are the fallback:
@@ -472,7 +479,7 @@ python src\py\rdc_analysis.py resources 'capture.rdc' 0 SkyViewLut       # name 
 ```
 
 Three things to check, in this order: is the *content* right (the decoded PNG), is the *format* right for how
-it is sampled (the RT-format audit, *ROADMAP §3*), and was it *written* before it was read (`deps` *(REFERENCE §4.15)*:
+it is sampled (the RT-format audit, *ROADMAP §2*), and was it *written* before it was read (`deps` *(REFERENCE §4.15)*:
 the write→read chain). To prove its contribution rather than argue about it, substitute a flat texture for it and
 diff the renders (`imgdiff`, or `replaydiff --with-images` for a whole frame — REFERENCE §4.16) — if the picture
 does not change, the texture is not the problem.
@@ -481,7 +488,7 @@ does not change, the texture is not the problem.
 
 ```powershell
 .\bin\replay_dump.exe cb 'capture.rdc' 27931 ps 3     # named values, structs and arrays expanded
-.\bin\replay_dump.exe watch 'capture.rdc' Light.intensity   # roadmap §1: the value at every event
+.\bin\replay_dump.exe watch 'capture.rdc' Light.intensity   # that member at every event, one row per change
 ```
 
 `cb` answers "what is bound here"; `watch` answers "is it ever different" — the difference between a constant
@@ -494,12 +501,12 @@ bytes when the reflection is not enough (structured buffers, index data, hand-bu
 ```powershell
 .\bin\replay_dump.exe shaders 'capture.rdc' <eid> --disasm   # the code, with the reflection next to it
 python src\py\rdc_analysis.py dxbc 'capture.rdc' verbose              # which containers exist, and their hashes
-.\bin\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP §3, the rest)
+.\bin\replay_dump.exe mesh 'capture.rdc' <eid> 0 20          # what the VS emitted (and, ROADMAP §2, the rest)
 ```
 
 Cross-check the signatures before reading the maths: VS output vs PS input (same semantic, index and width —
 a mismatch is a real bug and a *certain* finding), and each stage's expected bindings vs what the root
-signature actually binds. When debug info exists in the capture, the shader debugger *(ROADMAP §2)* steps one
+signature actually binds. When debug info exists in the capture, the shader debugger *(ROADMAP §1)* steps one
 invocation and prints the variables; when it does not (usually), say so — that is a limitation to report, not
 a puzzle to keep grinding at.
 
@@ -565,7 +572,7 @@ self-A/B in that same run: `replaydiff` of one bundle against *itself* must find
 
 **K. "Answer a shader question the capture cannot."** Some questions are not in the frame: what the shader does
 with *different* inputs. Replay has no `SetBufferData`, and `ReplaceResource` needs an existing replacement, so
-this is the one case for the standalone harness (ROADMAP §4.5):
+this is the one case for the standalone harness (ROADMAP §3.5):
 
 ```powershell
 python src\py\rdc_analysis.py dump-shaders 'capture.rdc' .\shaders   # the DXIL containers
@@ -628,7 +635,18 @@ shown.
 * **A chunk index is not an event id.** The offline tool numbers chunks; the engine numbers what a command list
   recorded. On one capture the first draw was chunk 316 while the first event with state was 842 (REFERENCE §9).
 * **`probe` runs alone** — it forces non-events on purpose and leaves the last real event's state behind, so
-  mixing it into a batch of other commands makes one answer wrong whichever order they run in.
+  mixing it into a batch of other commands makes one answer wrong whichever order they run in. A `probe`
+  that is not the session's first command now says so on stderr, and its answer is not cached (the cache is
+  for a *first* run's answer, REFERENCE §9).
+* **`watch` is slow by nature** — it reads every bound constant block at every event of its range, measured
+  at ~15 ms per id on the PC capture — so give it `--since`/`--until`/`--max-events`, and read the counters
+  it prints: `found` false means the *name* matched nothing (the log then says which commands list a block's
+  names), which is not the same as "the value never changed".
+* **A bundle is local state, so never commit one.** It belongs to one `.rdc` on this machine and it records
+  the capture's **absolute path** (`capture.json`'s `absPath`), which is exactly the kind of thing that must
+  not end up in a shared repository. The two defaults the tools write to when they are given no destination —
+  `replay_dump dump <rdc>` writes `bundle/`, `sweep <dir>` writes `bundles/` — are in `.gitignore`, and a
+  test in `tests/test_rdc_sweep.py` keeps them there; a destination you name yourself is yours to ignore.
 * **One replay at a time.** The engine creates a device per process; two at once is what makes a run look
   stuck, and a force-killed replay can leave the driver slow to create the next device.
 * **Validate the JSON.** `--json | python -m json.tool`, plus a duplicate-key check; and know that the driver's

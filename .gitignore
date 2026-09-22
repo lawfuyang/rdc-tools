@@ -10,3 +10,12 @@ __pycache__/
 # The corpus names its captures by key and digest; this file says where this machine's copies are (a path
 # is local state, and a capture's file name can name the frame it came from), so it is not shared.
 goldens/captures.local.json
+
+# Bundle-shaped output: one folder per capture, full of per-frame documents. It is local state twice over --
+# it belongs to one `.rdc` on this machine, and a bundle records the **absolute path** of the capture it came
+# from (`capture.json`'s `absPath`, REFERENCE §9) -- so it is never committed. These two are the defaults the
+# tools write to when they are given no destination: `replay_dump dump <rdc>` and `rdc_analysis.py sweep
+# <dir>`. Unanchored like `build/` above, because the tools resolve a relative destination against the
+# working directory rather than against this file: `cd sub; dump ...` must be ignored too.
+bundle/
+bundles/

@@ -480,6 +480,35 @@ const SchemaDoc kSchemas[] = {
   "additionalProperties": false
 })sc"},
 
+    {"watch", "watch", R"sc({
+  "title": "watch",
+  "description": "One reflection member's value at every event of a range: one row per change (`eid <n> <stage> b<slot> <path> = <value>`), plus what the run actually read. `valuesMatched` counts every reading of a matching path, so a range where nothing changed still shows it was read; `found` is false when the name matched nothing at all, which is not the same as 'it never changed'.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "name",
+               "since", "until", "events", "scanned", "withState", "blocksRead", "valuesMatched",
+               "changes", "truncated", "found"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "name": {"type": "string"},
+    "since": {"type": "integer"},
+    "until": {"type": "integer"},
+    "events": {"type": "array", "items": {"type": "string"}},
+    "scanned": {"type": "integer"},
+    "withState": {"type": "integer"},
+    "blocksRead": {"type": "integer"},
+    "valuesMatched": {"type": "integer"},
+    "changes": {"type": "integer"},
+    "truncated": {"type": "boolean"},
+    "found": {"type": "boolean"}
+  },
+  "additionalProperties": false
+})sc"},
+
     {"cb", "cb", R"sc({
   "title": "cb",
   "description": "One constant buffer at one event: what it is bound to and one row per reflection variable, with the value read from the data.",

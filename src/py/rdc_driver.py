@@ -1,17 +1,21 @@
 """The build's artefacts against the sources they are built from, and the build that catches them up.
 
-`cmake --build build` writes two things: `bin/replay_dump.exe` from `src/cpp/*.cpp|h`, and `bin/rdc_lz4.dll`
-from the vendored decoder in `src/cpp/third_party/lz4` (`CMakeLists.txt` can change either one). Nothing in
-that arrangement notices when one of them is left behind, and each is wrong in its own way: a replay host
-answers from the code it was compiled with, so an exe older than its sources replies with the *previous*
-revision's behaviour and looks exactly like one that is current -- the driver says so itself when it happens
-(REFERENCE 9), which only helps a reader of the log; and the library *is* the offline tool's LZ4 decoder, so a
-stale one decodes every capture with whatever its source said before the last change to it. This module is the
-other half for both: `build --check` is the gate, `build` is the fix.
+`cmake --build build` writes three things: `bin/replay_dump.exe` and `bin/rdc_replay.dll`, both from
+`src/cpp/*.cpp|h` (the second is the same sources as a library, `api.h`), and `bin/rdc_lz4.dll` from the
+vendored decoder in `src/cpp/third_party/lz4` (`CMakeLists.txt` can change any of them). Nothing in that
+arrangement notices when one is left behind, and each is wrong in its own way: a replay host answers from the
+code it was compiled with, so an exe older than its sources replies with the *previous* revision's behaviour
+and looks exactly like one that is current -- the driver says so itself when it happens (REFERENCE 9), which
+only helps a reader of the log; the replay library is the same failure one level quieter, because
+`rdc_replay.py` promises it answers exactly as the command line would; and the LZ4 library *is* the offline
+tool's decoder, so a stale one decodes every capture with whatever its source said before the last change to
+it. This module is the other half for all three: `build --check` is the gate, `build` is the fix.
 
-The two comparisons are **independent on purpose**: the exe is not built from the decoder's source, so a
-changed `lz4.c` must not make the exe look stale, and the driver's own warning -- which reads its own directory
--- is not extended with a library it never loads.
+The comparisons are **independent on purpose**: the exe and the replay library are not built from the
+decoder's source, so a changed `lz4.c` must not make either look stale, and the driver's own warning -- which
+reads its own directory -- is not extended with a library it never loads. The exe and the replay library *do*
+share their sources, and that is deliberate: the two must move together, since a library from one revision
+answering beside an exe from another is the drift that makes a library worse than a subprocess.
 
 Why the driver cannot rebuild itself: on Windows a running image cannot be written to, so the link that
 would replace `bin/replay_dump.exe` fails while that same exe is what is running -- `LNK1104: cannot open
@@ -48,6 +52,10 @@ BUILD_DIR = 'build'
 EXE_PATH = os.path.join('bin', 'replay_dump.exe')
 LIB_PATH = os.path.join('bin', 'rdc_lz4.dll')
 
+#: The replay driver built as a library (`src/cpp/api.h`, `src/py/rdc_replay.py`): the same sources as
+#: the exe, so the same comparison, and a second artefact that must not be left behind with it.
+REPLAY_LIB_PATH = os.path.join('bin', 'rdc_replay.dll')
+
 #: The build command, in the form the driver's own warning names it.
 BUILD_COMMAND = ('cmake', '--build', BUILD_DIR, '--config', 'Release')
 
@@ -70,6 +78,11 @@ class BuildTarget(TypedDict):
 TARGETS: Tuple[BuildTarget, ...] = (
     {'name': 'driver', 'artefact': EXE_PATH, 'source_dir': SOURCE_DIR, 'suffixes': SOURCE_SUFFIXES,
      'stakes': 'so every run answers with the previous build'},
+    # Same sources as the driver, so the same comparison -- and the two must be rebuilt together: a
+    # library left behind while the exe is current would answer from a different revision than the
+    # command line, which is the one thing `rdc_replay.py` promises it does not do.
+    {'name': 'replay library', 'artefact': REPLAY_LIB_PATH, 'source_dir': SOURCE_DIR,
+     'suffixes': SOURCE_SUFFIXES, 'stakes': 'so a session answers with the previous build'},
     {'name': 'lz4 library', 'artefact': LIB_PATH, 'source_dir': LIB_SOURCE_DIR,
      'suffixes': LIB_SOURCE_SUFFIXES,
      'stakes': 'so every capture is decoded by the previous decoder'},
@@ -254,6 +267,7 @@ __all__ = [
     'BuildTarget',
     'EXE_PATH',
     'LIB_PATH',
+    'REPLAY_LIB_PATH',
     'LIB_SOURCE_DIR',
     'LIB_SOURCE_SUFFIXES',
     'SOURCE_DIR',

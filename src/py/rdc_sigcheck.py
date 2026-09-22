@@ -11,7 +11,7 @@ answer with the *engine's* answer for the same frame: the signature id the engin
 rows it prints (class, register, space, visibility) and its resolved table slots (`cat(N) type(N)`),
 against those same facts read out of the chunk stream. That is the strongest form of the check, because
 the two sides then share nothing but the capture. What it still cannot do is align an engine *event id*
-with a file *chunk index* -- a mapping no file read produces (`Upstream`, ROADMAP §4) -- so a slot is
+with a file *chunk index* -- a mapping no file read produces (`Upstream`, ROADMAP §3) -- so a slot is
 compared as *"the engine saw a kind the file never wrote there"*, never slot-for-slot at one event.
 
 Findings carry the `certain` / `question` split the report's detectors use: `certain` is something the
@@ -398,7 +398,7 @@ def bundle_findings(check: SigCheck, bundle_dir: str) -> Tuple[List[SigFinding],
 
     # What the engine resolved *inside* a table (its `cat(N) type(N)` rows) is deliberately not
     # compared slot by slot: the engine's rows are per event and the file's writes cannot be aligned to
-    # an event -- no event-to-chunk mapping exists (`Upstream`, ROADMAP §4) -- so the two sets cover
+    # an event -- no event-to-chunk mapping exists (`Upstream`, ROADMAP §3) -- so the two sets cover
     # different moments of the frame and a difference between them would not be a disagreement. What
     # *can* be compared exactly is the binding itself: every `(heap, offset)` the engine reports must be
     # one the file recorded for that parameter, because both are the same frame's own payloads.

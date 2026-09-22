@@ -44,22 +44,39 @@ file(GLOB REPLAY_DUMP_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src
 
 add_executable(replay_dump ${REPLAY_DUMP_SOURCES})
 
-target_include_directories(replay_dump PRIVATE "${RENDERDOC_SRC}/renderdoc/api/replay")
-target_compile_definitions(replay_dump PRIVATE RENDERDOC_PLATFORM_WIN32 _CRT_SECURE_NO_WARNINGS)
-# bcrypt is SHA-256 for the bundle manifest; the source also carries the pragma, and this makes it explicit.
-target_link_libraries(replay_dump PRIVATE bcrypt)
+# --- the same code as a library, for a caller that already has a process ---------------------------
+# `bin/rdc_replay.dll` exports the ABI declared in `src/cpp/api.h`: one open capture, many commands,
+# called through `ctypes` by the offline tool (`src/py/rdc_replay.py`, REFERENCE §9). The sources are the
+# executable's own, so a library line and a batch line are the same command language and the same
+# dispatcher -- the only difference in this file is that the second target is a DLL, which makes `main`
+# dead code in it.
+#
+# It is a *separate* artefact rather than an export from the exe because that is what a caller can load:
+# `ctypes.CDLL('bin/rdc_replay.dll')` needs a DLL, and nothing about the exe's one-run-one-command shape
+# has to change to provide it.
+add_library(rdc_replay SHARED ${REPLAY_DUMP_SOURCES})
 
-if(MSVC)
-  # /MP compiles the translation units in parallel. With one target, the build tool's own --parallel has
-  # nothing to overlap, so without /MP a split into modules would only cost wall-clock. /external:* keeps
-  # RenderDoc's own headers out of the warnings this project treats as its own.
-  target_compile_options(replay_dump PRIVATE
-    /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 /MP
-    /external:W0 /external:anglebrackets)
-  # A warning is a finding: this is a tool whose whole job is to report what it cannot prove, so an
-  # unhandled case should not scroll past. (Debug keeps it a warning for a single-file iteration.)
-  target_compile_options(replay_dump PRIVATE $<$<CONFIG:Release>:/WX>)
-endif()
+# Everything both targets share, in one place: a flag that reached only one of them would make the
+# library's answers differ from the executable's on the same capture, which is the one thing this pair
+# exists not to do.
+foreach(_target IN ITEMS replay_dump rdc_replay)
+  target_include_directories(${_target} PRIVATE "${RENDERDOC_SRC}/renderdoc/api/replay")
+  target_compile_definitions(${_target} PRIVATE RENDERDOC_PLATFORM_WIN32 _CRT_SECURE_NO_WARNINGS)
+  # bcrypt is SHA-256 for the bundle manifest; the source also carries the pragma, and this is explicit.
+  target_link_libraries(${_target} PRIVATE bcrypt)
+
+  if(MSVC)
+    # /MP compiles the translation units in parallel. With one target, the build tool's own --parallel
+    # has nothing to overlap, so without /MP a split into modules would only cost wall-clock. /external:*
+    # keeps RenderDoc's own headers out of the warnings this project treats as its own.
+    target_compile_options(${_target} PRIVATE
+      /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 /MP
+      /external:W0 /external:anglebrackets)
+    # A warning is a finding: this is a tool whose whole job is to report what it cannot prove, so an
+    # unhandled case should not scroll past. (Debug keeps it a warning for a single-file iteration.)
+    target_compile_options(${_target} PRIVATE $<$<CONFIG:Release>:/WX>)
+  endif()
+endforeach()
 
 # --- the import library, from the DLL's exports --------------------------------------------------------
 # Only the entry points this tool calls are needed: everything else is virtual calls on the objects they
@@ -85,7 +102,9 @@ add_custom_command(OUTPUT "${RENDERDOC_IMPLIB}"
   DEPENDS "${RENDERDOC_DEF}" COMMENT "import library from renderdoc.dll's exports" VERBATIM)
 add_custom_target(renderdoc_implib DEPENDS "${RENDERDOC_IMPLIB}")
 add_dependencies(replay_dump renderdoc_implib)
+add_dependencies(rdc_replay renderdoc_implib)
 target_link_libraries(replay_dump PRIVATE "${RENDERDOC_IMPLIB}")
+target_link_libraries(rdc_replay PRIVATE "${RENDERDOC_IMPLIB}")
 
 # --- the engine's DLLs, beside the exe -----------------------------------------------------------------
 # The import library makes renderdoc.dll a load-time dependency and the loader looks next to the exe, not in
@@ -96,6 +115,13 @@ add_custom_command(TARGET replay_dump POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -DDll=${RENDERDOC_DLL} -DDest=$<TARGET_FILE_DIR:replay_dump>
           -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/deploy_dlls.cmake"
   COMMENT "deploying the engine's DLLs next to the exe" VERBATIM)
+
+# The library loads the same engine and lives in the same directory, so it needs the same neighbours --
+# and this makes it so when the library is the only target that was built.
+add_custom_command(TARGET rdc_replay POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -DDll=${RENDERDOC_DLL} -DDest=$<TARGET_FILE_DIR:rdc_replay>
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/deploy_dlls.cmake"
+  COMMENT "deploying the engine's DLLs next to the library" VERBATIM)
 
 # --- the LZ4 decoder the offline tool loads with ctypes ------------------------------------------------
 # A capture's frame-capture section is one LZ4 stream of 1 MB pages, and this is what the offline tool decodes

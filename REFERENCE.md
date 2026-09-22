@@ -163,9 +163,10 @@ parts (`fourcc, offset, length`). Part meanings:
 | `diff` | `<a.rdc> <b.rdc> [--all] [--format table\|csv\|markdown]` | the two streams' own calls, compared: marker path, arguments, the state chunks that changed before each call, and every binding — by what each slot is, not by its index (§4.18) |
 | `rootsig-check` | `<rdc> [bundleDir] [--format table\|csv\|markdown]` | what the root signatures declare against what the stream binds and the heaps hold, and (with a bundle) against the engine's own rows. Exit 0/1 (§4.19) |
 | `vram` | `<rdc> [maxPasses=8] [--drop <nameFilter>] [--format table\|csv\|markdown]` | the frame's memory by role, the pass with the largest peak live inside it, and the what-if arithmetic (§4.20) |
+| `sweep` | `<dir> [--out <root>] [--commands <file>] [--overwrite] [--min-bytes N] [--limit N] [--exe]` | one bundle per capture in a folder, plus an index of what they are — the corpus's GPU half, and the command that makes the replay driver's library worth having (§4.21) |
 | `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the fallback to the bundled table. Needs no capture file |
 | `chunk-names` | `[--check\|--write] [--out <file>] [--src <tree>]` | the bundled enum table (`src/py/rdc_chunknames.py`) against a source tree: `--write` regenerates it from that tree's `SystemChunk`, `D3D12Chunk` and `DXGI_FORMAT` enums, `--check` reports the drift (exit 0 current, 1 differs or is missing, **2 no tree to compare with**). `--write` refuses an incomplete tree, because a table written from one would shrink to whatever that tree happens to have. Needs no capture file |
-| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare for an artefact** — no binary, no library or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison for its own binary and says so in its log (§9) — that warning does not cover the library, which it never loads. **Both artefacts `cmake --build` writes are compared, each in its own block**, because they can disagree and the difference matters: a stale exe answers with the previous revision's behaviour, while `bin/rdc_lz4.dll` *is* the offline tool's decoder (§3.2), so a stale one decodes every capture with code its source no longer says. The two are independent — a new `lz4.c` does not make the exe stale, and a new `replay_dump.cpp` does not make the library stale |
+| `build` | `[--check]` | is `bin/replay_dump.exe` older than the sources it is built from (`src/cpp/*.cpp\|h` and `CMakeLists.txt`)? Without `--check` a stale or missing binary is built with `cmake --build build --config Release`, with the compiler's own output going straight to the console and the verdict printed again afterwards. Exit codes: 0 current (or the build succeeded), 1 out of date (with `--check`) or the build failed, **2 nothing to compare for an artefact** — no binary, no library or no sources, which is a fresh clone and not a mistake. Needs no capture file. The driver makes the same comparison for its own binary and says so in its log (§9) — that warning does not cover the library, which it never loads. **All three artefacts `cmake --build` writes are compared, each in its own block**, because they can disagree and the difference matters: a stale exe answers with the previous revision's behaviour, while `bin/rdc_lz4.dll` *is* the offline tool's decoder (§3.2), so a stale one decodes every capture with code its source no longer says. The exe and `bin/rdc_replay.dll` share their sources and so are compared against the same tree — deliberately, because a library from one revision answering beside an exe from another is the drift that makes a library worse than a subprocess — while the decoder is independent of both: a new `lz4.c` makes neither of them stale, and a new `replay_dump.cpp` does not make the decoder stale |
 
 ### 4.2 Stream text mining
 
@@ -197,7 +198,7 @@ which replay does not expose.
 | Command | Arguments | Output |
 |---|---|---|
 | `dxbc` | `<rdc>` | one row per DXBC/DXIL container: index, offset, size, stage (`PS`/`VS`/`root-sig`/`?`, from `SV_Target` vs `SV_Position`), hash and the parts it carries. This is an inventory — what a shader *reads* is the reflection's job (§8) |
-| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §4.5) |
+| `dump-shaders` | `<rdc> <outdir>` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` (hash, size, parts) — feed the `.dxil` to `dxc`/`dxil-spirv`/RenderDoc, or to the D3D12 harness (`ROADMAP.md` §3.5) |
 
 ### 4.5 Chunk level
 
@@ -1217,6 +1218,60 @@ arithmetic, and the last section of the output says so. Measured on `desktop-1`:
 45 buffers 62.2 MB, 21 textures ~45.6 MB (~211.6 MB total), ~99.5 MB at half resolution, and `--drop GBuffer`
 saves ~48.0 MB over 5 resources.
 
+### 4.21 A folder of captures: `sweep <dir>`
+
+`sweep <dir> [--out <root>] [--commands <file>] [--overwrite] [--min-bytes N] [--limit N] [--exe]`
+
+The corpus (§4.17) names captures, hashes them and pins their transcripts; this is the half of that which
+needs a GPU to rebuild in bulk. For every `.rdc` under `<dir>` (recursively, in sorted order) it writes one
+*bundle* — `dump`, REFERENCE §9 — under `<out>/<key>/`, runs the extra lines in `--commands` in the same
+session and writes each one's document beside the bundle, and then writes `<out>/sweep.json`: one row per
+capture with the key its bundle sits under, the capture's size and SHA-256, the engine version, and what the
+bundle holds.
+
+    sweep   : captures (3 capture(s)) -> bundles, the library
+    Android Renderer         swept    53.8 s  256 file(s), 3.1 MB
+    desktop                  present  a1b2c3d4e5f6
+    index   : bundles\sweep.json (1 swept, 1 present, 0 failed, 34.2 MB of captures)
+
+The destination with no argument is `bundles`, relative to the working directory, and it is in `.gitignore`
+with the driver's `bundle/` — a bundle is local state that records the capture's absolute path (§9), which is
+why the sweep's own default must not be committable and why a test pins that it is not
+(`tests/test_rdc_sweep.py`).
+
+The line it sends for a bundle is **quoted** (`dump "<dir>"`), and that is load-bearing rather than tidy: a
+key can hold a space, the command language splits on whitespace, and `dump` takes the *last* positional as its
+destination. Unquoted, `dump out/Android Renderer` sends `Renderer` as a second argument and the bundle lands
+in a directory named after the capture, resolved against the process's working directory — which happened
+once, as 257 files in `Renderer/` at the repository root, before the quoting and the `.gitignore` entry. The
+sweep noticed (no manifest at the path it asked for, so the capture was reported `failed`), and that is the
+half a reader sees: the stray directory is the half nothing watched.
+
+Three decisions carry it:
+
+* **One process, one session per capture.** A folder of captures would otherwise be a program per capture,
+  each paying the engine's standup (~4 s on a small capture, ~11 s on a 1.4 GB one) — this is what the
+  driver's library is for (§9), and `sweep` is its first caller. The replay system is built once and the
+  captures come and go on it (`api.h`), which is the shape RenderDoc's own application uses; `--exe` falls
+  back to a `replay_dump.exe dump` per capture, for a machine that has the exe and not the library.
+* **The index is built from the bundles' manifests, not from the run.** A manifest is written last (§9), so
+  its presence is what "this bundle is complete" means: a capture whose bundle is there is reported
+  `present` and is not replayed unless `--overwrite`, and the numbers a corpus entry wants come from the
+  bundle that was actually written. A sweep is therefore resumable, and a second run over a folder that
+  gained one capture sweeps one capture. Measured on a folder of one: the first run 54.6 s (a 36 MB mobile
+  capture, 256 files, 3.1 MB of bundle), the second **0.7 s**.
+* **A key is where the capture sits, and nothing more**: its path under `<dir>`, extension dropped, with the
+  separators replaced (`sub/a.rdc` is `sub-a`). The index therefore names local files, which is local state
+  — the corpus keeps a key and a hash in git and the paths out of it (§4.17) — and what a capture is
+  *called* in a corpus stays the corpus's own word.
+
+A capture that cannot be replayed is a `failed` row carrying the engine's own sentence in `note`, and the
+run exits 1 with the failures named at the end: one unreadable file in a folder of thirty should not cost the
+other twenty-nine, and it should not be silent either. `sweep.json` is validated against the tool's own
+schema before it is written (§4.12) — a document this tool cannot validate is a document a consumer cannot
+either, and `validate <out>/sweep.json <schemaDir>` needs no kind, because the file's name says which one
+it is.
+
 ---
 
 ## 5. Worked examples
@@ -1473,6 +1528,7 @@ the answers look like answers, and only the source says what the library should 
 | `state <rdc> <eid>` | bound shaders per stage, render targets, depth target, root signature and every root parameter with its register, space and what is bound |
 | `shaders <rdc> <eid> [--disasm]` | the reflection: constant blocks with **names** and bind points, resource bindings, input/output signatures, the SHA-256 of the shader's own bytes per stage, and the disassembly on request |
 | `cb <rdc> <eid> <stage> <slot>` | the **named values** of one constant buffer, structs and arrays expanded |
+| `watch <rdc> <name> [--since A] [--until B] [--max-events N] [--stage <stage>] [--all]` | one reflection member's value at every event of a range, as one row per *change* — see below |
 | `textures <rdc> [filter] [--save <dir>]` | the texture list; `--save` decodes each one to PNG through `SaveTexture` |
 | `mesh <rdc> <eid> [instance] [max]` | post-VS geometry: what the vertex shader actually emitted |
 | `image <rdc> <eid> <out.bmp>` | the texture display at that event, written as a BMP (no PNG encoder needed) |
@@ -1499,7 +1555,12 @@ capture cannot: the JSON writer's escaping, separators and balance, the schema t
 `renderdoc.dll` it would load — skipping the DLL checks, rather than failing, when RenderDoc is not installed.
 
 **The bundle — `dump` and `bundle-verify`.** `dump` is one replay session turned into files, so the offline
-half (and a reader) can work without a device. It writes:
+half (and a reader) can work without a device. **A bundle is local state and is never committed**: it belongs
+to one `.rdc` on this machine, and the first two files below carry the capture's **absolute path** — which is
+the point (a bundle says which file it came from) and also why it must not be shared. The destination with no
+argument is `bundle`, relative to the *working directory*, and it is in `.gitignore` beside the sweep's
+`bundles/` (§4.21); the driver will not write into a directory that is not empty unless `--overwrite` is
+passed, so the accident to guard against is a *new* directory, not an existing one. It writes:
 
 | File | Content |
 |---|---|
@@ -1547,7 +1608,7 @@ its 2,132 collected ids were one state repeated past the last event; on `desktop
 back, and `--until` can narrow the range but no longer extend it past the frame's end. All of the gaps are
 written into the bundle's own `notInThisBundle` list, so a reader does not conclude that the frame had no
 copies. Nothing offline derives one numbering from the other: the mismatch between event ids and chunk indices is
-one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §4), and no item anywhere in that file
+one of the chunk-level findings the `Upstream` item tracks (`ROADMAP.md` §3), and no item anywhere in that file
 proposes to close it here.
 
 **The sweep is cached** (`sweep-<key>.txt` in the cache directory, keyed by the capture and the dump options
@@ -1578,12 +1639,69 @@ left in the reported state by earlier replay passes, real rows in every bundle t
 on any per-event reading of a state that sits between command lists -- and the two things that would
 make a parallel sweep honest are both out of reach: reproducing the serial history per worker costs
 the whole prefix (the last worker would pay the entire range), and splitting at command-list
-boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §4, `Upstream`).
+boundaries needs the event-id-to-chunk mapping the offline tool does not have (`ROADMAP.md` §3, `Upstream`).
 The attempt also left
 two Windows findings behind: a spawned child must be given a stdin it can use (an inherited slot it
 cannot takes its whole stdio down -- three "successful" workers once left three empty logs), and
 simultaneous replay-device creations can leave one hung at zero CPU with no error, so any such design
 needs a deadline and a serial fallback rather than an unbounded wait.
+
+**The same driver is a library** (`bin/rdc_replay.dll`, ABI in `src/cpp/api.h`, Python caller
+`src/py/rdc_replay.py`). `replay_dump.exe` is one command per process, which is right for a command line and
+wrong for a tool that asks several questions: the standup is ~4 s on a small capture and ~11 s on a 1.4 GB
+one, and every process pays it again. The library builds from the *same sources* — one command language, one
+dispatcher, so a library line and a batch line mean the same thing — and what it adds is a session held open
+across calls:
+
+| ABI | what it does |
+|---|---|
+| `RdcReplayAbi()` | the ABI's own version (`rdc_replay/1`); a caller refuses one it does not know rather than guessing |
+| `RdcReplayOpen(capture, log, err, errLen)` | a session; `capture` NULL or empty is a session with **no capture**, which answers `schema` and needs no device |
+| `RdcReplayCommand(session, line, out, err, errLen)` | one line in the batch syntax; returns the command's own exit code and the document it printed |
+| `RdcReplayClose(session)` · `RdcReplayFree(block)` | the session's teardown; and `free`, for the buffer the previous call returned |
+
+`RdcReplayOpen` reads exactly like the CLI's own path — the version guard first (a capture from a newer
+engine is refused by name, before a device exists), then `OpenFile`, then `OpenCapture` — and it returns the
+same sentences in `err` that `main` prints, because `GuardCaptureVersion` writes the message into a string
+the library can return rather than only to stderr. A command's *document* comes back in `out`; its progress
+and its own failure messages still go to the process's stderr, which is what a caller sitting in the same
+process sees anyway. One detail is not obvious and is worth the two lines it costs: `CaptureStdout` `_dup2`s
+a file opened `"wb"` over stdout, and `_dup2` gives the target the *source's* mode — so without
+`_setmode(_O_TEXT)` the library's document would carry LF where the command line carries CRLF. Measured
+before that fix: the same `info` was 435 bytes on the command line and 418 here, one byte per line. The
+bundle's own documents are written the same way on purpose and stay LF (a bundle's `capture.json`: 0 CRLF).
+
+**What a session is, exactly: a batch file.** The library's promise is not "a fresh engine per command" —
+it cannot be, because pipeline state at an id depends on how replay reached it (that is the paragraph on the
+parallel sweep). A session that runs eight commands gives the same text as a `batch` file holding the same
+eight lines, byte for byte: measured over `info`, `draws 5`, `state 270`, `statediff 270 300`, `debug`,
+`shaders 270`, `state 270 --json` and `crosscheck 270 --max 4` on `desktop-1`, including the rows that *move*
+when a state read follows a jump forward. One command per process is the other regime, and the CLI still
+offers it; a caller who needs it should not use a session for two questions.
+
+**The replay system is the process's, not the session's**, and that is the engine's rule rather than a design
+preference. The first version of the library shut the system down with each session, and the first session
+was clean while **every one after it faulted inside the teardown** — which is "initialise once per process"
+being enforced by a crash rather than by a message. So the DLL owns the system (and the log: one per
+process, named by the first session), a session owns a capture and its controller, and the teardown happens
+when the DLL unloads. RenderDoc's own application opens captures the same way. The first caller to lean on it
+is `sweep` (§4.21): one process, one session per capture, a folder at a time. The device-free half of that
+ABI is what the test suite checks — a session with no capture answering `schema`, a capture that is not there
+failing before a device would exist, and a capture from a future engine being refused with the guard's own
+sentence — while the text it produces is pinned by comparison against the executable and against `batch`.
+
+**A stale library is caught twice over, and it needs both.** `build --check` compares `bin/rdc_replay.dll`
+against `src/cpp` as its own artefact (§4.1), independently of the exe — measured: a library aged an hour
+behind a current exe is reported as the *only* stale one, exit 1 — and `build` rebuilds it (measured: a
+deleted DLL comes back in 4.5 s). What the gate cannot do is speak to a run in progress, and the driver's own
+warning cannot either: `WarnIfDriverIsStale` asks about the process it is running in, which under a library
+session is the *host* — `python.exe` — so it finds no `src\cpp` beside it and stays quiet exactly when the
+answers are the previous build's. `rdc_replay.stale_note()` closes that: when the DLL loads, the same
+comparison `build --check` makes (`rdc_driver.target_staleness`, not a second implementation of it) is asked
+about the file just loaded, and a stale one gets the driver's own two lines on stderr — *"this replay library
+is older than its sources: `src\cpp\x.cpp` was written N s later, so every answer from this session is the
+previous build's"* — with the build command under it. Nothing is printed when it cannot tell: a DLL copied out
+of the tree, a missing one (that is the "no library at" error, not a staleness warning) or a current one.
 
 **The probe is cached too, and bounded by the frame** (`probe-<key>.txt`: the same directory, header and
 one-row-per-line format as the sweep's, and the same two environment variables). `probe` sweeps the same ids
@@ -1707,6 +1825,33 @@ Three things to know about running it:
   says why, `done: exit N` means it finished, and neither means it died or was killed mid-run.
   (`replay_dump` writes that last line itself precisely because a log that just stopped used to be
   unreadable — a run that failed to open a missing capture looks exactly like one that hung there.)
+**One uniform across the frame (`watch`).** `cb` answers "what is in this block at this event"; the question
+it answers badly is "is this uniform right at the draw that matters and wrong at the next one", because that
+is a `cb` per event and forty documents to read. `watch <name>` reads every bound constant block at every
+event of a range and prints **one row per change**:
+
+    eid 284     vs  b0  View.TranslatedWorldToClip  = 0, 0, 0, 0 | 0, 0, 0, 0 | 0, 0, 0, 0 | 0, 0, 0, 0
+    eid 298     vs  b0  View.TranslatedWorldToClip  = -0.2726, 0.639458, 0, 0.874883 | 0.962127, 0.64…
+    eid 338     vs  b0  View.TranslatedWorldToClip  = 0, 0, 0, 0 | 0, 0, 0, 0 | 0, 0, 0, 0 | 0, 0, 0, 0
+    eid 341     vs  b0  View.TranslatedWorldToClip  = -0.2726, 0.639458, 0, 0.874883 | 0.962127, 0.64…
+
+That is `desktop-1` verbatim (`watch View.TranslatedWorldToClip --max-events 500`, 31 rows, 255 readings),
+and it is the whole value of the command in four lines: the same uniform is a matrix at 298 and 341 and zeros
+at 284 and 338 — the engine's own lazy zeroing, invisible to a `cb` at the wrong event. The name rules are
+pinned by the device-free selftest: the whole dotted path, or the last component when the request has no dot
+in it (`intensity` finds `Light.intensity`), both case-insensitively, and **nothing else** — a substring rule
+would watch `intensityScale` alongside `intensity` without saying so. A matched *struct* reports its members,
+because a struct's own value text is `-`. Note that `cb` prints nesting as indentation while `watch` names it
+as a path, so the two spell the same member differently on purpose.
+
+It is slow by nature — a constant-buffer read per event, measured at 15 ms per id over `desktop-1` — so it
+takes a range and reports what it actually read: `scanned`, `withState`, `blocksRead`, `valuesMatched`,
+`changes` and `found`. `found` false is the case worth knowing: the name matched nothing in any block of any
+event, which is a fact about the *question* (or about a frame whose blocks were never read) and not the same
+as "it never changed"; the log then says which commands list a block's names. It reads what it reads through
+the same code as `cb` (`BlockRead`, commands_state.cpp), so a `watch` row and a `cb` document cannot disagree
+about which buffer a block is.
+
 **Finding your way around a frame (the four navigation commands).** `find <substring> [max]` searches what the
 engine already publishes -- every call's name and marker path from the action list, every resource's name from
 the resource table -- and says which field matched, because `View` hitting a marker and `View` hitting a

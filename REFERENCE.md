@@ -1000,7 +1000,8 @@ capture, nine about the pair) and two driver texts. `goldens --check` compares t
 this machine — the offline half is ~36 s (every child runs without the stream cache (§4.8) and pays its own
 decode, and the pair's A/B reads both bundles) and the driver half is three replay sessions, one per capture
 that pins driver commands. On a machine with no GPU and no capture none of that is paid: both halves report
-themselves as not compared, which is what keeps CI fast and honest. One of the
+themselves as **not compared** — nothing runs, and nothing is claimed either — which is what keeps a run on a
+capture-less machine fast and honest. One of the
 three is held **by identity only** — `desktop-2` is a frame from a renderer that is not Unreal, and what a
 frame says about itself (its marker names, its resource names, its pass names) is its own, so that capture
 has no transcript, label, document or driver text here and its `commands` and `driverCommands` lists are

@@ -217,7 +217,7 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | What does this whole frame do, pass by pass, and what is off about it? | `report` — after a `dump` (REFERENCE §4.11) |
 | How do two captures differ (mobile vs desktop, before vs after)? | `passdiff`, then `replaydiff` (REFERENCE §4.16) |
 | Do the documents still match their contract? | `validate <bundle> schema`, `schema --check` |
-| How do I run any of this headless (CI, no GPU)? | `selftest`, `goldens --check`, `bundle-verify`, `schema --check` |
+| How do I run any of this headless (no GPU, no captures)? | `selftest`, `goldens --check`, `bundle-verify`, `schema --check` |
 
 Every command in that table has a worked example in §2.2 (offline) or §2.3 (driver); §2.4 is the order to run
 them in, and §2.5 is the recipes that use several at once.
@@ -582,16 +582,17 @@ silence.
 
 **M. "Run it headless."** Three regimes, and they should not be confused:
 
-* **CI, no GPU and no capture:** `selftest` (the hermetic suite — seconds, no device) and Pyright — that is the
-  whole gate in `.github/workflows/checks.yml`, and the fixture bundles in `tests/` are what make even the
-  report generator and the A/B testable there.
+* **A machine with neither the GPU nor the captures:** `selftest` (the hermetic suite — seconds, no device) and
+  Pyright. Those two are the whole gate, and **nothing in the repository runs them for you** — there is no CI
+  configuration and no hook, so this is what to run before pushing. The fixture bundles in `tests/` are what
+  make even the report generator and the A/B testable without a device.
 * **A machine with the captures but no GPU:** `goldens --check` (REFERENCE §4.17) — the transcripts, the labels
   and the self-A/B for the corpus in `goldens/`, plus the driver's device-free `schema --check`. The driver's own
   text needs a device, so without one that half is reported **not compared** rather than passed, and the command
   exits **2** when no capture of the corpus is present — "nothing compared", not "clean".
 * **A machine with the GPU and the capture:** the driver, gated — `probe` alone, one replay at a time,
   `debug --fail-on error` (REFERENCE §9) as the pass/fail line, `bundle-verify` over the artefacts, and the
-  before/after comparison of recipe I. Record what CI cannot cover rather than implying coverage.
+  before/after comparison of recipe I. Record what no gate covers rather than implying coverage.
 
 **N. "Keep the repo honest."** The gates, cheapest first, and what each one can and cannot see:
 

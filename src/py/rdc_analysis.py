@@ -16,9 +16,15 @@ Usage:
   python rdc_analysis.py resources <rdc> [limit] [nameFilter]   # id -> kind/size/name
   python rdc_analysis.py descriptors <rdc> [limit] [heapFilter] # descriptor heap contents
   python rdc_analysis.py verify   <rdc>          # framing/padding/payload checks, exit 1 on problems
+
+# `--driver D3D11|D3D12|Vulkan|OpenGL|GLES` names the capture's API for every command's chunk names (the
+# bundled table is D3D12's, so another driver needs the renderdoc-src tree; `bootstrap` fetches it). The same
+# thing for a whole shell is `$RDC_DRIVER`, and the flag wins over it.
+
   python rdc_analysis.py summary  <rdc>
   python rdc_analysis.py markers  <rdc>
   python rdc_analysis.py chunks   <rdc> [limit] [nameFilter]
+python rdc_analysis.py formats  <rdc>          # which formats the file holds, and what the parse decoded
   python rdc_analysis.py chunk    <rdc> <chunkIndex>
   python rdc_analysis.py draws    <rdc> [maxDraws]
   python rdc_analysis.py deps     <rdc> [maxResources] [table|dot|mermaid]
@@ -155,11 +161,13 @@ from rdc_ab import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_ab_render import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_image import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_cache import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+import rdc_chunkmap  # `_take_driver` asks it for the driver list
 from rdc_chunkmap import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_formats import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_table import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 import rdc_table  # noqa: F401  (used qualified: the format the entry point parsed and checked)
 from rdc_uses import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -258,6 +266,35 @@ def _take_format(cmd: str, argv: Sequence[str]) -> Tuple[List[str], str]:
         del rest[index:index + 2]
     return rest, fmt
 
+def _take_driver(cmd: str, argv: Sequence[str]) -> List[str]:
+    """The command's arguments with `--driver <name>` taken out, after setting this run's driver.
+
+    The driver is the *capture's* API rather than the command's -- a Vulkan capture has Vulkan chunks whatever
+    is asked of it -- so it belongs to the run, and this is the one place it can be set from: `rdc_chunkmap`
+    reads it for every command that prints a chunk name. `$RDC_DRIVER` says the same thing for a shell that
+    runs many commands; this flag wins over it.
+
+    An unknown name is refused with the list of the ones that exist. The loader treats a driver whose header
+    it cannot find as "a half-extracted tree" and quietly falls back to numeric ids -- the right answer for a
+    missing folder and exactly the wrong one for `vukan`, which would look like a capture nobody can name.
+    `--driver` is taken out *before* the positional arguments are read, for the reason `--format` is: written
+    as `chunks <rdc> --driver vulkan 20`, the value would otherwise be read as the limit.
+    """
+    rest = list(argv)
+    if '--driver' in rest:
+        index = rest.index('--driver')
+        named = None
+        for known in rdc_chunkmap.KNOWN_DRIVERS:
+            if index + 1 < len(rest) and rest[index + 1].lower() == known.lower():
+                named = known    # canonical: the path and the driver table are looked up by this spelling
+        if named is None:
+            print('usage: rdc_analysis.py %s <rdc> [args] [--driver %s]'
+                  % (cmd, '|'.join(rdc_chunkmap.KNOWN_DRIVERS)))
+            sys.exit(2)
+        rdc_chunkmap.set_driver(named)
+        del rest[index:index + 2]
+    return rest
+
 def _take_drops(cmd: str, argv: Sequence[str]) -> Tuple[List[str], List[str]]:
     """`(argv without the --drop pairs, the filters they named)`, in the order they were written.
 
@@ -345,6 +382,10 @@ def _dispatch() -> None:
         print(__doc__)
         return
     cmd, path = argv[1], argv[2]
+    # `--driver` is taken out before any command reads its own positionals, the way `--format` is: it is a
+    # property of the run -- the capture's API, not the command's -- and every command that prints a chunk name
+    # reads it back through `rdc_chunkmap.default_driver`.
+    argv = _take_driver(cmd, argv)
     if cmd == 'chunk':
         cmd_chunk_detail(path, int(argv[3]))
     elif cmd == 'draws':
@@ -358,6 +399,9 @@ def _dispatch() -> None:
         cmd_deps(path, _arg(argv, 3, 40), deps_fmt)
     elif cmd == 'memory':
         cmd_memory(path, _arg(argv, 3, 20))
+    elif cmd == 'formats':
+        rest, fmt = _take_format('formats', argv)
+        cmd_formats(path, fmt)
     elif cmd == 'chunks':
         cmd_chunks(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
     elif cmd == 'verify':

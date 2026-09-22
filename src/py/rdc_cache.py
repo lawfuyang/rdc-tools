@@ -355,6 +355,13 @@ def load_stream(path: str, section_index: int = 0) -> Tuple[CaptureInfo, Buffer,
     turns the cache off and `$RDC_CACHE_DIR` moves it. A hit is an `mmap` of the cache file, not a
     copy of it (see `cache_lookup`): anything that needs plain bytes -- to compare with `==`, or to
     keep after the call -- wraps it in `bytes(stream)`.
+
+    A *miss* that could store a cache is served from the map too: the copy that produced the cache is
+    released here rather than held for the rest of the command. That matters because the largest capture
+    here is a 1.5 GB stream and every caller allocates on top of it (the chunk walk, `find_all`'s runs,
+    the report), so a cold run would otherwise hold the whole stream on the heap while it works. The
+    decompression itself still peaks at one copy -- producing the bytes *is* allocating them -- and the
+    label stays the decompression's either way: it says how the bytes were made, not where they came from.
     """
     info = parse_container(path)
     hit = cache_lookup(path, info, section_index)
@@ -362,7 +369,10 @@ def load_stream(path: str, section_index: int = 0) -> Tuple[CaptureInfo, Buffer,
         return info, hit[0], hit[1]
     stream, method, blocks = _decompress_section(info, section_index)
     cache_store(path, info, section_index, stream, method, blocks)
-    return info, stream, _method_label(method, blocks)
+    warmed = cache_lookup(path, info, section_index)
+    if warmed is not None:
+        return info, warmed[0], _method_label(method, blocks)
+    return info, stream, _method_label(method, blocks)    # no cache to map (see `cache_dir`): the heap copy
 
 __all__ = [
     'CACHE_ALIGN',

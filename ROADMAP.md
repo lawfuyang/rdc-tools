@@ -31,14 +31,14 @@ shader disassembly (`GetShader` → `ShaderReflection`), the non-frame `.rdc` se
 state (`GetPipelineState`), true EID mapping (`SetFrameEvent` and the action list), typed constant-buffer values
 and the `DebugDumpState`-style helpers built on them (`GetCBufferVariableContents`), a per-pass summary (a fold
 over the action list), Vulkan support (replay is API-agnostic), and texture-format identification (which landed
-anyway: `resources` prints the DXGI format and dimensions of every texture).
+anyway: `resources` prints the DXGI format and dimensions of every texture, and `formats` now audits them).
 
 The same rule was applied to what was already **built**: `float` and `pattern` (searching the raw stream for a
 uniform's *value*), `sig` (decoding vertex signatures), `rootconst` (dumping root-constant values) and `report`
 (an inventory of UE shader/policy strings) were removed, together with the `dxbc`/`dump-shaders` harvest that
 picked GI-ish strings out of containers. Each one was a worse answer to a question `GetCBufferVariableContents`
 or `ShaderReflection` answers exactly. What is left is deliberately offline: the container and the chunk stream,
-`draws`/`resources`/`descriptors`/`rootsig`, the cache, `verify`, and the structural search commands.
+`draws`/`resources`/`descriptors`/`rootsig`, the cache, `verify`, `formats`, and the structural search commands.
 
 **The report generator was the one carve-out, and it did not break the rule.** It added no new extraction:
 it consumes what `replay_dump` and the offline parser already produce, and puts analysis, ranking and
@@ -50,14 +50,18 @@ The **D3D12 harness** (§2.5) absorbs nothing: it exists for the one question re
 shader does with inputs the capture does not contain — so no item here is "free with a harness".
 
 Current state for reference: the offline tool parses the `.rdc` container, decompresses the frame-capture stream
-(LZ4 through the built `bin/rdc_lz4.dll`, and Zstd optional) and caches it on disk so
+(LZ4 through the built `bin/rdc_lz4.dll` — and a Zstd section without the optional decoder refuses with the fix
+in the message rather than a traceback — and caches it on disk so
 repeat
-commands are instant (REFERENCE §4.8), walks the
-SDChunk stream, decodes the main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the barriers, the render-target
+commands are instant (REFERENCE §4.8; a cache *hit* is an `mmap`, and a cold run is served from the map it just
+wrote rather than holding the 1.5 GB stream on the heap), walks the
+SDChunk stream, names chunks for the capture's driver (`--driver`/`$RDC_DRIVER`, D3D12 by default), decodes the
+main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the barriers, the render-target
 bindings, the clears, the discards and the copies (the use ledger behind `deps` and `memory`, REFERENCE §4.15),
 the resource table
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (REFERENCE §4.10) and the root signatures (REFERENCE §3.4), inventories the
-DXBC/DXIL containers, and can check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
+DXBC/DXIL containers, audits the formats it finds (`formats`, the offline half of the driver's audit), and can
+check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
 rendered image, the cross-checks between a shader's reflection and the state it is given (`crosscheck`), the
 per-pass counter fold (`counters --per-pass`), the picture commands with their subresources and overlays
@@ -128,9 +132,11 @@ say so explicitly, and should degrade gracefully when it is missing.
   `SetCaptureOptionU32`, `SetCaptureTitle`, and `SetObjectAnnotation`/`SetCommandAnnotation` for rich labels. A
   small launcher could capture with *our own* markers and object names for the cases the engine's own names miss
   — which is exactly the class of thing that makes a summary sharper. (~2–3 d)
-* **Other APIs' names** — the offline tool's chunk-name loader already takes a driver (`load_chunk_names(driver=...)`);
-  expose it, and accept that a Vulkan capture's chunks will be read by the same code with different enums. The
-  replay driver is API-agnostic already; the analysis is where the D3D12 assumptions live. (~1 d, plus evidence)
+* **Other APIs' names** — `--driver D3D11|D3D12|Vulkan|OpenGL|GLES` (and `$RDC_DRIVER`) selects the driver the
+  chunk names come from, and the *bundled* table is D3D12's only: naming a Vulkan or D3D11 capture needs the
+  source tree, and what is left here is doing the same for the other direction — the *analysis* is where the
+  D3D12 assumptions live (the payload decoders, the resource table), so a Vulkan capture can be named and not
+  yet read. (~1 d + evidence from a real capture of another API)
 * **D3D12 harness** (kept for completeness) — see §2.5 below.
 * **Upstream** — the chunk-level findings (event ids vs chunk indices, what `InitialContents` really holds, the
   crash-handle server, the `TextureSave`/`GetTextureData` subresource split) are the kind of thing RenderDoc's
@@ -173,34 +179,14 @@ replay driver) and DXIL compilation to a PSO — `dxc` is available with the UE 
 
 **Effort.** ~2–3 days for a single-purpose harness; scope it to one shader at a time.
 
-## 3. P3 — Robustness and scope
-
-* **Zstd without the dependency** — either vendor a decoder or fail with a clear message (today it needs
-  `pip install zstandard`). (~4 h)
-* **Memory-mapped stream access** — avoid holding ~1.5 GB in RAM for the largest captures. (~4 h)
-* **Non-D3D12 driver names** — `load_chunk_names(driver=...)` already takes a driver; expose it on the CLI.
-  (~1 h)
-* **Format coverage in the offline view** — the same audit `formats` does for the engine's textures (REFERENCE
-  §9), for the file's payloads: what was decoded, what was skipped, and why. (~2 h)
-
-## 4. Suggested order
+## 3. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
-item of §1–§3 appears exactly once, so this is the whole list in one place rather than a selection of it; each
+item of §1–§2 appears exactly once, so this is the whole list in one place rather than a selection of it; each
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**Phase 1 — robustness, when a capture asks for it (~half a day each).** Small, independent, and none of them
-blocks anything above:
-
-1. **Zstd without the dependency (§3, ~4 h)** — vendor a decoder or refuse with a clear message, instead of
-   needing `pip install zstandard`.
-2. **Memory-mapped stream access (§3, ~4 h)** — the largest capture is ~1.5 GB held in RAM today.
-3. **Non-D3D12 driver names (§3, ~1 h)** — the loader already takes `driver=`; the CLI does not expose it.
-4. **Format coverage in the offline view (§3, ~2 h)** — the engine-side half landed with `formats` (REFERENCE
-   §9); the file-side half is what is left.
-
-**Phase 2 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
+**Phase 1 — blocked, conditional, or standing.** Not ordered, because each waits on something outside this
 list — a device, a debug-info capture, evidence, or a decision:
 
 1. **Remote replay (§2, ~2–3 d + a device)** — blocked on device access and server setup, but it is the
@@ -212,5 +198,6 @@ list — a device, a debug-info capture, evidence, or a decision:
    program.
 4. **A capture-side annotation layer (§2, ~2–3 d)** — needs an installed DLL, and a scenario where our own
    markers beat the engine's names.
-5. **Other APIs' names (§2, ~1 d + evidence)** — needs a capture from another API in hand.
+5. **Other APIs' names (§2, ~1 d + evidence)** — naming them is done (`--driver`); reading their payloads is
+   not, and that needs a capture from another API in hand.
 6. **Upstream (§2)** — not a work item and not a phase: a standing intention to file what gets confirmed.

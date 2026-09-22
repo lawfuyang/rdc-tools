@@ -13,7 +13,7 @@ import rdc_profile
 
 import os
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 def load_format_names(src_root: Optional[str] = None) -> Dict[int, str]:
     """DXGI format id -> short name (`R8G8B8A8_UNORM`): the tree's copy of the enum, else the bundled table.
@@ -28,6 +28,117 @@ def load_format_names(src_root: Optional[str] = None) -> Dict[int, str]:
     if not raw:
         raw = rdc_chunknames.FORMAT_NAMES
     return {fmt_id: name.replace('DXGI_FORMAT_', '', 1) for fmt_id, name in raw.items()}
+
+#: Every class `classify_format` can return, and nothing else -- so a test can sweep the whole name table and
+#: assert it never lands somewhere outside this list. sRGB is deliberately *not* one of them: it is a flag on a
+#: layout (`R8G8B8A8_UNORM_SRGB` is still UNORM's components), and a class for it would say a SRGB texture has
+#: no components.
+CLASSES = ('unorm', 'snorm', 'float', 'uint', 'sint', 'depth', 'block', 'packed', 'yuv', 'typeless', 'other')
+
+#: The video layouts: a YUV plane, or a palettised block, with no plain texel size at all. Listed rather than
+#: inferred, because the names carry no rule -- `NV12` is two planes and `AI44` is one byte of palette index
+#: plus one of alpha -- and guessing at one of them would be a wrong number where "a video layout" is right.
+_VIDEO_FORMATS = ('NV12', 'NV11', 'P010', 'P016', 'P208', 'P216', 'P416', '420_OPAQUE', 'AI44', 'IA44',
+                  'AYUV', 'Y410', 'Y416', 'YUY2', 'Y210', 'Y216', 'P8', 'A8P8')
+
+#: A block-compressed format's element is a whole block, so its "widths" are per block and its size is the
+#: block's: 8 bytes for BC1/BC4 (4x4 texels, 4 bits each) and 16 for the rest, 4x4 or 4x5. Kept as a table
+#: rather than derived: deriving it means re-implementing the format table the engine already has.
+_BLOCK_BYTES = {'BC1': 8, 'BC4': 8}
+
+def classify_format(name: str) -> Dict[str, Any]:
+    """What a DXGI **name** says about itself, for the format coverage audit (`formats`).
+
+    The name is the input, not the enum value: the tool reads names out of the capture's own resource table
+    (`load_format_names`), and a classifier that wanted the numeric id could not answer for a format the
+    bundled table has never heard of. So everything here is a *reading of the name*, and `other` is the honest
+    answer for a name whose shape this does not know -- an unknown format becomes a row in the audit rather
+    than an exception, which is the whole point of an audit.
+
+    The reading is deliberately shallow: which type the components are, how many and how wide, whether the
+    layout is block-compressed, packed or a video one, and whether the bits are typeless -- the one class that
+    changes what a *picture* of it means, because the display path needs a cast. It does not try to be the
+    engine's `ResourceFormat`: the driver's `formats` prints that one directly, and this half exists for the
+    captures and formats a driver is not around to describe.
+    """
+    upper = name.upper()
+    typeless = upper.endswith('_TYPELESS')
+    srgb = upper.endswith('_SRGB') or '_SRGB_' in upper
+    body = upper
+    for suffix in ('_TYPELESS', '_SRGB'):
+        if body.endswith(suffix):
+            body = body[: -len(suffix)]
+
+    shape: Dict[str, Any] = {'class': 'other', 'components': 0, 'bits': 0, 'layout': '',
+                             'srgb': srgb, 'typeless': typeless, 'blockCompressed': False, 'note': ''}
+    if not body or body == 'UNKNOWN':
+        shape['note'] = 'the enum has no name for it'
+        return shape
+
+    head = body.split('_', 1)[0]
+    for block, size in _BLOCK_BYTES.items():
+        if head.startswith(block):
+            shape.update({'class': 'block', 'blockCompressed': True, 'layout': head,
+                          'note': '%d bytes per 4x4 block (%s)' % (size, '4 bits a texel'
+                                                                   if block in ('BC1', 'BC4') else '8')})
+            return shape
+    if head.startswith('BC'):
+        shape.update({'class': 'block', 'blockCompressed': True, 'layout': head,
+                      'note': '16 bytes per block (4x4, or 4x5 for BC7)'})
+        return shape
+    if body in _VIDEO_FORMATS:
+        shape.update({'class': 'yuv', 'note': 'a palettised or video layout: no plain texel size'})
+        return shape
+
+    # The channel widths: the digit runs before the type suffix (`R10G10B10A2_UNORM` -> 10,10,10,2; `R8G8_B8G8`
+    # and `G8R8_G8B8` are two texels in one 16-bit word, which is why they are their own class). Split by hand
+    # rather than with a regular expression: this module reads the *name* and nothing else, and a three-line
+    # scan of digits and non-digits needs no import to explain.
+    channels: List[int] = []
+    digits = ''
+    for char in head + 'X':
+        if char.isdigit():
+            digits += char
+        elif digits:
+            channels.append(int(digits))
+            digits = ''
+    shape['components'] = len(channels)
+    shape['bits'] = channels[0] if channels and len(set(channels)) == 1 else 0
+    shape['layout'] = ':'.join(str(part) for part in channels)
+
+    if body.startswith('D') and (channels or '_' in body):    # D32_FLOAT, D24_UNORM_S8_UINT, D16_UNORM
+        shape.update({'class': 'depth', 'components': 1, 'bits': channels[0] if channels else 0})
+        if 'S8' in body:
+            shape['note'] = 'depth and stencil in one element'
+        return shape
+    if head in ('R8G8', 'G8R8') or '_B8G8' in head or '_G8B8' in head:
+        shape.update({'class': 'packed', 'components': 2, 'bits': 8,
+                      'note': 'two texels per 16-bit element'})
+        return shape
+
+    # The type comes from a *suffix*, and a name without one is not guessed at: defaulting to `unorm` would make
+    # `SOMETHING_NEW_FROM_A_DRIVER` read as a plain 8-bit format, which is the one mistake this classifier
+    # cannot afford -- the audit's whole point is that an unknown name is a row that says so.
+    kind = ''
+    if '_FLOAT' in body:
+        kind = 'float'
+    elif '_SNORM' in body:
+        kind = 'snorm'
+    elif '_UINT' in body:
+        kind = 'uint'
+    elif '_SINT' in body:
+        kind = 'sint'
+    elif '_UNORM' in body:
+        kind = 'unorm'
+    elif '_SHAREDEXP' in body:
+        kind = 'float'
+        shape['note'] = 'a shared exponent across the components'
+    shape['class'] = 'typeless' if typeless else (kind or 'other')
+    if typeless:
+        shape['note'] = 'no type of its own: a picture needs `--cast` to say how to read the bits'
+    elif not kind:
+        shape['note'] = 'no type in the name: this table does not know the layout'
+    return shape
 
 def _parse_resource(blob: Buffer, desc_off: int) -> Optional[ResourceInfo]:
     """Decode the `D3D12_RESOURCE_DESC` of one creation payload, or None if it does not fit.

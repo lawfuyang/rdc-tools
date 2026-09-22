@@ -405,7 +405,10 @@ class TestLoadStream(CmdCase):
     def test_lz4(self):
         chunks = [self.ch('PushMarker', b'Marker\x00')]
         _, stream, how = R.load_stream(self.cap(*chunks, lz4=True))
-        self.assertEqual(stream, b''.join(chunks))
+        # `bytes(...)` because a stream may be an `mmap` of the cache file now -- a cold run is served from the
+        # map it just wrote, not from the heap buffer that produced it (see `load_stream`) -- and a map does
+        # not compare equal to a `bytes` however equal its contents are.
+        self.assertEqual(bytes(stream), b''.join(chunks))
         self.assertEqual(how, 'lz4(1 blocks)')
 
 

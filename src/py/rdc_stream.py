@@ -271,10 +271,26 @@ def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
 def decompress_zstd(blob: Buffer) -> bytes:
     """Decompress a Zstd section body.
 
-    The optional dependency is imported *inside* the function on purpose: the module stays
-    importable without `zstandard` installed, and calling this without it raises ImportError.
+    The optional dependency is imported *inside* the function on purpose: the module stays importable
+    without `zstandard` installed, so an LZ4 capture -- which is what this tool's own captures are -- needs
+    nothing extra. What a Zstd capture gets without it is the refusal below rather than a bare
+    `ModuleNotFoundError`: the module's absence is a *missing decoder*, and the message has to say which
+    capture needs one and what the fix is, because the alternative reading ("the tool is broken") is the
+    one a traceback invites.
+
+    Why a message rather than a vendored decoder: Zstd's entropy stage (FSE plus Huffman, two interleaved
+    bitstreams) is an order of magnitude more code than the LZ4 decoder in `third_party/lz4`, and the
+    project vendors the decoder it can read. `pip install zstandard` is one command, and a capture that
+    needs it says so before anything else happens.
     """
-    import zstandard  # optional dependency, imported lazily
+    try:
+        import zstandard  # optional dependency, imported lazily
+    except ImportError:
+        raise FrameError(
+            "this capture's frame section is Zstd-compressed and no Zstd decoder is installed: "
+            "`pip install zstandard` is the whole fix -- nothing else in the tool uses it, and a capture "
+            "compressed with LZ4 needs nothing extra (that is what `bin/rdc_lz4.dll` is for, and what every "
+            'capture this project has is compressed with)') from None
     dctx = zstandard.ZstdDecompressor()
     # data may be a u32 block-size prefix followed by one or more zstd frames
     if blob[:4] == ZSTD_MAGIC:

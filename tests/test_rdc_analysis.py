@@ -380,10 +380,11 @@ class TestDecompressZstd(unittest.TestCase):
         self.assertEqual(out, b'RAWBODY')
         self.assertEqual(seen, [b'RAWBODY'])
 
-    def test_missing_module_propagates_import_error(self):
+    def test_a_missing_zstd_decoder_is_a_clear_refusal(self):
         with mock.patch.dict(sys.modules, {'zstandard': None}):
-            with self.assertRaises(ImportError):
+            with self.assertRaises(R.FrameError) as caught:
                 R.decompress_zstd(R.ZSTD_MAGIC + b'BODY')
+                self.assertIn('pip install zstandard', str(caught.exception))
 
 class TestGetStream(TempDirCase):
     def test_raw_section(self):
@@ -391,13 +392,13 @@ class TestGetStream(TempDirCase):
         info = R.parse_container(path)
         stream, how = R.get_stream(info)
         self.assertEqual(how, 'raw')
-        self.assertEqual(stream, info['_data'][info['sections'][0]['dataOffset']:][:len(stream)])
+        self.assertEqual(bytes(stream), info['_data'][info['sections'][0]['dataOffset']:][:len(stream)])
 
     def test_lz4_section(self):
         chunks = [F.chunk(1000, b'payload-' * 20)]
         path = self.capture_path(chunks, lz4=True, block_count=2)
         stream, how = R.get_stream(R.parse_container(path))
-        self.assertEqual(stream, b''.join(chunks))
+        self.assertEqual(bytes(stream), b''.join(chunks))
         self.assertEqual(how, 'lz4(2 blocks)')
 
     def test_zstd_section(self):
@@ -422,7 +423,7 @@ class TestGetStream(TempDirCase):
         with mock.patch.dict(sys.modules, {'zstandard': mod}):
             stream, how = R.get_stream(R.parse_container(self.path('z.rdc', data)))
         self.assertEqual(how, 'zstd')
-        self.assertEqual(stream, body)
+        self.assertEqual(bytes(stream), body)
         self.assertEqual(seen, [body])
 
     def test_section_index_selects_other_sections(self):
@@ -812,7 +813,7 @@ class TestStreamCaching(CacheCase):
         R.load_stream(self.capture)
         os.remove(self.cache_file())
         _, stream, how = R.load_stream(self.capture)
-        self.assertEqual(stream, self.stream)
+        self.assertEqual(bytes(stream), self.stream)
         self.assertEqual(how, 'lz4(2 blocks)')
         self.assertTrue(os.path.isfile(self.cache_file()))
 
@@ -822,7 +823,7 @@ class TestStreamCaching(CacheCase):
         self.release_container()
         F.write_bytes(self.capture, F.capture(other, lz4=True))
         _, stream, how = R.load_stream(self.capture)
-        self.assertEqual(stream, b''.join(other))
+        self.assertEqual(bytes(stream), b''.join(other))
         self.assertEqual(how, 'lz4(1 blocks)')
 
     def test_an_unusable_cache_directory_only_warns_once(self):

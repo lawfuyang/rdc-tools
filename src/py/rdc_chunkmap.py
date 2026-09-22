@@ -311,7 +311,29 @@ def _warn_bundled_names(src_root: str, missing: List[str]) -> None:
         '         number (see README section 1.1).\n' % (version, why))
 
 
-def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: str = 'D3D12') -> Dict[int, str]:
+#: The drivers whose chunk enums this tool reads, and the list a `--driver` typo is refused with. RenderDoc
+#: keeps one folder per API (`renderdoc/driver/<name>/<name>_common.h`), so these are its names; the case is
+#: the path's and is lowered where the path is built. The **bundled table is D3D12's only**, so another driver
+#: needs the source tree -- without it the names fall back to numbers with the usual warning, and that warning
+#: is about a half-extracted tree, not about a typo, which is why a name outside this list is refused rather
+#: than passed through.
+KNOWN_DRIVERS = ('D3D11', 'D3D12', 'Vulkan', 'OpenGL', 'GLES')
+
+#: This run's driver when `--driver` or `$RDC_DRIVER` named one: a module-level default rather than a
+#: parameter threaded through every `cmd_*`, because the driver is a property of the *capture* rather than of
+#: the command -- a Vulkan capture has Vulkan chunks whatever is asked of it, so one run reads names one way.
+_DRIVER: Optional[str] = None
+
+def set_driver(name: str) -> None:
+    """Set the driver this run reads chunk names for (the CLI's `--driver`, or `$RDC_DRIVER`)."""
+    global _DRIVER
+    _DRIVER = name
+
+def default_driver() -> str:
+    """The driver this run reads names for: `--driver` first, then `$RDC_DRIVER`, then D3D12."""
+    return _DRIVER or os.environ.get('RDC_DRIVER', '') or 'D3D12'
+
+def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: Optional[str] = None) -> Dict[int, str]:
     """Build the chunk-id -> name map: the tree's enums where they are, the bundled table where they are not.
 
     The tree is asked for first (`rdc_renderdoc_src.ensure`), which fetches the latest tagged RenderDoc source
@@ -324,10 +346,15 @@ def load_chunk_names(src_root: str = RENDERDOC_SRC, driver: str = 'D3D12') -> Di
     release, or half-extracted no longer costs the names of the ids it does not mention. Before the table
     existed, the second case printed numeric ids.
 
+    `driver` names the capture's API and defaults to this run's (`default_driver`): a Vulkan capture's chunks
+    are named from `driver/vulkan/vulkan_common.h`, and the bundled table has no Vulkan names, so a driver
+    other than D3D12 is a question only the source tree can answer.
+
     Warns once on stderr while the tree is incomplete, naming the version the bundled names are from; the rest
     of the tool is unaffected either way, because a name is only ever printed (README section 1.1).
     """
     global _SRC_WARNED
+    driver = driver or default_driver()
     src_root = rdc_renderdoc_src.ensure(src_root)
     names: Dict[int, str] = dict(rdc_chunknames.SYSTEM_CHUNKS)
     names.update(rdc_chunknames.DRIVER_CHUNKS.get(driver, {}))
@@ -429,6 +456,13 @@ def cmd_chunknames(argv: Sequence[str] = ()) -> int:
     `--out <file>` and `--src <tree>` are for a caller that is not this repository: a test, or a script
     keeping a table for another RenderDoc release beside the tool.
     """
+    # The checked-in table is D3D12's (`DRIVER_CHUNKS` is keyed by driver and this file carries one), so a run
+    # that named another driver has no table here to check. Exit 2 is this command's "nothing to compare with"
+    # code, and saying that beats reporting a D3D12 verdict to somebody who asked about Vulkan.
+    if default_driver() != 'D3D12':
+        print("chunk-names: the bundled table is D3D12's; --driver %s has no table here to check"
+              % default_driver())
+        return 2
     write = '--write' in argv
     out = table_path()
     src_root = RENDERDOC_SRC

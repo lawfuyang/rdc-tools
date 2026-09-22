@@ -67,6 +67,7 @@ extern int g_Indent;         // output.cpp: the writer's nesting level
 extern FILE *g_LogFile;      // capture.cpp: the log, or NULL for stderr
 extern ULONGLONG g_Start;    // capture.cpp: the process start, for the timing column
 extern pGetVersionString g_GetVersionString;    // capture.cpp: resolved from the DLL, printed in headers
+extern std::string g_DllOverride;    // capture.cpp: `--dll <path>`, ahead of $RDC_RENDERDOC_DLL
 
 // --------------------------------------------------------------------------- limits
 //
@@ -84,6 +85,7 @@ constexpr int kMaxValueDepth = 16;
 std::string ResultText(const ResultDetails &res);
 std::string UsageText(ResourceUsage usage);
 std::string SeverityText(MessageSeverity severity);
+bool SeverityFromName(const char *name, MessageSeverity &out);
 std::string CounterText(GPUCounter counter);
 const char *StageName(ShaderStage stage);
 char RegisterLetter(DescriptorCategory category);
@@ -266,6 +268,26 @@ HMODULE LoadReplayDLL();
 bool InitialiseReplay(HMODULE dll, int argc, char **argv);
 ICaptureFile *OpenCaptureFile(HMODULE dll);
 void PrintCaptureHeader(ICaptureFile *file, const char *path);
+
+//: The container's fixed 32-byte header, as far as the version guard needs it -- RenderDoc's own
+//: `FileHeader` (serialise/rdcfile.cpp): `magic "RDOC" | version u32 | headerLength u32 |
+//: progVersion 16 bytes, NUL-padded`. The replay API has no accessor for it, so the guard reads it
+//: here, exactly as the offline tool reads the same bytes (`rdc_stream.parse_container`).
+struct CaptureVersion
+{
+  uint32_t logfile = 0;    // the logfile format version, which the engine also checks itself
+  std::string program;     // "1.46 e4bd23": the RenderDoc that recorded it, and its commit
+};
+
+bool ReadCaptureVersion(const char *path, CaptureVersion &out);
+//: `1.46`, `1.46 e4bd23` and `v1.9.2` all name a release; anything else does not, and says so.
+bool ParseMajorMinor(const std::string &text, int &major, int &minor);
+//: -1 engine older, 0 equal, +1 engine newer; `known` false when either side does not parse, which
+//: is deliberately not a verdict -- a guard that guesses is worse than no guard.
+int CompareMajorMinor(const std::string &engine, const std::string &capture, bool &known);
+//: Refuse a capture recorded by a newer RenderDoc than the engine about to replay it, before the
+//: engine is asked to do anything: a `Fail` code (1) when it refuses, 0 otherwise.
+int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven);
 bool ParseInt(const char *text, int &value);
 int ToInt(const std::string &text, int fallback);
 
@@ -443,7 +465,33 @@ int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, b
 std::string SignatureLinkText(const SigParameter &written, const SigParameter &read);
 int CmdCrosscheck(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int since,
                   int until, int maxEvents, int maxRows);
-int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path);
+//: One debug message's identity and reach: what makes two of them "the same message", and what they
+//: did over the frame.
+//:
+//: The engine gives every distinct message a `messageID` (its hash of the text and where it came
+//: from), which is the whole reason this can be a table rather than a wall -- a validation error
+//: repeated at 400 events is one row with a count. Severity, category and source are part of the
+//: identity rather than decoration: the same id reported at another severity is another finding.
+//: `firstEid`/`lastEid` turn "somewhere in the frame" into a range, and `text` is the first
+//: description seen -- the engine's id is derived from the text, so every member of a group carries
+//: the same one.
+struct DebugGroup
+{
+  MessageSeverity severity = MessageSeverity::Info;
+  MessageCategory category = MessageCategory::Undefined;
+  MessageSource source = MessageSource::API;
+  uint32_t messageID = 0;
+  uint32_t firstEid = 0;
+  uint32_t lastEid = 0;
+  uint32_t count = 0;
+  std::string text;
+};
+
+//: The messages folded into groups, most severe first, then the loudest, then the earliest: the
+//: order a reader triages in, and stable for equal keys so two runs print the same table.
+std::vector<DebugGroup> GroupDebugMessages(const rdcarray<DebugMessage> &messages);
+int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::vector<std::string> &args);
 int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what);
 int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid);
 int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *batchPath);

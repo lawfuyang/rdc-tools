@@ -646,6 +646,68 @@ int CmdSelftest()
     RemoveDirectoryA(dir.c_str());
   }
 
+  // -------------------------------------------------------- the version guard (capture.cpp)
+  {
+    // Two pure functions over strings and one that reads 32 bytes of a file, so all of it is
+    // checked here rather than in the field: this decides whether a run is refused, and the one
+    // interesting case beyond "equal" is that the compare is *numeric* -- "1.9" is older than
+    // "1.10", and a string compare answers the opposite.
+    int major = 0, minor = 0;
+    t.Check(ParseMajorMinor("1.46", major, minor) && major == 1 && minor == 46,
+            "version-parse-plain", "1.46 did not parse as 1.46");
+    t.Check(ParseMajorMinor("1.46 e4bd23", major, minor) && major == 1 && minor == 46,
+            "version-parse-with-commit", "the header's `version commit` form did not parse");
+    t.Check(ParseMajorMinor("v1.9.2", major, minor) && major == 1 && minor == 9,
+            "version-parse-tag", "a release tag did not parse");
+    t.Check(!ParseMajorMinor("1", major, minor), "version-parse-refuses-a-bare-major",
+            "'1' was accepted as a version");
+    t.Check(!ParseMajorMinor("unknown", major, minor),
+            "version-parse-refuses-what-is-not-a-version", "'unknown' was accepted as a version");
+
+    bool known = false;
+    t.Check(CompareMajorMinor("1.46", "1.46 e4bd23", known) == 0 && known, "version-equal",
+            "the same release compared as a difference");
+    t.Check(CompareMajorMinor("1.45", "1.46 e4bd23", known) == -1 && known,
+            "version-older-is-older", "an older engine did not compare as older");
+    t.Check(CompareMajorMinor("1.47", "1.46 e4bd23", known) == 1 && known, "version-newer-is-newer",
+            "a newer engine did not compare as newer");
+    t.Check(CompareMajorMinor("1.9", "1.10 x", known) == -1 && known,
+            "version-compares-numerically", "1.9 and 1.10 compared as text");
+    t.Check(CompareMajorMinor("", "1.46", known) == 0 && !known, "version-unknown-is-not-a-verdict",
+            "an unparsable engine version produced a verdict");
+
+    // The header is read rather than asked for -- the replay API has no accessor -- so its offsets
+    // are pinned against bytes written the way `rdcfile.cpp` writes them.
+    const std::string path = DefaultLogStem() + ".capture";
+    unsigned char header[32] = {0};
+    memcpy(header, "RDOC", 4);
+    header[8] = 0x02;
+    header[9] = 0x01;    // logfile version 258, little-endian, as every capture in the corpus has it
+    memcpy(header + 16, "1.46 e4bd23", 11);
+
+    FILE *f = fopen(path.c_str(), "wb");
+    if(f == NULL)
+      return Fail(1, "cannot write %s for the selftest", path.c_str());
+    fwrite(header, 1, sizeof(header), f);
+    fclose(f);
+
+    CaptureVersion capture;
+    t.Check(ReadCaptureVersion(path.c_str(), capture) && capture.logfile == 258 &&
+                capture.program == "1.46 e4bd23",
+            "capture-version-reads-the-header", "the header was not read as the engine writes it");
+    t.Check(!ReadCaptureVersion((path + ".missing").c_str(), capture),
+            "capture-version-refuses-a-missing-file", "a file that is not there produced a version");
+
+    FILE *notCapture = fopen(path.c_str(), "wb");
+    if(notCapture == NULL)
+      return Fail(1, "cannot write %s for the selftest", path.c_str());
+    fwrite("RDX!", 1, 4, notCapture);    // 4 of the 32 bytes: neither the magic nor the length
+    fclose(notCapture);
+    t.Check(!ReadCaptureVersion(path.c_str(), capture), "capture-version-refuses-not-a-capture",
+            "a file that is not a container produced a version");
+    remove(path.c_str());
+  }
+
   // ------------------------------------------------------------------ per-pass folding
   {
     // A pass is a maximal run of consecutive *calls* sharing a marker path. The marker's own row is
@@ -858,6 +920,65 @@ int CmdSelftest()
     fmt.compType = CompType::UNorm;
     fmt.compCount = 4;
     t.Equal(FormatText(fmt), "unorm4", "format-text");
+  }
+
+  // ------------------------------------------------------------- the message table (debug --group)
+  {
+    // What makes `--group` useful is the counting, and what makes it *correct* is that the identity is
+    // the engine's own message id *plus* the severity, category and source -- the same text at another
+    // severity is another finding. So the checks here are the identity, the fold, and the order.
+    const auto makeMessage = [](uint32_t eid, MessageSeverity severity, MessageCategory category,
+                                MessageSource source, uint32_t id, const char *text) {
+      DebugMessage message;
+      message.eventId = eid;
+      message.severity = severity;
+      message.category = category;
+      message.source = source;
+      message.messageID = id;
+      message.description = text;
+      return message;
+    };
+    const rdcarray<DebugMessage> messages = {
+        makeMessage(1, MessageSeverity::High, MessageCategory::State_Setting, MessageSource::API, 7,
+                    "a"),
+        makeMessage(9, MessageSeverity::High, MessageCategory::State_Setting, MessageSource::API, 7,
+                    "a"),
+        makeMessage(4, MessageSeverity::Info, MessageCategory::Miscellaneous, MessageSource::API, 9,
+                    "b"),
+        makeMessage(4, MessageSeverity::High, MessageCategory::Miscellaneous, MessageSource::API, 9,
+                    "b"),
+        makeMessage(2, MessageSeverity::High, MessageCategory::State_Setting, MessageSource::API, 7,
+                    "a"),
+    };
+
+    const std::vector<DebugGroup> groups = GroupDebugMessages(messages);
+    t.Check(groups.size() == 3, "debug-group-folds-identical-messages",
+            "identical messages did not fold into one group");
+    t.Check(groups.size() == 3 && groups[0].count == 3 && groups[0].firstEid == 1 &&
+                groups[0].lastEid == 9,
+            "debug-group-counts-and-the-eid-range", "a group's count or eid range is wrong");
+    t.Check(!groups.empty() && groups[0].severity == MessageSeverity::High,
+            "debug-group-most-severe-first", "the worst severity is not the first row");
+    // The fourth message has the *same* id and text as the third and differs only in severity: folding
+    // on the id alone would have produced two groups where the engine reported two findings.
+    t.Check(groups.size() == 3 && groups[1].severity == MessageSeverity::High &&
+                groups[2].severity == MessageSeverity::Info,
+            "debug-group-keeps-a-severity-apart",
+            "the same id at two severities was folded together");
+    t.Check(!groups.empty() && groups[0].text == "a", "debug-group-keeps-the-text",
+            "a group lost the message text");
+    t.Check(GroupDebugMessages(rdcarray<DebugMessage>()).empty(), "debug-group-of-nothing-is-empty",
+            "an empty message list produced a group");
+
+    MessageSeverity severity = MessageSeverity::Info;
+    t.Check(SeverityFromName("high", severity) && severity == MessageSeverity::High,
+            "severity-from-name-high", "`high` did not name the High severity");
+    t.Check(SeverityFromName("info", severity) && severity == MessageSeverity::Info,
+            "severity-from-name-info", "`info` did not name the Info severity");
+    t.Check(!SeverityFromName("High", severity) && !SeverityFromName("error", severity) &&
+                !SeverityFromName(NULL, severity),
+            "severity-from-name-refuses-the-rest",
+            "a name that is not one of the four was accepted");
   }
 
   // ------------------------------------------------------------------ the help text and the DLL

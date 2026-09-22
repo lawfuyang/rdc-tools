@@ -157,8 +157,8 @@ parts (`fourcc, offset, length`). Part meanings:
 | `sections` | `<rdc>` | file size, rdc version, progVersion, thumbnail, driver name/id; every section (type, flags, version, compressed/uncompressed size, name); then the decompressed size of section 0 vs expected, and the method used |
 | `verify` | `<rdc>` | walks the chunk stream and checks what would make a parse untrustworthy: frames claiming bytes the stream does not hold, and payload lengths that disagree with the layout the decoder expects (see §3.4). Also reports the alignment padding totals — non-zero padding is legal (stale buffer bytes) so it is a note, not a failure. Exit code 0/1, so it can gate a script |
 | `blocks` | `<rdc>` | per section: name, flags, first 16 bytes hex — enough to identify compression (`28b52ffd` = Zstd) |
-| `resources` | `<rdc> [limit=200] [nameFilter]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
-| `descriptors` | `<rdc> [limit=200] [heapFilter]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
+| `resources` | `<rdc> [limit=200] [nameFilter] [--format table|csv|markdown]` | the resource table: id, kind, byte size or dimensions + DXGI format, and the name the application gave it (§4.9) |
+| `descriptors` | `<rdc> [limit=200] [heapFilter] [--format table|csv|markdown]` | the written slots of every descriptor heap: heap, slot, kind (cbv/srv/uav/rtv/dsv/sampler) and the resource it points at (§4.10) |
 | `cache` | `[list\|dir\|clear]` | inspect or clear the decompressed-stream cache (§4.8); needs no capture file |
 | `bootstrap` | `[tag]` | fetch the RenderDoc source tree the chunk names come from into `renderdoc-src` (README §1.1). Every command does this on demand; this runs it up front, pins a tag, and is the one path where a failed download is an error rather than the fallback to the bundled table. Needs no capture file |
 | `chunk-names` | `[--check\|--write] [--out <file>] [--src <tree>]` | the bundled enum table (`src/py/rdc_chunknames.py`) against a source tree: `--write` regenerates it from that tree's `SystemChunk`, `D3D12Chunk` and `DXGI_FORMAT` enums, `--check` reports the drift (exit 0 current, 1 differs or is missing, **2 no tree to compare with**). `--write` refuses an incomplete tree, because a table written from one would shrink to whatever that tree happens to have. Needs no capture file |
@@ -200,15 +200,27 @@ which replay does not expose.
 
 | Command | Arguments | Output |
 |---|---|---|
-| `summary` | `<rdc>` | chunk count, draw/dispatch count, marker count, chunk-type histogram (top 40), and all markers in order with their chunk index. **A chunk index is not an event id in general** — the replay driver's `probe` showed the engine numbers only what a command list recorded, and on one capture the two were tens of thousands apart (§9) |
+| `summary` | `<rdc> [--format table|csv|markdown]` | chunk count, draw/dispatch count, marker count, chunk-type histogram (top 40), and all markers in order with their chunk index. **A chunk index is not an event id in general** — the replay driver's `probe` showed the engine numbers only what a command list recorded, and on one capture the two were tens of thousands apart (§9) |
 | `markers` | `<rdc>` | every marker chunk: index, kind, up to 3 strings (handles ASCII and UTF-16LE) |
 | `chunks` | `<rdc> [limit=200] [nameFilter]` | chunk index, offset, **name**, payload length, and a preview of the strings inside — the way to find a chunk by name |
 | `chunk` | `<rdc> <index>` | full inspector: id/name/flags/length, payload offset **and header size**, decoded fields via `decode_chunk`, 160-byte hex dump, and the payload's strings |
-| `draws` | `<rdc> [maxDraws=80]` | per-draw table (see below) |
+| `draws` | `<rdc> [maxDraws=80] [--format table|csv|markdown]` | per-draw table (see below) |
 | `deps` | `<rdc> [maxResources=40] [table\|dot\|mermaid]` | who writes what and who reads it, from the capture's own stream: writes/reads per resource with the first and last event, `read-before-write` and `write-never-read` flagged and their evidence printed, and the same graph in DOT or Mermaid (§4.15) |
 | `memory` | `<rdc> [maxRows=20]` | what the frame's memory adds up to: placement and kind with byte totals, capture-relative lifetimes, the aliasing barriers it hands memory over with, heaps ranked by what sharing could save, and every figure's caveat (§4.15) |
-| `rootsig` | `<rdc> [maxSigs=40]` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter with its type, register, space and descriptor ranges |
+| `rootsig` | `<rdc> [maxSigs=40] [--format table|csv|markdown]` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter with its type, register, space and descriptor ranges |
 | `dump-chunk` | `<rdc> <index> <outfile>` | writes the chunk payload to a file |
+
+**`--format table|csv|markdown` on the five row commands** (`draws`, `resources`, `descriptors`, `rootsig`,
+`summary`) prints the same rows as a CSV or a Markdown table instead of the terminal's own layout, for
+pasting into an issue or opening in a spreadsheet. `table` is the default and is the command's own printing,
+byte for byte. In the other two **stdout is the table alone** and the lines the terminal form prints around
+it (`resources: 542 ids (516 with a descriptor, 528 named)`, `total resources: 542 (shown 40)`) go to
+*stderr*, because a prose line in the middle of a CSV is not a row. A format changes the *shape* of the
+answer, never its selection: `resources` still honours its limit, `summary` still lists the top 40 chunk
+types and the first 120 markers, and `draws` folds each draw's indented state lines into one cell separated
+by `; `. Values are quoted as RFC 4180 asks (a comma, a quote or a newline), and a `|` in a Markdown cell is
+escaped. The rows themselves live in `rdc_table.py`; the commands build them once and print either form from
+that one list, which is what keeps the terminal and the CSV from disagreeing.
 
 #### `draws` — the per-draw table
 
@@ -434,15 +446,20 @@ slot was never written during the capture (§8). The layouts are in §3.4; what 
 
 `validate <file|bundleDir> <schemaDir|one.schema.json> [kind]` checks documents against the schemas the
 driver publishes — `schema/` in this repo, written by `replay_dump schema --out schema` and checked in —
-plus the **report's own** schema, which is `REPORT_SCHEMA` in `rdc_schemas.py` rather than a file, because the
-driver does not write `report.json`: the offline tool does. A folder that carries a `report.schema.json` of its
-own wins, and `validate <bundleDir> <schemaDir>` checks `report.json` along with everything else, which is what
-keeps the report's JSON twin honest. The so the
-contract is a file a consumer can read rather than something reverse-engineered from a writer.
+plus the schemas of the two documents the *offline tool* writes, which are data in `rdc_schemas.py` rather
+than files, because that folder is what the driver publishes: `REPORT_SCHEMA` for `report.json` and
+`AB_SCHEMA` for `replaydiff.json`. A folder that carries a `report.schema.json` or a
+`replaydiff.schema.json` of its own wins, and `validate <bundleDir> <schemaDir>` checks `report.json` along
+with everything else, which is what keeps the report's JSON twin honest. The contract is therefore a file a
+consumer can read rather than something reverse-engineered from a writer — and for the A/B it closed the same
+gap: `replaydiff.json` used to carry a `schemaVersion` and no shape at all, so a reader could tell which
+version of the document it held and nothing else, and `validate` could not answer "is this one this tool
+wrote?".
 
 ```powershell
 python src\py\rdc_analysis.py validate bundle schema        # every document in a bundle
 python src\py\rdc_analysis.py validate t.json schema textures   # a document saved from a command's stdout
+python src\py\rdc_analysis.py validate ab\diff\replaydiff.json schema replaydiff   # the A/B's own kind
 ```
 
 Every `--json` document carries `schemaVersion` (1 today), so a consumer can refuse a shape it does not
@@ -901,16 +918,38 @@ python src\py\rdc_analysis.py goldens --write            # refresh the transcrip
 | `goldens/captures.local.json` | **not in git**: `capturePaths` says where *this machine's* copies of those keys live. A key with no entry is *not compared*; a key the corpus does not have is refused (that is a typo, not a missing capture); a file that is absent -- a fresh clone, CI -- is simply no paths, which is the same answer as no captures |
 | `goldens/<key>.expect.json` | the **labels**: which detectors must fire over the `.rdc` (and how many findings each), what the report over that capture's bundle must count, the findings *histogram*, and what `replaydiff` must say about the bundle against itself |
 | `goldens/<key>/<command>.txt` | a **transcript**: the command line, the exit code, stdout and stderr, written by `--write` and compared byte for byte by `--check`, with the capture written `<capture>` and never a path |
+| `goldens/<key>/driver.txt` | the **driver's own text**, in the same shape: one `batch` session per capture over that capture's `driverCommands`, its stdout and any finding on stderr, so the half that used to be compared by hand (rebuild, run, diff in the terminal) is a file that `--check` diffs |
 
 **A transcript is a run of the CLI, not a call to a function**: each command is a subprocess of
 `rdc_analysis.py` with the capture path inserted after the command name (`<capture>` in the corpus stands
 for it where a command takes it twice, as `passdiff` does), so what is pinned is the command's output
-contract, usage line and exit code. Two environment variables are fixed for those children:
-`$RDC_PROFILE`/`$RDC_PROGRESS` are removed (a phase table would be a golden of this machine's speed) and
+contract, usage line and exit code. Three environment variables are fixed for those children:
+`$RDC_PROFILE`/`$RDC_PROGRESS` are removed (a phase table would be a golden of this machine's speed),
 `$RDC_NO_CACHE` is set, because the stream cache is invisible *except* in one place — the `, cached` marker
 in a method label that `dxbc` and `verify` print — and a transcript that depends on what this machine has
-already decoded fails on a fresh checkout. Line endings are normalised on the way in and out, so a
-`core.autocrlf` checkout compares equal.
+already decoded fails on a fresh checkout, and `$PYTHONIOENCODING` is pinned to `utf-8`, because the parent
+decodes the child's stdout as UTF-8: a shell that exports the variable (or a console on another code page)
+would otherwise decide whether the `§` in the tool's own text arrives as itself or as a replacement
+character. That was found the direct way rather than reasoned about — a `--write` run under
+`$PYTHONIOENCODING=utf-8` showed two checked-in transcripts carrying the replacement character, which is a
+golden that passes or fails depending on who runs it. Line endings are normalised on the way in and out, so
+a `core.autocrlf` checkout compares equal.
+
+**The driver's text is pinned the same way, with two differences that are the environment's and not the
+answer's.** One `batch` session per capture (`replay_dump batch <capture> <file>`, written under
+`build/goldens/<key>/driver.batch.txt`) runs the capture's `driverCommands` — `info`, `draws 12`,
+`textures`, `debug` for the two captures here — and the golden records the command line, the exit code and
+what came back. The engine's own identity is normalised: the header's `renderdoc` field names the *installed*
+RenderDoc rather than the capture's, so it is written `<engine>`, where the version guard is what judges that
+number (§9). And the driver's stderr enters the golden as **findings only**: its per-step log lines carry
+seconds, an absolute working directory and a timestamped log-file name, which are this machine's run rather
+than the answer, while `error:`/`note:`/`warning:` lines — written outside the log — are kept. A run that
+fails for the *machine's* reasons (no `renderdoc.dll`, no replay system, no device, or a capture from a newer
+RenderDoc than the engine, which the guard refuses) is reported as **not compared**, exactly as a missing
+capture is, so `goldens --check` still answers on a machine that cannot replay; any other failure is compared
+and fails, and a failure with no output is **never** written as an expectation, because a golden of a crash
+would be a golden that says a crash is correct. `desktop-2` pins no driver commands for the same reason it
+pins no transcript.
 
 **The path is redacted.** Everything a run records — the command line, both streams, and the `capture`
 member of an A/B document — says `<capture>` where the path was, in each spelling it arrives in (the path as
@@ -925,9 +964,9 @@ or a file name is a test over the corpus rather than a hope.
 **A capture's own strings are a different question from its path, and redaction cannot touch them.** A
 transcript *is* the frame's words — its marker names, its resource names, its shader entry points — because
 reproducing what the tool prints is the whole point of one. So a capture whose author has not said its words
-may be published is in the corpus **by identity only**: `desktop-2` has no transcript, no label and no
-document, its `commands` list is empty by design, and its `known` lines are numbers and API facts rather
-than quotations. What is published about it is its size and digest, which still verify the file where it is
+may be published is in the corpus **by identity only**: `desktop-2` has no transcript, no label, no
+document and no driver text, its `commands` and `driverCommands` lists are empty by design, and its `known`
+lines are numbers and API facts rather than quotations. What is published about it is its size and digest, which still verify the file where it is
 present. The check that nothing of it is left anywhere is a scan rather than a reading: regenerate that
 capture's transcripts into a throwaway corpus under `build/`, subtract the words the other captures use, keep
 the identifier-like remainder, and grep the tree for those. That remainder was 111 identifiers, and the only
@@ -956,12 +995,16 @@ tools" a command rather than a reading (§4.16). The driver's own device-free ch
 runs in the same pass when `bin/replay_dump.exe` is built; everything else the driver does needs a GPU and
 stays a manual gate (§9).
 
-**What is here, checked on 2026-09-21**: three captures, 22 transcripts and 58 labels (49 of them about a
-capture, nine about the pair). `goldens --check` compares them in **36 s** on this machine: every child runs
-without the stream cache (§4.8) and pays its own decode, and the pair's A/B reads both bundles. One of the
+**What is here, checked on 2026-09-21**: three captures, 22 transcripts, 58 labels (49 of them about a
+capture, nine about the pair) and two driver texts. `goldens --check` compares them in about a minute on
+this machine — the offline half is ~36 s (every child runs without the stream cache (§4.8) and pays its own
+decode, and the pair's A/B reads both bundles) and the driver half is three replay sessions, one per capture
+that pins driver commands. On a machine with no GPU and no capture none of that is paid: both halves report
+themselves as not compared, which is what keeps CI fast and honest. One of the
 three is held **by identity only** — `desktop-2` is a frame from a renderer that is not Unreal, and what a
 frame says about itself (its marker names, its resource names, its pass names) is its own, so that capture
-has no transcript, label or document here and its `commands` list is empty **by design**. Its size and
+has no transcript, label, document or driver text here and its `commands` and `driverCommands` lists are
+empty **by design**. Its size and
 digest are still checked, so the file is verified when it is on this machine; nothing it prints is compared,
 and the corpus's `known` lines for it are numbers and API facts rather than quotations. The two bundles' self-A/Bs are `47`
 and `12` passes with every difference at 0, and the pair — the mobile frame against the desktop one, both
@@ -1232,7 +1275,7 @@ the answers look like answers, and only the source says what the library should 
 | `pixelhistory <rdc> <eid\|last> <resId\|name> <x> <y>` | every event up to `<eid>` that tried to write that pixel: the test that rejected each attempt and the value before, from and after it (below) |
 | `counters <rdc> [--per-pass [--passes <file>] [--top N]]` | GPU counters per event. `--per-pass` folds one counter over each pass (`FetchCounters` answers per event and takes no range): the passes come from the frame's markers — consecutive calls sharing a marker path are one — or from `--passes`, one `<first eid> <last eid> [<name>]` line per pass. The counter that is the cost is the engine's choice (`EventGPUDuration` when this replay produced one), named in the document with its unit; a replay that produces no results says so rather than printing a table of zeros, because GPU counters are a driver feature |
 | `crosscheck <rdc> [eid] [--since N] [--until N] [--max-events N] [--max N]` | what the reflections say a shader wants against what the state says it was given: the vs output signature against the ps input signature, each stage's bindings against the root signature's declared ranges, and the render targets' formats against the ps output signature. Every finding names an event and quotes both sides. `linksChecked`, `bindingsChecked`, `bindingsUnmapped`, `targetsChecked` and `noRootParameters` say how much was actually compared — a capture whose shaders were stripped has no reflection, and then an empty findings list means *nothing was checked*, not that the frame is clean |
-| `debug <rdc>` | debug messages |
+| `debug <rdc> [--group] [--fail-on high\|medium\|low\|info]` | the engine's own messages (validation layers, driver complaints). One row per message; `--group` folds each *distinct* message — the engine's own `messageID` plus severity, category and source — into one row with its count and its first/last eid, which is what makes ten thousand messages a table. `--fail-on` is the pass/fail line: the run exits **1** when anything at or above that severity was reported, and `high` is the *most* severe, so `--fail-on medium` means High or Medium. Nothing else in the driver fails on a *finding* rather than on a failure, and the exit code is the point — "did the engine complain about this frame" becomes a line in a script instead of a paragraph someone has to judge |
 | `usage <rdc> <resId or name>` | every event that touches a resource |
 | `probe <rdc> [maxEid]` | which event ids the engine actually has — see below |
 | `dump <rdc> [outDir=bundle]` | the whole frame to disk as a *bundle* for the offline tool — see below |
@@ -1360,7 +1403,31 @@ survives a re-capture where an event id does not and it is what lets an offline 
 engine's vocabulary. A bundle written before 2026-09-17 has no `marker` member at all: a reader asks for it
 with a default rather than by index.
 
-**The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path). RenderDoc's own
+**The engine is version-checked before it is used, and `--dll` is how another one is named.** `--dll <path>`
+wins over `$RDC_RENDERDOC_DLL` (both exist so that "does this capture replay the same under 1.46 and under
+1.47?" is the same command twice rather than an environment variable re-set between runs, which cannot be
+done per run at all). The replay API exposes no accessor for the version that *recorded* a capture, so the
+driver reads the container's fixed 32-byte header itself — `RDOC | version | headerLength | progVersion`, the
+same bytes `rdc_stream.parse_container` reads — and compares its `MAJOR.MINOR` against
+`RENDERDOC_GetVersionString()` from the loaded DLL, **before** `InitialiseReplay` and before any device
+exists. An older engine than the capture is refused, with both versions named and exit 1: an older engine
+answers from another version's decoding, and that looks exactly like an answer. Newer is allowed and says so
+in a note; equal is silent; a version that does not parse (a fork, a development build) is said and passed on,
+because a guard that guesses about a file it cannot read is worse than no guard.
+
+| engine | capture | what happens |
+|---|---|---|
+| 1.46 | the corpus's own three (`1.46 e4bd23`, logfile version 258) | replayed, no note — the tested direction |
+| 1.46 | a copy whose header says `1.0 abcdef` | replayed, one note: the engine is newer than the capture |
+| 1.46 | a copy whose header says `1.99 abcdef` | **refused**, exit 1, both versions named, no device created |
+| any | a version that does not parse (`unknown`) | a note, then the run continues: not a verdict |
+
+The guard judges the **program** version, not the logfile format version: the engine checks that one itself
+(`FileIncompatibleVersion`), and the program version is the number a reader is actually holding. The measured
+rows above are `tests`-free and reproducible by hand — copy a capture, rewrite sixteen bytes at offset 16,
+and run `info`.
+
+**The DLL is loaded, not linked** (`$RDC_RENDERDOC_DLL` overrides the path; `--dll` overrides both). RenderDoc's own
 stringisers for `ResultCode`, `ResourceUsage`, `MessageSeverity` and `GPUCounter` are not exported, so
 the driver does **not** supply the missing template specialisations: RenderDoc's definitions exist in
 its `stringise.cpp` and are unreachable from this translation unit, which is

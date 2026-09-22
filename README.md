@@ -237,7 +237,9 @@ python src\py\rdc_analysis.py draws    'capture.rdc' 40   # the stream's own acc
 `python src\py\rdc_analysis.py <command> <capture.rdc> [args…]`; no arguments prints the list (§1). It reads the
 **file** — no device, no `renderdoc.dll`, no GPU — so it is the half that works anywhere, that costs
 sub-seconds once the stream is cached (REFERENCE §4.8), and that the hermetic test suite covers. Each table
-below gives the tool's own usage with one concrete capture.
+below gives the tool's own usage with one concrete capture. The five row commands (`resources`,
+`descriptors`, `summary`, `draws`, `rootsig`) also take `--format csv|markdown`, which prints the same rows
+as a spreadsheet or an issue wants them and moves the prose around them to stderr (REFERENCE §4).
 
 #### The container and the stream
 
@@ -290,7 +292,7 @@ below gives the tool's own usage with one concrete capture.
 | `passdiff` | the two captures' marker trees side by side, aligned by path — the free first half of "why do these two differ" | `passdiff ab\mobile.rdc ab\desktop.rdc --all` |
 | `replaydiff` | the A/B of two bundles: structure, state rows, every named constant member by member, each shader's hash, and with `--with-images` the renders, per pixel up to `--image-detail` | `replaydiff ab\mobile ab\desktop --with-images --out ab\diff` |
 | `validate` | documents against the schemas the driver publishes (plus the report's own): a whole bundle, or one saved `--json` file with the `kind` it is | `validate bundle schema`, `validate t.json schema textures` |
-| `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts and A/B documents byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare) | `goldens --check`, `goldens --write` |
+| `goldens` | the checked-in corpus: re-runs each capture's pinned command list and compares the transcripts, the A/B documents and the **driver's own text** for that capture byte for byte (**0** compared and matched, **1** a mismatch, **2** nothing to compare) | `goldens --check`, `goldens --write` |
 
 #### Upkeep
 
@@ -309,6 +311,9 @@ is where §2's rules come from. An **event id argument may be a marker path** (`
 `state "Scene > BasePass"`) or `last` for the frame's own last event, and `--at-marker <path>` does the same for
 a command whose eid is not positional (`cb --at-marker BasePass ps 0`). Every command takes `--json`; `schema`
 prints the shape of each document kind, and the offline `validate` checks real documents against it.
+`--dll <path>` (or `$RDC_RENDERDOC_DLL`) names which `renderdoc.dll` to replay with, and the driver refuses a
+capture recorded by a **newer** RenderDoc than that engine, with both versions named, instead of replaying it
+badly (REFERENCE §9).
 
 #### Opening the capture, and finding your way
 
@@ -316,7 +321,7 @@ prints the shape of each document kind, and the offline `validate` checks real d
 |---|---|---|
 | `info` | renderdoc version, driver, GPU, API properties, feature flags (`pixelHistory`, `shaderDebugging`) and counts — the cheapest sanity check there is | `info 'capture.rdc'` |
 | `probe` | which event ids actually have pipeline state; a wrong eid returns an *empty* state rather than an error, so this is what runs before "nothing is bound" is believed | `probe 'capture.rdc' 3000` |
-| `debug` | the API's own complaints (validation layer, etc.) — they outrank any self-made hypothesis | `debug 'capture.rdc' --json` |
+| `debug` | the API's own complaints (validation layer, etc.) — they outrank any self-made hypothesis; `--group` folds each distinct message into one row with its count and eid range, and `--fail-on` exits **1** when anything at or above that severity was reported (a pass/fail line for a script) | `debug 'capture.rdc' --group --fail-on medium` |
 | `draws` | the action tree with event ids: markers and calls, optionally filtered | `draws 'capture.rdc' 200 Shadow` |
 | `find` | events whose call name or marker path matches, and resources whose name matches (case-insensitive) | `find 'capture.rdc' SkyViewLut` |
 | `state` | the bound shaders, outputs and D3D12 root parameters at one event | `state 'capture.rdc' 27931`, `state 'capture.rdc' BasePass` |
@@ -580,11 +585,12 @@ silence.
 * **CI, no GPU and no capture:** `selftest` (the hermetic suite — seconds, no device) and Pyright — that is the
   whole gate in `.github/workflows/checks.yml`, and the fixture bundles in `tests/` are what make even the
   report generator and the A/B testable there.
-* **A machine with the captures but no GPU:** `goldens --check` (REFERENCE §4.17) — the transcripts and labels
-  for the corpus in `goldens/`, plus the driver's device-free `schema --check`. It exits **2** when no capture
-  of the corpus is present, which means "nothing compared" and not "clean".
+* **A machine with the captures but no GPU:** `goldens --check` (REFERENCE §4.17) — the transcripts, the labels
+  and the self-A/B for the corpus in `goldens/`, plus the driver's device-free `schema --check`. The driver's own
+  text needs a device, so without one that half is reported **not compared** rather than passed, and the command
+  exits **2** when no capture of the corpus is present — "nothing compared", not "clean".
 * **A machine with the GPU and the capture:** the driver, gated — `probe` alone, one replay at a time,
-  `debug --fail-on error` *(ROADMAP §1)* as the pass/fail line, `bundle-verify` over the artefacts, and the
+  `debug --fail-on error` (REFERENCE §9) as the pass/fail line, `bundle-verify` over the artefacts, and the
   before/after comparison of recipe I. Record what CI cannot cover rather than implying coverage.
 
 **N. "Keep the repo honest."** The gates, cheapest first, and what each one can and cannot see:
@@ -594,7 +600,7 @@ python src\py\rdc_analysis.py selftest                # the hermetic suite: no G
 npx --yes pyright@latest                              # the type checker ("standard"), no runtime at all
 python src\py\rdc_analysis.py chunk-names --check     # the bundled names vs the tree (exit 2 = no tree here)
 python src\py\rdc_analysis.py build --check           # are bin\replay_dump.exe and bin\rdc_lz4.dll current?
-python src\py\rdc_analysis.py goldens --check         # the corpus (exit 2 = none of it on this machine)
+python src\py\rdc_analysis.py goldens --check         # the corpus and the driver's text (exit 2 = none here)
 .\bin\replay_dump.exe schema --check schema           # the checked-in schemas vs this driver
 .\bin\replay_dump.exe selftest                        # the driver checking itself: writer, schemas, help, DLL
 cmake --build build --config Release --target clang-format-check

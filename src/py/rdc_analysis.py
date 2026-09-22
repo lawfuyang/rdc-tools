@@ -54,6 +54,12 @@ Usage:
   python rdc_analysis.py goldens  [--check|--write] [--capture <name>] [--corpus <file>] [--verbose]
                                                          # the corpus's transcripts and labels (goldens/)
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
+  python rdc_analysis.py <cmd> <rdc> ... [--format table|csv|markdown]
+                                                         # `draws`, `resources`, `descriptors`,
+                                                         #   `rootsig` and `summary` print a CSV or a
+                                                         #   Markdown table instead of the terminal's
+                                                         #   own: the same rows, with the prose around
+                                                         #   them on stderr so stdout stays a table
 
 Speed (REFERENCE 4.13): the one decode a capture needs is 0.5 s, through `bin/rdc_lz4.dll` -- the same
 `cmake --build build` writes it -- and it is free after that from the stream cache. A tree without that
@@ -68,7 +74,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 if TYPE_CHECKING:       # `unittest` is only needed by `selftest`, and importing it costs ~120 ms
     import unittest
@@ -110,7 +116,8 @@ from rdc_renderdoc_src import (BootstrapError as BootstrapError,
                                ensure as ensure, is_populated as is_populated, latest_tag as latest_tag,
                                missing_parts as missing_parts, target_dir as target_dir,
                                version as tree_version)
-from rdc_schemas import (BUNDLE_SCHEMAS as BUNDLE_SCHEMAS, REPORT_SCHEMA as REPORT_SCHEMA,
+from rdc_schemas import (AB_SCHEMA as AB_SCHEMA, BUNDLE_SCHEMAS as BUNDLE_SCHEMAS,
+                         REPORT_SCHEMA as REPORT_SCHEMA,
                          SCHEMA_KEYWORDS as SCHEMA_KEYWORDS,
                          SchemaError as SchemaError, cmd_validate as cmd_validate,
                          load_document as load_document, load_schemas as load_schemas,
@@ -130,6 +137,8 @@ from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and test
 from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_table import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+import rdc_table  # noqa: F401  (used qualified: the format the entry point parsed and checked)
 from rdc_uses import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_profile import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -205,6 +214,27 @@ def _arg(argv: Sequence[str], index: int, default: Optional[int] = None,
         raise IndexError('missing command argument #%d' % index)
     return default
 
+def _take_format(cmd: str, argv: Sequence[str]) -> Tuple[List[str], str]:
+    """The command's arguments with `--format <fmt>` taken out, and the format it named.
+
+    `--format` may sit anywhere after the command, so it is removed *before* the positional arguments
+    are read: written as `resources <rdc> --format csv 40`, the flag would otherwise be read as the
+    limit. A missing or unknown value prints that command's usage and exits 2, like every other bad
+    argument here -- and the exit code matters, because a script that asked for CSV and silently got
+    a terminal table has an answer that parses into something wrong.
+    """
+    rest = list(argv)
+    fmt = 'table'
+    if '--format' in rest:
+        index = rest.index('--format')
+        if index + 1 >= len(rest) or not rdc_table.valid(rest[index + 1]):
+            print('usage: rdc_analysis.py %s <rdc> [args] [--format %s]'
+                  % (cmd, '|'.join(rdc_table.FORMATS)))
+            sys.exit(2)
+        fmt = rest[index + 1]
+        del rest[index:index + 2]
+    return rest, fmt
+
 def cmd_bootstrap(argv: Sequence[str]) -> int:
     """`bootstrap [tag]` -- put the RenderDoc source tree where the tool reads its chunk names from.
 
@@ -269,7 +299,8 @@ def _dispatch() -> None:
     if cmd == 'chunk':
         cmd_chunk_detail(path, int(argv[3]))
     elif cmd == 'draws':
-        cmd_draws(path, _arg(argv, 3, 80))
+        rest, fmt = _take_format('draws', argv)
+        cmd_draws(path, _arg(rest, 3, 80), fmt)
     elif cmd == 'deps':
         deps_fmt = argv[4] if len(argv) > 4 else 'table'
         if deps_fmt not in ('table', 'dot', 'mermaid'):
@@ -283,11 +314,13 @@ def _dispatch() -> None:
     elif cmd == 'verify':
         sys.exit(cmd_verify(path))
     elif cmd == 'summary':
-        cmd_summary(path)
+        rest, fmt = _take_format('summary', argv)
+        cmd_summary(path, fmt)
     elif cmd == 'markers':
         cmd_markers(path)
     elif cmd == 'rootsig':
-        cmd_rootsig(path, _arg(argv, 3, 40))
+        rest, fmt = _take_format('rootsig', argv)
+        cmd_rootsig(path, _arg(rest, 3, 40), fmt)
     elif cmd == 'dump-chunk':
         cmd_dump_chunk(path, int(argv[3]), argv[4])
     elif cmd == 'dump-shaders':
@@ -315,9 +348,11 @@ def _dispatch() -> None:
     elif cmd == 'blocks':
         cmd_blocks(path)
     elif cmd == 'resources':
-        cmd_resources(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+        rest, fmt = _take_format('resources', argv)
+        cmd_resources(path, _arg(rest, 3, 200), rest[4] if len(rest) > 4 else None, fmt)
     elif cmd == 'descriptors':
-        cmd_descriptors(path, _arg(argv, 3, 200), argv[4] if len(argv) > 4 else None)
+        rest, fmt = _take_format('descriptors', argv)
+        cmd_descriptors(path, _arg(rest, 3, 200), rest[4] if len(rest) > 4 else None, fmt)
     elif cmd == 'strings':
         cmd_strings(path, _arg(argv, 3, 6), _arg(argv, 4, 200))
     elif cmd == 'names':

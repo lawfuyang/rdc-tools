@@ -768,21 +768,140 @@ int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, b
   return 0;
 }
 
-int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path)
+std::vector<DebugGroup> GroupDebugMessages(const rdcarray<DebugMessage> &messages)
 {
+  std::vector<DebugGroup> groups;
+  for(size_t i = 0; i < messages.size(); i++)
+  {
+    const DebugMessage &message = messages[i];
+    DebugGroup *found = NULL;
+    for(size_t g = 0; g < groups.size(); g++)
+    {
+      if(groups[g].messageID == message.messageID && groups[g].severity == message.severity &&
+         groups[g].category == message.category && groups[g].source == message.source)
+      {
+        found = &groups[g];
+        break;
+      }
+    }
+
+    if(found == NULL)
+    {
+      DebugGroup group;
+      group.severity = message.severity;
+      group.category = message.category;
+      group.source = message.source;
+      group.messageID = message.messageID;
+      group.firstEid = message.eventId;
+      group.lastEid = message.eventId;
+      group.count = 1;
+      group.text = message.description.c_str();
+      groups.push_back(group);
+      continue;
+    }
+
+    found->count++;
+    found->firstEid = std::min(found->firstEid, message.eventId);
+    found->lastEid = std::max(found->lastEid, message.eventId);
+  }
+
+  std::sort(groups.begin(), groups.end(), [](const DebugGroup &a, const DebugGroup &b) {
+    if(a.severity != b.severity)
+      return (unsigned)a.severity < (unsigned)b.severity;
+    if(a.count != b.count)
+      return a.count > b.count;
+    return a.firstEid < b.firstEid;
+  });
+  return groups;
+}
+
+//: `debug <rdc> [--group] [--fail-on high|medium|low|info]`: the engine's own complaints.
+//:
+//: Two shapes of the same answer. Without `--group` it is one row per message, which is what a reader
+//: wants at ten messages; with it, one row per *distinct* message with its count and its eid range,
+//: which is what a reader wants at ten thousand. Rows are strings in both, so `--json` stays the
+//: document the `messages` schema describes (REFERENCE 4.12) and the grouped form needs no new kind.
+//:
+//: `--fail-on` is the driver-side sanity gate: with a threshold, a run exits **1** when anything at or
+//: above it was reported -- High is the most severe, so `--fail-on medium` means High or Medium. Nothing
+//: else in this program fails on a *finding* rather than on a failure, and the exit code is the point:
+//: "did the engine complain" becomes a line in a script instead of a paragraph a reader has to judge.
+int CmdDebug(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::vector<std::string> &args)
+{
+  bool bGroup = false;
+  bool bFailOn = false;
+  MessageSeverity failOn = MessageSeverity::Info;
+  for(size_t i = 1; i < args.size(); i++)
+  {
+    const std::string &a = args[i];
+    if(a == "--group")
+      bGroup = true;
+    else if(a == "--fail-on" && i + 1 < args.size())
+    {
+      i++;
+      if(!SeverityFromName(args[i].c_str(), failOn))
+        return Fail(2, "--fail-on takes high, medium, low or info, not '%s'", args[i].c_str());
+      bFailOn = true;
+    }
+    else if(a.size() > 2 && a[0] == '-' && a[1] == '-')
+      return Fail(2, "unknown option '%s' for debug", a.c_str());
+    // Anything else is the capture path, which the dispatcher already took apart.
+  }
+
   PrintCaptureHeader(file, path);
   rdcarray<DebugMessage> msgs = ctrl->GetDebugMessages();
 
-  ArrayOpen("messages");
+  // The worst severity present decides the exit code, and it is read from the messages themselves
+  // rather than from what is printed: a threshold must not depend on which form was asked for.
+  unsigned worst = (unsigned)MessageSeverity::Info + 1;
   for(size_t i = 0; i < msgs.size(); i++)
-    Row(Fmt("eid %-6u %-8s %s", (unsigned)msgs[i].eventId, SeverityText(msgs[i].severity).c_str(),
-            msgs[i].description.c_str()));
+    worst = std::min(worst, (unsigned)msgs[i].severity);
+
+  ArrayOpen("messages");
+  const std::vector<DebugGroup> groups =
+      bGroup ? GroupDebugMessages(msgs) : std::vector<DebugGroup>();
+  if(bGroup)
+  {
+    if(groups.empty())
+      Row("(no messages)");
+    for(size_t g = 0; g < groups.size(); g++)
+    {
+      const DebugGroup &group = groups[g];
+      Row(Fmt("eid %u..%u  %ux  %s category(%u) source(%u) id(%u)  %s", group.firstEid,
+              group.lastEid, group.count, SeverityText(group.severity).c_str(),
+              (unsigned)group.category, (unsigned)group.source, group.messageID, group.text.c_str()));
+    }
+  }
+  else
+  {
+    for(size_t i = 0; i < msgs.size(); i++)
+      Row(Fmt("eid %-6u %-8s %s", (unsigned)msgs[i].eventId, SeverityText(msgs[i].severity).c_str(),
+              msgs[i].description.c_str()));
+  }
   ArrayClose(false);    // total follows
   g_Indent = g_bJson ? 1 : 0;
-  Field("total", (long long)msgs.size(), true);
+  // `total` counts what the rows are: messages by default, groups with `--group`. The number of
+  // messages is still worth having in the grouped form, so it goes to the log rather than nowhere.
+  Field("total", (long long)(bGroup ? groups.size() : msgs.size()), true);
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");
+
+  if(bGroup)
+    Log("debug: %d message(s) in %d group(s)", (int)msgs.size(), (int)groups.size());
+
+  if(bFailOn && worst <= (unsigned)failOn)
+  {
+    // To stderr, so stdout stays a document under `--json`, and to the log, because the exit code
+    // is the part a script reads and the log is where a reader finds out why.
+    const int count = (int)std::count_if(msgs.begin(), msgs.end(), [failOn](const DebugMessage &m) {
+      return (unsigned)m.severity <= (unsigned)failOn;
+    });
+    Log("failed: %d of %d message(s) at or above %s (--fail-on)", count, (int)msgs.size(),
+        SeverityText(failOn).c_str());
+    return 1;
+  }
   return 0;
 }
 

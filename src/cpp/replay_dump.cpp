@@ -103,7 +103,14 @@ void Usage()
       "                                    state says it was given: the vs->ps link, each stage's\n"
       "                                    bindings against the root signature, and the render\n"
       "                                    targets against the pixel shader's outputs\n"
-      "  debug   <rdc>                     debug messages (validation layer, etc.)\n"
+      "  debug   <rdc> [--group] [--fail-on high|medium|low|info]\n"
+      "                                    debug messages (validation layer, etc.); --group folds "
+      "each\n"
+      "                                    distinct message into one row with its count and its "
+      "eid\n"
+      "                                    range, and --fail-on exits 1 when anything at or above "
+      "that\n"
+      "                                    severity was reported\n"
       "  usage   <rdc> <resId>             every event that touches a resource\n"
       "  probe   <rdc> [maxEid=2000]       which event ids actually have pipeline state\n"
       "  dump    <rdc> [outDir=bundle]     the whole frame to disk, for the offline tool (ROADMAP "
@@ -116,7 +123,7 @@ void Usage()
       "DLL\n"
       "\n"
       "Options (any position): --json, --log <file>, --disasm, --save <dir>, --out <dir>, --check\n"
-      "<dir>, --at-marker <path>.\n"
+      "<dir>, --at-marker <path>, --dll <path> (the renderdoc.dll to replay with).\n"
       "\n"
       "An event id argument may be a *marker path* instead of a number: `state BasePass` and\n"
       "`state \"Scene > BasePass\"` both work, matching the name inside the path first, then a\n"
@@ -231,7 +238,13 @@ void Usage()
       "what to read when a run looks stuck. Event ids are the engine's, and they are not the "
       "offline\n"
       "tool's chunk indices: `probe` lists the ids that actually have pipeline state.\n"
-      "$RDC_RENDERDOC_DLL overrides the renderdoc.dll to load (default: the installed one) and\n"
+      "--dll <path> (or $RDC_RENDERDOC_DLL) names the renderdoc.dll to replay with -- the flag "
+      "first,\n"
+      "then the environment, then the installed engine -- and a capture recorded by a *newer* "
+      "RenderDoc\n"
+      "than the one loaded is refused, with both versions named, instead of being replayed by an "
+      "engine\n"
+      "that does not know the file.\n"
       "$RDC_REPLAY_DEBUG=1 traces every step, for when the engine takes the process down. Run one\n"
       "replay at a time: the engine creates a device per process, and two at once on one GPU is "
       "what\n"
@@ -666,7 +679,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
         ToInt(OptValue(args, "--since", "0"), 0), ToInt(OptValue(args, "--until", "0"), 0),
         ToInt(OptValue(args, "--max-events", "0"), 0), ToInt(OptValue(args, "--max", "200"), 200));
   if(!strcmp(cmd, "debug"))
-    return CmdDebug(ctrl, file, path);
+    return CmdDebug(ctrl, file, path, args);
   if(!strcmp(cmd, "usage") && args.size() > 1)
     return CmdUsage(ctrl, file, path, args[1].c_str());
   if(!strcmp(cmd, "probe"))
@@ -919,6 +932,8 @@ int main(int argc, char **argv)
       logPath = argv[++i];
       bPerRunLog = false;
     }
+    else if(!strcmp(argv[i], "--dll") && i + 1 < argc)
+      g_DllOverride = argv[++i];
     else if(!strcmp(argv[i], "--repl"))
       bRepl = true;
     else if(!strcmp(argv[i], "--stdin"))
@@ -1004,6 +1019,13 @@ int main(int argc, char **argv)
   HMODULE dll = LoadReplayDLL();
   if(dll == NULL)
     return Fail(1, "cannot load renderdoc.dll");
+
+  // Before the replay system and the device: a capture recorded by a newer RenderDoc than the
+  // engine just loaded is refused here, with both versions named, rather than by whatever the
+  // engine would otherwise do with a file it does not know.
+  const int versionCode = GuardCaptureVersion(pathAbs.c_str(), path);
+  if(versionCode != 0)
+    return versionCode;
 
   Log("starting the replay system");
   if(!InitialiseReplay(dll, argc, argv))

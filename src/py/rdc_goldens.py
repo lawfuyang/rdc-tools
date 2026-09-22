@@ -60,6 +60,25 @@ CORPUS_NAME = 'captures.json'
 LOCAL_NAME = 'captures.local.json'
 EXPECT_SUFFIX = '.expect.json'
 CAPTURE_TOKEN = '<capture>'
+#: The driver's own text golden, one per capture: `<name>/driver.txt`.
+DRIVER_FILE = 'driver.txt'
+#: The batch file a driver golden runs, written under `build/` rather than checked in: every line's
+#: output carries a `#=== <line>` marker, so the golden itself says what the batch file held, and a
+#: second copy under version control would be a second thing to keep in step with the corpus.
+DRIVER_BATCH = 'driver.batch.txt'
+#: The header fields that name the *replaying* engine rather than the capture. Normalised away in a
+#: driver golden, because which RenderDoc is installed here is the environment (see `normalise_driver`).
+DRIVER_ENV_FIELDS = ('renderdoc',)
+#: The driver's own error texts that mean *this machine* cannot replay: no engine to load, no replay
+#: system, no device, or a capture from a newer RenderDoc than the engine here (the version guard).
+#: Anything else that goes wrong is the driver's own answer, and a golden compares it rather than
+#: excusing it, so this list is deliberately short, and pinned by a test.
+ENVIRONMENT_ERRORS = (
+    'cannot load renderdoc.dll',
+    'RENDERDOC_InitialiseReplay failed',
+    'cannot open ',
+    'replay must be at least the capture',
+)
 
 #: The corpus format's own version, so a corpus from a newer tool is refused rather than half-read.
 CORPUS_VERSION = 1
@@ -94,6 +113,11 @@ class GoldenCapture(TypedDict, total=False):
     #: The commands whose transcript is pinned, each as its own argument list (`[["draws", "25"], ...]`):
     #: the capture path is inserted after the command name, and `<capture>` where it is wanted again.
     commands: List[List[str]]
+    #: The **driver** commands whose text is pinned (`goldens/<key>/driver.txt`), in the syntax a `batch`
+    #: file uses: without the executable and without the capture, one command per line. A capture whose
+    #: own words may not be published keeps an empty list here *and* an empty `commands` above -- the same
+    #: reason, stated once per list, because a driver's text quotes the frame just as a transcript does.
+    driverCommands: List[List[str]]
     #: Where this capture's bundle is looked for, relative to the root. Absent when it has none.
     bundle: str
 
@@ -105,6 +129,11 @@ class GoldenCorpus(TypedDict):
     captures: List[GoldenCapture]
     #: The A/B pair whose numbers `replaydiff` must reproduce when both bundles are present.
     pair: Dict[str, Any]
+    #: How to invoke the driver: `{"argv": [...]}`, defaulting to the built `bin/replay_dump.exe`. It is
+    #: a member rather than a constant for the same reason the local path map is one -- a corpus of one's
+    #: own may replay with another build, and the tests point it at a script, which is how the harness
+    #: itself is checked with no GPU, no device and no 600 MB capture.
+    driver: Dict[str, Any]
 
 
 class GoldenExpect(TypedDict, total=False):
@@ -184,6 +213,13 @@ def load_corpus(path: str) -> GoldenCorpus:
         # committed anywhere), and the local file fills in the rest.
         if not capture.get('path'):
             capture['path'] = local.get(key, '')
+        # A driver command is written straight into a `batch` file, so a bare string would be run one
+        # command per *character*: refused here rather than becoming a strange driver failure later.
+        for command in capture.get('driverCommands') or []:
+            if not isinstance(command, list) or not all(isinstance(part, str) for part in command) \
+                    or not command:
+                raise rdc_schemas.SchemaError('%s: every `driverCommands` entry of %s is a list of '
+                                              'strings' % (path, key))
         captures.append(capture)
     # A local file that names a capture the corpus does not have is a typo that would otherwise present
     # itself as "not on this machine" for the capture that *is* there: say so instead.
@@ -192,7 +228,31 @@ def load_corpus(path: str) -> GoldenCorpus:
         raise rdc_schemas.SchemaError('%s names %s, which %s does not have'
                                       % (LOCAL_NAME, ', '.join(unknown), os.path.basename(path)))
     return GoldenCorpus(schemaVersion=CORPUS_VERSION, note=str(document.get('note', '')),
-                        captures=captures, pair=document.get('pair') or {})
+                        captures=captures, pair=document.get('pair') or {},
+                        driver=_load_driver(path, document.get('driver')))
+
+
+def _load_driver(corpus_path: str, raw: Any) -> Dict[str, Any]:
+    """The corpus's `driver` member -- how to invoke the driver -- with its `argv` checked and defaulted.
+
+    Checked rather than trusted because it ends up on a command line: an `argv` entry that is not a
+    string, or an empty list, is refused here rather than becoming a process that cannot start (and a
+    traceback from inside the harness instead of from the thing it was checking).
+    """
+    if raw is None:
+        return {'argv': [rdc_driver.EXE_PATH]}
+    if not isinstance(raw, dict):
+        raise rdc_schemas.SchemaError('%s: `driver` is not an object' % corpus_path)
+    argv: List[str] = []
+    if raw.get('argv') is not None:
+        given: Any = raw['argv']
+        if not isinstance(given, list) or not all(isinstance(part, str) for part in given) or not given:
+            raise rdc_schemas.SchemaError('%s: `driver.argv` is a list of at least one string'
+                                          % corpus_path)
+        argv = [str(part) for part in given]
+    section: Dict[str, Any] = dict(raw)
+    section['argv'] = argv or [rdc_driver.EXE_PATH]
+    return section
 
 
 def _load_local_paths(corpus_path: str) -> Dict[str, str]:
@@ -310,17 +370,23 @@ def _run(program: str, argv: Sequence[str], cwd: str) -> Tuple[int, str, str]:
     """Run one program and return `(exit code, stdout, stderr)`, with the line endings normalised.
 
     The child's environment is fixed rather than inherited: `$RDC_PROFILE`/`$RDC_PROGRESS` are removed (a
-    phase table in a transcript would be a golden of this machine's speed) and `$RDC_NO_CACHE` is *set*,
+    phase table in a transcript would be a golden of this machine's speed), `$RDC_NO_CACHE` is *set*,
     because the stream cache is otherwise invisible except in one place -- the `, cached` marker in a
     method label (`dxbc`, `verify`) -- and a transcript that depends on what this machine has already
-    decoded is a transcript that fails on a fresh checkout. Decoding instead of reading the cache costs
-    the capture's decode time per command, which is the price of the comparison meaning the same thing
-    everywhere.
+    decoded is a transcript that fails on a fresh checkout, and `$PYTHONIOENCODING` is pinned to `utf-8`
+    for the same reason one level down: the child's stdout is decoded here as UTF-8, so a parent shell
+    that exports the variable (or a code page that is not UTF-8) would otherwise decide whether a `§` in
+    the tool's own text arrives as itself or as a replacement character. That is not hypothetical -- it
+    is what a `--write` run under `$PYTHONIOENCODING=utf-8` found: two checked-in transcripts carried the
+    replacement character, and the same check passed or failed depending on who ran it. Decoding instead
+    of reading the cache costs the capture's decode time per command, which is the price of the
+    comparison meaning the same thing everywhere.
     """
     env = dict(os.environ)
     for name in (rdc_profile.PROFILE_ENV, rdc_profile.PROGRESS_ENV):
         env.pop(name, None)
     env[rdc_cache.NO_CACHE_ENV] = '1'
+    env['PYTHONIOENCODING'] = 'utf-8'
     try:
         finished = subprocess.run([program] + list(argv), cwd=cwd, env=env, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, timeout=1800)
@@ -354,6 +420,131 @@ def run_driver(argv: Sequence[str], cwd: str) -> Tuple[int, str, str]:
     which is why the caller also counts a missing verdict line as a failure.
     """
     return _run(os.path.join(rdc_driver.repo_root(), rdc_driver.EXE_PATH), list(argv), cwd)
+
+
+def run_driver_as(argv_prefix: Sequence[str], argv: Sequence[str], cwd: str) -> Tuple[int, str, str]:
+    """The driver, invoked the way the corpus says: `<prefix...> <command> <capture> <args...>`.
+
+    `_run` takes a program and its arguments, so the prefix is split the way a shell would split it: the
+    first part is the program. That is what lets a corpus -- the tests' corpus -- replay with a script
+    rather than the built exe, with no environment variable and no shell involved.
+    """
+    if not argv_prefix:
+        raise ValueError('an empty driver invocation')
+    parts = list(argv_prefix) + list(argv)
+    return _run(parts[0], parts[1:], cwd)
+
+
+def normalise_driver(text: str) -> str:
+    """The driver's text with the *replaying* engine's version replaced by `<engine>`.
+
+    The header names both versions and only one of them is the capture's: `machine`, `driver` and
+    `localReplay` come from the file, while `renderdoc` is which RenderDoc is installed *here*. A golden
+    that pinned that number would fail on a machine with another version while every answer matched --
+    and the number is judged where it belongs, by the version guard, which refuses a capture recorded by
+    a newer RenderDoc than the engine about to replay it. Measured rather than assumed: `info` on the
+    corpus prints exactly one such field, and a test walks every checked-in driver golden for a field
+    that is not `<engine>`.
+    """
+    lines: List[str] = []
+    for line in text.splitlines():
+        key = line.split(' ', 1)[0] if ' ' in line else ''
+        lines.append('%-18s <engine>' % key if key in DRIVER_ENV_FIELDS else line)
+    return '\n'.join(lines) + ('\n' if text.endswith('\n') else '')
+
+
+def driver_findings(err: str) -> List[str]:
+    """The driver's stderr lines that are findings rather than its own progress log.
+
+    Every step of a run is logged (`[replay_dump]    2.1s  opening the capture ...`) with the seconds it
+    took, an absolute working directory and a timestamped log file name -- this machine's run, not the
+    answer, and a golden that pinned those lines would fail on every run of every machine. What is kept
+    are the lines written *outside* the log: `error:` from `Fail`, and the raw `note:`/`warning:` lines.
+    The log lines are not lost: they are in the run's log file, which is where a person reads them.
+    """
+    return [line for line in err.splitlines() if not line.startswith('[replay_dump]')]
+
+
+def driver_environment_failure(err: str) -> str:
+    """The line that says this machine cannot replay at all, or an empty string when it can.
+
+    The distinction is what keeps this check useful rather than noisy: no RenderDoc installed, no replay
+    system, a device that will not initialise, a capture from a newer engine than the one here -- those
+    are the *machine's* state, and the driver half is reported as **not compared**, the same answer a
+    capture that is not on this machine gets. Any other failure is the driver's own and is compared, so
+    a command that stopped working fails loudly instead of being excused.
+    """
+    for line in driver_findings(err):
+        if any(needle in line for needle in ENVIRONMENT_ERRORS):
+            return line.strip()
+    return ''
+
+
+def check_driver(root: str, capture: GoldenCapture, argv_prefix: Sequence[str], write: bool,
+                 verbose: bool = False) -> Tuple[bool, int, List[str]]:
+    """One capture's driver commands through a single `batch` session, compared or written.
+
+    Returns `(compared, mismatched, problems)`, like the other checks, and `compared` is False when there
+    is nothing to compare *on this machine*: no command list for this capture, no driver where the corpus
+    says to find one, or a run that failed for the environment's reasons. One `batch` session rather than
+    one process per command, because opening the capture is what costs seconds and a session pays it once
+    (`replay_dump`'s own help says so).
+    """
+    commands = list(capture.get('driverCommands') or [])
+    if not commands:
+        return False, 0, []
+    name = str(capture.get('name', ''))
+    capture_path = str(capture.get('path', ''))
+    program = argv_prefix[0]
+    if not os.path.isabs(program):
+        program = os.path.join(root, program)
+    if not os.path.isfile(program):
+        if verbose:
+            _print('  %-20s not compared (%s is not built: `build`)' % ('driver', argv_prefix[0]))
+        return False, 0, []
+
+    batch_rel = os.path.join(WORK_DIR, name, DRIVER_BATCH)
+    batch_abs = os.path.join(root, batch_rel)
+    os.makedirs(os.path.dirname(batch_abs), exist_ok=True)
+    with open(batch_abs, 'w', encoding='utf-8', newline='\n') as handle:
+        handle.write('# %s: the driver commands this corpus pins, one per line\n' % name)
+        for command in commands:
+            handle.write('%s\n' % ' '.join(command))
+
+    recorded = list(argv_prefix) + ['batch', capture_path, batch_rel]
+    code, out, err = run_driver_as(argv_prefix, ['batch', capture_path, batch_rel], root)
+    findings = driver_findings(err)
+    findings_text = ''.join(line + '\n' for line in findings)
+    text = normalise_driver(redact(transcript(recorded, code, out, findings_text), capture_path))
+    path = os.path.join(root, GOLDENS_DIR, name, DRIVER_FILE)
+
+    if code != 0 and not out.strip():
+        environment = driver_environment_failure(err)
+        if environment:
+            _print('  %-20s not compared (%s)' % ('driver', environment))
+            return False, 0, []
+        # A failure that is not the environment's, with nothing on stdout: reported, and never written
+        # as an expectation -- a golden of a crash would be a golden that says a crash is correct.
+        return True, 1, ['%s: the driver exited %d with no output (%s)'
+                         % (DRIVER_FILE, code, driver_findings(err)[-1:] or ['no stderr'])]
+
+    if write:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write(text)
+        _print('  %-20s written (%d KB, %d command(s))' % (DRIVER_FILE, len(text) // 1024, len(commands)))
+        return True, 0, []
+
+    if not os.path.isfile(path):
+        return True, 1, ['%s is missing (write it with `goldens --write` and read the diff)' % DRIVER_FILE]
+    with open(path, encoding='utf-8') as handle:
+        expected = handle.read().replace('\r\n', '\n')
+    if expected == text:
+        if verbose:
+            _print('  %-20s ok (%d command(s))' % ('driver', len(commands)))
+        return True, 0, []
+    lines = diff_lines(expected, text)
+    return True, 1, ['%s differs (exit %d):\n    %s' % (DRIVER_FILE, code, '\n    '.join(lines))]
 
 
 def transcript(argv: Sequence[str], code: int, out: str, err: str) -> str:
@@ -791,6 +982,8 @@ def cmd_goldens(argv: Sequence[str] = ()) -> int:
         _print('labels  : not touched (a label file is hand-written, so `--write` never replaces one)')
 
     compared = mismatched = 0
+    driver_any = False
+    driver_argv = list((corpus.get('driver') or {}).get('argv') or [rdc_driver.EXE_PATH])
     notes: List[str] = []
     for capture in corpus['captures']:
         name = str(capture.get('name', ''))
@@ -822,6 +1015,12 @@ def cmd_goldens(argv: Sequence[str] = ()) -> int:
         _count, wrong, problems = check_transcripts(root, capture, write, verbose)
         mismatched += wrong
         notes.extend('%s: %s' % (name, problem) for problem in problems)
+        # The driver's half runs here too, in the same pass and only where it can: it needs the capture,
+        # the built exe and a device, and reports itself as *not compared* when any of them is missing.
+        driver_checked, wrong, problems = check_driver(root, capture, driver_argv, write, verbose)
+        driver_any = driver_any or driver_checked
+        mismatched += wrong
+        notes.extend('%s: %s' % (name, problem) for problem in problems)
         expect = load_expect(os.path.join(root, GOLDENS_DIR, name + EXPECT_SUFFIX))
         if write:
             # The A/B document is the other thing a `--write` refreshes (the labels stay hand-written).
@@ -848,11 +1047,12 @@ def cmd_goldens(argv: Sequence[str] = ()) -> int:
     for note in notes:
         _print('  %s' % note)
     if write:
-        _print('goldens : transcripts written for %d capture(s) -- review the diff before keeping it'
-              % compared)
+        _print('goldens : transcripts and driver text written for %d capture(s) -- review the diff '
+              'before keeping it' % compared)
         return 0
-    _print('goldens : %d capture(s) compared, %d mismatch(es), the pair is %s'
-          % (compared, mismatched, 'compared' if pair_checked else 'not compared'))
+    _print('goldens : %d capture(s) compared, %d mismatch(es), the pair is %s, the driver is %s'
+          % (compared, mismatched, 'compared' if pair_checked else 'not compared',
+             'compared' if driver_any else 'not compared'))
     if not compared and not pair_checked:
         _print('          nothing to compare: no capture of this corpus is on this machine (exit 2)')
         _print('          %s, beside the corpus, says where this machine keeps them' % LOCAL_NAME)
@@ -865,6 +1065,9 @@ __all__ = [
     'CORPUS_NAME',
     'CORPUS_VERSION',
     'DIFF_LINES',
+    'DRIVER_BATCH',
+    'DRIVER_FILE',
+    'ENVIRONMENT_ERRORS',
     'EXPECT_SUFFIX',
     'GOLDENS_DIR',
     'GoldenCapture',
@@ -872,6 +1075,7 @@ __all__ = [
     'GoldenExpect',
     'WORK_DIR',
     'check_bundle',
+    'check_driver',
     'check_labels',
     'check_pair',
     'check_transcripts',
@@ -880,12 +1084,16 @@ __all__ = [
     'compare_document',
     'diff_lines',
     'differing_lines',
+    'driver_environment_failure',
+    'driver_findings',
     'findings_by_detector',
     'load_corpus',
     'load_expect',
+    'normalise_driver',
     'redact',
     'run_command',
     'run_driver',
+    'run_driver_as',
     'sha256_file',
     'tool_path',
     'transcript',

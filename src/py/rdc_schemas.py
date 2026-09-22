@@ -210,6 +210,107 @@ REPORT_SCHEMA['description'] = ('The frame report the offline tool writes: the f
                                 'vocabulary, the red flags and the gaps. Written by `report <rdc> <bundleDir>`; '
                                 'validated by `validate <bundleDir> <schemaDir>`.')
 
+def _ab_side() -> Dict[str, Any]:
+    """One side of the A/B, as `replaydiff.json` states it (a function: the two sides are two objects)."""
+    return _obj({
+        'bundle': _text(),
+        'capture': _text(),
+        'captureSha256': _text(),
+        'api': _text(),
+        'events': {'type': 'integer'},
+        'passes': {'type': 'integer'},
+        'resources': {'type': 'integer'},
+        'messages': {'type': 'integer'},
+        'withImages': {'type': 'integer'},    # how many images the bundle carries, not the flag
+        'renderdoc': _text(),
+    })
+
+#: The **A/B's** own schema, for the same reason as the report's: the document is written by the offline tool
+#: (`replaydiff <bundleA> <bundleB>`), so `schema/` -- which is what the *driver* publishes -- cannot hold it.
+#: Until this existed, `replaydiff.json` carried a `schemaVersion` and no shape at all: a reader could tell
+#: which version of the document it was holding and nothing else, and `validate` could not answer "is this
+#: one this tool wrote?". Every member is required and none may be added, so a field a change dropped or
+#: renamed fails a run instead of reaching a consumer as a missing column -- which is what the report's own
+#: schema has been doing since it landed.
+#:
+#: `withImages` appears twice with two types, deliberately and correctly: the top-level one is *the flag the
+#: run was given* (a boolean) and a side's is *how many images that bundle holds* (a count). The schema is
+#: also what pins that distinction.
+AB_SCHEMA: Dict[str, Any] = _obj({
+    'schemaVersion': {'const': 1},
+    'a': _ab_side(),
+    'b': _ab_side(),
+    'sameCapture': {'type': 'boolean'},
+    'withImages': {'type': 'boolean'},
+    'imagesFound': {'type': 'boolean'},
+    'imageDetail': {'type': 'integer'},
+    'passes': _arr(_obj({
+        'path': _text(),
+        'status': _text(),
+        'note': _text(),
+        'aFirstEid': {'type': 'integer'},
+        'bFirstEid': {'type': 'integer'},
+        'structure': _text(),
+        'changes': _arr(_obj({'field': _text(), 'a': _text(), 'b': _text()})),
+        'stateRemoved': _arr(_text()),
+        'stateAdded': _arr(_text()),
+        'shaders': _arr(_obj({
+            'stage': _text(),
+            'verdict': _text(),
+            'aHash': _text(),
+            'bHash': _text(),
+            'aBytes': {'type': 'integer'},
+            'bBytes': {'type': 'integer'},
+            'changes': _arr(_obj({'field': _text(), 'a': _text(), 'b': _text()})),
+        })),
+        'cbuffers': _arr(_obj({
+            'block': _text(),
+            'stage': _text(),
+            'slot': {'type': 'integer'},
+            'aFile': _text(),
+            'bFile': _text(),
+            'notes': _arr(_text()),
+            'values': _arr(_obj({'member': _text(), 'a': _text(), 'b': _text()})),
+        })),
+        'images': _arr(_obj({
+            'slot': {'type': 'integer'},
+            'verdict': _text(),
+            'aEid': {'type': 'integer'},
+            'bEid': {'type': 'integer'},
+            'aFile': _text(),
+            'bFile': _text(),
+            'width': {'type': 'integer'},
+            'height': {'type': 'integer'},
+            'differing': {'type': 'integer'},
+            # The three statistics are *formatted* in the document ("12.4%"): they are printed as they
+            # are rendered in the Markdown, so a consumer reads the same text the report shows.
+            'percentDiffering': _text(),
+            'meanDelta': _text(),
+            'maxDelta': {'type': 'integer'},
+            'hashDistance': {'type': 'integer'},
+            'heatMap': _text(),
+            'note': _text(),
+        })),
+    })),
+    'summary': _obj({
+        'same': {'type': 'integer'},
+        'added': {'type': 'integer'},
+        'removed': {'type': 'integer'},
+        'structureChanges': {'type': 'integer'},
+        'stateChanges': {'type': 'integer'},
+        'constantsChanged': {'type': 'integer'},
+        'shadersDifferent': {'type': 'integer'},
+        'imagesCompared': {'type': 'integer'},
+        'imagesNotCompared': {'type': 'integer'},
+    }),
+    'caveats': _arr(_text()),
+})
+AB_SCHEMA['title'] = 'replaydiff'
+AB_SCHEMA['description'] = ('The A/B of two bundles the offline tool writes: each side\'s frame, the aligned '
+                            'passes with what differs inside them, and the counts the summary line prints. '
+                            'Written by `replaydiff <bundleA> <bundleB>`; validated by '
+                            '`validate <replaydiff.json> <schemaDir> replaydiff`.')
+
 class SchemaError(Exception):
     """A schema file that cannot be used: unreadable, not JSON, or not an object."""
 
@@ -335,10 +436,11 @@ def load_schemas(schema_dir: str) -> Dict[str, Dict[str, Any]]:
         if not isinstance(schema, dict):
             raise SchemaError('%s is not a JSON object' % name)
         schemas[kind] = schema
-    # The report's schema is this module's own data (see `REPORT_SCHEMA`), not a file the driver publishes: the
-    # offline tool writes that document. A folder that carries a `report.schema.json` of its own wins, so a
-    # consumer can pin a different revision without a code change.
+    # Two of the documents are this module's own data (see `REPORT_SCHEMA` and `AB_SCHEMA`), not files the
+    # driver publishes: the offline tool writes both. A folder that carries a `report.schema.json` of its own
+    # wins, so a consumer can pin a different revision without a code change -- the same for `replaydiff`.
     schemas.setdefault('report', REPORT_SCHEMA)
+    schemas.setdefault('replaydiff', AB_SCHEMA)
     return schemas
 
 #: Which schema a bundle file's *name* identifies. The rest of a bundle (PNGs, `cbuffers/`) is not a
@@ -357,6 +459,8 @@ def schema_for_file(name: str) -> Optional[str]:
     base = os.path.basename(name).lower()
     if base == 'report.json':
         return 'report'
+    if base == 'replaydiff.json':
+        return 'replaydiff'    # the A/B's own document, which the offline tool writes
     if base in BUNDLE_SCHEMAS:
         return BUNDLE_SCHEMAS[base]
     if base.endswith('.state.json'):

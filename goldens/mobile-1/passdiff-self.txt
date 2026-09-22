@@ -41,5 +41,5 @@ verdicts  : added 0, removed 0, renamed? 0, 34 path(s) in both
 32    358..634         358..634         18       18       FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender
 33    240..634         240..634         24       24       FRDGBuilder::Execute > MobileSceneRender
 34    194..634         194..634         24       24       FRDGBuilder::Execute
-note      : chunk indices are the file's numbering, not the engine's event ids (REFERENCE �9): `replay_dump draws` prints the engine's own, and both take a marker path
+note      : chunk indices are the file's numbering, not the engine's event ids (REFERENCE §9): `replay_dump draws` prints the engine's own, and both take a marker path
 --- stderr ---

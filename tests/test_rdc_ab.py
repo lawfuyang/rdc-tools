@@ -733,6 +733,53 @@ class TestReplayDiffCommand(BundleCase):
         self.assertIn('# replaydiff', markdown)
         self.assertIn('## What this cannot say', markdown)
 
+    def test_the_json_twin_is_schema_valid(self):
+        """The A/B's own schema against the document it describes (the acceptance gate of ROADMAP §5).
+
+        Like the report's, the schema lives in `rdc_schemas.py` rather than in `schema/`: that folder is
+        what the *driver* publishes, and this document is the offline tool's. The schema is exhaustive and
+        closed, so a member a change dropped or renamed fails here rather than reaching a consumer as a
+        missing column -- and the two halves of the document that only a run with images produces are
+        exercised by asking for images.
+        """
+        event_row = [event(1, marker='Scene > BasePass', targets=['11 64x64x1 R8G8B8A8_UNORM']),
+                     event(5, marker='Scene > BasePass', targets=['11 64x64x1 R8G8B8A8_UNORM'])]
+        a = self.bundle('a', events=event_row, resources=[resource('11', first=1)])
+        b = self.bundle('b', events=event_row, resources=[resource('11', first=1)],
+                        manifest={'captureSha256': 'cd' * 32})
+        self.write_image(a, 5, 0, self.image((1, 2, 3, 255)))
+        self.write_image(b, 5, 0, self.image((1, 2, 9, 255)))
+        out = self.path('diff')
+        self.assertEqual(R.cmd_replaydiff(a, b, ['--out', out, '--with-images']), 0)
+        with open(os.path.join(out, 'replaydiff.json'), encoding='utf-8') as handle:
+            document = json.load(handle)
+        self.assertTrue(document['passes'], 'the fixture should have produced an aligned pass')
+        self.assertEqual(R.validate_document(document, R.AB_SCHEMA), [])
+
+    def test_the_ab_schema_notices_a_member_that_went_missing(self):
+        a = self.bundle('a', events=[event(1, marker='P')])
+        b = self.bundle('b', events=[event(1, marker='P')])
+        out = self.path('diff')
+        R.cmd_replaydiff(a, b, ['--out', out])
+        with open(os.path.join(out, 'replaydiff.json'), encoding='utf-8') as handle:
+            document = json.load(handle)
+        del document['sameCapture']
+        problems = R.validate_document(document, R.AB_SCHEMA)
+        self.assertTrue(problems, 'a missing member is not a valid document')
+        self.assertTrue(any('sameCapture' in problem for problem in problems))
+
+    def test_the_ab_schema_notices_a_field_that_changed_type(self):
+        """The flag and a side's count are both called `withImages`; the schema keeps them apart."""
+        a = self.bundle('a', events=[event(1, marker='P')])
+        b = self.bundle('b', events=[event(1, marker='P')])
+        out = self.path('diff')
+        R.cmd_replaydiff(a, b, ['--out', out])
+        with open(os.path.join(out, 'replaydiff.json'), encoding='utf-8') as handle:
+            document = json.load(handle)
+        document['withImages'] = 3          # the *side*'s type, in the flag's place
+        problems = R.validate_document(document, R.AB_SCHEMA)
+        self.assertTrue(any('withImages' in problem for problem in problems))
+
     def test_the_same_capture_on_both_sides_is_named_as_a_tools_ab(self):
         event_row = [event(1, marker='P')]
         a = self.bundle('a', events=event_row)

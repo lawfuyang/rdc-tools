@@ -1381,5 +1381,187 @@ class TestRealCapture(unittest.TestCase):
                 self.assertTrue(capture_text(cmd, self.path).strip())
 
 
+class TestFormats(CmdCase):
+    """`--format csv|markdown` on the five row commands: the same rows, and stdout left as a table.
+
+    The terminal form is pinned by every other test in this file (they read the lines it prints), so
+    what is checked here is the other half of the promise: the formats carry the same *data*, the
+    prose the terminal form prints around the rows moves to stderr, a value a CSV cannot hold plain is
+    quoted, and the selection is unchanged (`resources`' limit and `summary`'s caps still apply).
+    """
+
+    def three_resources(self) -> str:
+        chunks = []
+        for i in range(1, 4):
+            chunks.append(self.ch('Device_CreateCommittedResource',
+                                  F.pl_committed_resource(i, F.pl_resource_desc(1, 64))))
+            chunks.append(self.ch('SetName', F.pl_set_name(i, 'Buffer%d' % i)))
+        return self.cap(*chunks)
+
+    def descriptors_capture(self) -> str:
+        return self.cap(
+            self.ch('Device_CreateDescriptorHeap', F.pl_descriptor_heap(298)),
+            self.ch('Device_CreateDescriptorHeap', F.pl_descriptor_heap(299, heap_type=1)),
+            self.ch('Device_CreateShaderResourceView',
+                    F.pl_descriptor_write(2233, heap=298, index=138456)),
+            self.ch('Device_CreateUnorderedAccessView',
+                    F.pl_descriptor_write(2234, heap=298, index=138458)),
+            self.ch('Device_CreateSampler', F.pl_descriptor_write(0, heap=299, index=0)),
+            self.ch('SetName', F.pl_set_name(298, 'GlobalResourceHeap')),
+            self.ch('SetName', F.pl_set_name(299, 'GlobalSamplerHeap')),
+            self.ch('SetName', F.pl_set_name(2233, 'SkyAtmosphere.SkyViewLut')))
+
+    def summary_capture(self, markers: int = 1, draws: int = 2) -> str:
+        chunks = [self.ch('PushMarker', b'Marker%02d\x00' % i) for i in range(markers)]
+        for _ in range(draws):
+            chunks.append(self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)))
+        chunks.append(self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1)))
+        return self.cap(*chunks)
+
+    def out_and_err(self, fn: Callable[..., object], *args: Any, **kwargs: Any) -> Any:
+        """`(stdout, stderr)` apart -- which stream carries what is the point of these tests.
+
+        `capture_all` concatenates the two (the selftest needs that); this keeps them separate, so
+        "the table is on stdout and the counts are on stderr" can be asserted rather than assumed.
+        """
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            fn(*args, **kwargs)
+        return out.getvalue(), err.getvalue()
+
+    def frame_with_state(self) -> str:
+        return self.cap(*[
+            self.ch('PushMarker', b'BasePass\x00'),
+            self.ch('List_SetPipelineState', F.pl_pso(7, 3042)),
+            self.ch('List_SetGraphicsRootConstantBufferView', F.pl_root_view(7, 10, 1907, 0x120000)),
+            self.ch('List_IASetIndexBuffer', F.pl_index_buffer(7, 80641, 0x3F2B0000, 16, 57)),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 2880, 1, 0, 0, 0)),
+            self.ch('PopMarker', b''),
+        ])
+
+    def test_resources_csv_is_the_rows_and_the_counts_move_to_stderr(self):
+        path = self.three_resources()
+        stdout, stderr = self.out_and_err(R.cmd_resources, path, 200, None, 'csv')
+        self.assertEqual(stdout.splitlines()[0], 'id,kind,size,name')
+        self.assertIn('1,buffer,64 B,Buffer1', stdout)
+        self.assertEqual(len(stdout.splitlines()), 4)          # the header and the three rows
+        self.assertIn('resources: 3 ids (3 with a descriptor, 3 named)', stderr)
+        self.assertIn('total resources: 3 (shown 3)', stderr)
+        self.assertNotIn('resources:', stdout)                 # nothing but the table on stdout
+
+    def test_the_rows_are_the_terminal_forms_rows(self):
+        """Same selection, same order: the CSV row per resource is the table row's own fields."""
+        path = self.three_resources()
+        table = self.out(R.cmd_resources, path)
+        stdout, _ = self.out_and_err(R.cmd_resources, path, 200, None, 'csv')
+        table_rows = [l for l in table.splitlines() if l.startswith('res') and 'resources:' not in l]
+        self.assertEqual(len(table_rows), len(stdout.splitlines()) - 1)
+        for line in table_rows:
+            rid = line.split()[0][3:]
+            self.assertIn('\n%s,' % rid, stdout)
+
+    def test_a_value_with_a_comma_or_a_quote_is_quoted(self):
+        path = self.cap(self.ch('Device_CreateCommittedResource',
+                                F.pl_committed_resource(1, F.pl_resource_desc(1, 64))),
+                        self.ch('SetName', F.pl_set_name(1, 'Sky, "Lut"')))
+        stdout, _ = self.out_and_err(R.cmd_resources, path, 200, None, 'csv')
+        self.assertIn('"Sky, ""Lut"""', stdout)
+
+    def test_a_value_with_a_pipe_is_escaped_in_markdown(self):
+        path = self.cap(self.ch('Device_CreateCommittedResource',
+                                F.pl_committed_resource(1, F.pl_resource_desc(1, 64))),
+                        self.ch('SetName', F.pl_set_name(1, 'a|b')))
+        stdout, _ = self.out_and_err(R.cmd_resources, path, 200, None, 'markdown')
+        self.assertEqual(stdout.splitlines()[0], '| id | kind | size | name |')
+        self.assertEqual(stdout.splitlines()[1], '|---|---|---|---|')
+        self.assertIn('a\\|b', stdout)
+
+    def test_resources_limit_still_caps_the_rows(self):
+        path = self.three_resources()
+        stdout, stderr = self.out_and_err(R.cmd_resources, path, 2, None, 'csv')
+        self.assertEqual(len(stdout.splitlines()), 3)          # the header and two rows
+        self.assertIn('total resources: 3 (shown 2)', stderr)
+
+    def test_descriptors_rows_repeat_the_heap(self):
+        path = self.descriptors_capture()
+        stdout, stderr = self.out_and_err(R.cmd_descriptors, path, 200, None, 'csv')
+        self.assertEqual(stdout.splitlines()[0], 'heap,heapName,slot,kind,target')
+        # The terminal form prints each heap once and indents its slots under it; a table has to
+        # repeat the heap on every row, or the row means nothing on its own.
+        rows = [line.split(',') for line in stdout.splitlines()[1:]]
+        self.assertEqual(len(rows), 3)                      # the three written slots
+        self.assertEqual([row[0] for row in rows], ['298', '298', '299'])
+        self.assertEqual([row[1] for row in rows], ['GlobalResourceHeap'] * 2 + ['GlobalSamplerHeap'])
+        self.assertIn('descriptor heaps: 2, 3 written slots', stderr)
+
+    def test_rootsig_has_one_row_per_parameter(self):
+        path = self.cap(self.sig_chunk(1, [('cbv', 0, 0, 0, 0, []), ('table', 0, 0, 0, 0, [])]))
+        stdout, _ = self.out_and_err(R.cmd_rootsig, path, 40, 'csv')
+        self.assertEqual(stdout.splitlines()[0], 'id,version,dwords,samplers,flags,parameter')
+        self.assertIn('rp0(cbv b0 s0)', stdout)
+        self.assertIn('rp1(', stdout)
+        self.assertEqual(len(stdout.splitlines()), 3)          # the header and the two parameters
+
+    def test_draws_folds_the_state_lines_into_one_cell(self):
+        path = self.frame_with_state()
+        table = self.out(R.cmd_draws, path)
+        self.assertIn('CBV: rp10=res1907', table)              # the sub-line the table form prints
+        stdout, stderr = self.out_and_err(R.cmd_draws, path, 80, 'csv')
+        self.assertEqual(stdout.splitlines()[0], 'chunk,path,pso,args,call,state')
+        self.assertEqual(len(stdout.splitlines()), 2)          # the header and the one draw
+        self.assertIn('CBV: rp10=res1907', stdout)             # ... now inside the row's last cell
+        self.assertIn('total draws/dispatches: 1', stderr)
+
+    def test_summary_csv_is_the_long_form(self):
+        path = self.summary_capture(markers=2)
+        stdout, _ = self.out_and_err(R.cmd_summary, path, 'csv')
+        self.assertEqual(stdout.splitlines()[0], 'section,name,value')
+        self.assertIn('frame,chunks,', stdout)
+        self.assertIn('frame,markers,2', stdout)
+        self.assertIn('chunk-type,', stdout)
+        self.assertIn('marker,#1,', stdout)
+
+    def test_summary_caps_are_the_terminal_forms(self):
+        path = self.summary_capture(markers=121, draws=0)
+        stdout, stderr = self.out_and_err(R.cmd_summary, path, 'csv')
+        markers = [l for l in stdout.splitlines() if l.startswith('marker,')]
+        self.assertEqual(len(markers), 120)
+        self.assertIn('... 1 more', stderr)
+
+    def test_the_flag_may_come_before_the_positional_arguments(self):
+        path = self.three_resources()
+        with mock.patch.object(sys, 'argv',
+                               ['rdc_analysis.py', 'resources', path, '--format', 'csv', '2']):
+            stdout = self.out(R.main)
+        self.assertEqual(stdout.splitlines()[0], 'id,kind,size,name')
+        self.assertEqual(len(stdout.splitlines()), 3)          # the limit was read as the limit
+
+    def test_an_unknown_format_is_a_usage_error(self):
+        """`SystemExit` rather than a patched `sys.exit`: the exit is what stops the command running
+        with a format it cannot render, so the check has to be that it really leaves."""
+        path = self.three_resources()
+        for name in ('xml', 'CSV', ''):
+            with self.subTest(format=name):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), \
+                        mock.patch.object(sys, 'argv',
+                                          ['rdc_analysis.py', 'resources', path, '--format', name]), \
+                        self.assertRaises(SystemExit) as leave:
+                    R.main()
+                self.assertEqual(leave.exception.code, 2)
+                self.assertIn('usage: rdc_analysis.py resources <rdc> [args] [--format table|csv|markdown]',
+                              out.getvalue())
+
+    def test_a_missing_format_value_is_a_usage_error(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'draws', self.three_resources(),
+                                                '--format']), \
+                self.assertRaises(SystemExit) as leave:
+            R.main()
+        self.assertEqual(leave.exception.code, 2)
+        self.assertIn('usage: rdc_analysis.py draws', out.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

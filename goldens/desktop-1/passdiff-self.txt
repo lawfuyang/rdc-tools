@@ -48,5 +48,5 @@ verdicts  : added 0, removed 0, renamed? 0, 71 path(s) in both
 39    1494..1501       1494..1501       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube 2 instances
 40    1503..1508       1503..1508       1        1        FRDGBuilder::Execute > Scene > Scene > BasePass > BasePassParallel > /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
   ... 31 more (--all prints every row)
-note      : chunk indices are the file's numbering, not the engine's event ids (REFERENCE �9): `replay_dump draws` prints the engine's own, and both take a marker path
+note      : chunk indices are the file's numbering, not the engine's event ids (REFERENCE §9): `replay_dump draws` prints the engine's own, and both take a marker path
 --- stderr ---

@@ -15,11 +15,32 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
 
 - `selftest -v` for per-test output, `selftest -k Draws` to run only matching test ids.
 - A change that can move what a **command prints** (a decoder, a table, `draws`/`resources`/`deps`/`memory`/
-  `dxbc`, a report section) is not finished until the corpus agrees either: `python src\py\rdc_analysis.py
-  goldens --check` (REFERENCE §4.17) diffs every transcript under `goldens/` and compares the labels — 36 s on
-  this machine, and it exits 2 when the captures are not here, which means "not compared", not "clean". When
-  the change is deliberate, `goldens --write` refreshes the transcripts and **that diff is the review**: read
-  it, then keep it. The labels (`*.expect.json`) are hand-written and `--write` never touches them.
+  `dxbc`, a report section, the driver's own text) is not finished until the corpus agrees either: `python
+  src\py\rdc_analysis.py goldens --check` (REFERENCE §4.17) diffs every transcript under `goldens/`, compares
+  the labels *and* runs each capture's `driverCommands` through one `batch` session, diffing the driver's text
+  too — about a minute on this machine (half of it the driver half, which needs the built exe and a GPU), and
+  it exits 2 when the captures are not here, which means "not compared", not "clean". When the change is
+  deliberate, `goldens --write` refreshes the transcripts and the driver texts, and **that diff is the
+  review**: read it, then keep it. The labels (`*.expect.json`) are hand-written and `--write` never touches
+  them.
+- **The driver's half of that check has two rules that keep it from crying wolf, and one that keeps it
+  honest.** The header's `renderdoc` field is the *installed* engine and is written `<engine>` (the version
+  guard judges that number, not a golden); the driver's stderr reaches the golden as findings only, because
+  its per-step log lines carry seconds and a timestamped log path. And a run that failed for the machine's
+  reasons (no DLL, no replay system, no device, a capture from a newer engine) is "not compared" while any
+  other failure is compared — but a failure with *no output* is reported and **never** written as an
+  expectation: a golden of a crash would be a golden that says a crash is correct.
+- **`--format csv|markdown` may not change an answer, only its shape.** The five row commands build their
+  rows once and print either form from that list, so the terminal and the CSV cannot drift; in the non-table
+  forms stdout is the table *alone* and the prose moves to stderr, and every cap (a limit, the top 40 chunk
+  types, the first 120 markers) still applies. If a format needs a different selection, that is a different
+  command, not a flag.
+- **The driver refuses a capture from a newer RenderDoc than the engine it loaded** (`--dll` over
+  `$RDC_RENDERDOC_DLL` over the installed one), before `InitialiseReplay` — both versions named, exit 1, no
+  device created. It reads the container's 32-byte header itself because the replay API has no accessor for
+  the recording version, and it does not guess when a version does not parse. Do not "fix" a refusal by
+  lowering the comparison: an older engine answering from another version's decoding is the failure this
+  exists to prevent (REFERENCE §9 has the tested matrix).
 - **The corpus is generic, and a path is never committed.** A capture is a key (`desktop-1`, `desktop-2`,
   `mobile-1`: platform, then size ascending) plus a SHA-256; where *this* machine keeps the file is
   `goldens/captures.local.json`, which `.gitignore` keeps out of the repository because a path is local state
@@ -30,9 +51,10 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   `tests/test_rdc_goldens.py` checks that the checked-in goldens carry no path (and skips where the local file
   is absent, which is CI).
 - **A capture's own strings are a separate question from its path, and redaction cannot touch them**: a
-  transcript *is* the frame's words, so a capture whose author has not said they may be published is in the
-  corpus by identity only — no transcript, no label, `commands: []`. `desktop-2` is that capture, and
-  REFERENCE §4.17 records both the rule and the scan that verifies nothing of it is left in the tree.
+  transcript *is* the frame's words, and so is a driver's text, so a capture whose author has not said they
+  may be published is in the corpus by identity only — no transcript, no label, no document,
+  `commands: []` **and** `driverCommands: []`. `desktop-2` is that capture, and REFERENCE §4.17 records both
+  the rule and the scan that verifies nothing of it is left in the tree.
 - Other entry points, one file per area (`tests/rdc_testcase.py` holds what they share, and is not a test
   file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource

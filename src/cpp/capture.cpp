@@ -354,17 +354,29 @@ FILE *OpenLog(const std::string &requested, bool bPerRun, std::string &openedAs)
 
 pGetVersionString g_GetVersionString = NULL;
 pShutdownReplay g_ShutdownReplay = NULL;
+std::string g_DllOverride;
 
+//: Which renderdoc.dll to load: `--dll` first, then `$RDC_RENDERDOC_DLL`, then the installed engine.
+//:
+//: The flag is not a convenience over the environment variable. Comparing two builds -- "does this
+//: capture replay the same under 1.46 and under 1.47?" -- is the same command twice with two `--dll`s,
+//: where the environment would have to be re-set between runs and cannot be set per run at all.
 HMODULE LoadReplayDLL()
 {
   const char *env = getenv("RDC_RENDERDOC_DLL");
-  std::string path = env && *env ? env : "C:\\Program Files\\RenderDoc\\renderdoc.dll";
+  const char *fallback = "C:\\Program Files\\RenderDoc\\renderdoc.dll";
+  const std::string path = !g_DllOverride.empty()
+                               ? g_DllOverride
+                               : (env && *env ? std::string(env) : std::string(fallback));
 
   HMODULE dll = LoadLibraryA(path.c_str());
   if(dll == NULL)
   {
-    fprintf(stderr, "cannot load %s (set RDC_RENDERDOC_DLL to the renderdoc.dll to use)\n",
-            path.c_str());
+    fprintf(
+        stderr,
+        "cannot load %s (pass --dll <path>, or set RDC_RENDERDOC_DLL, to name the renderdoc.dll "
+        "to replay with)\n",
+        path.c_str());
     return NULL;
   }
   g_GetVersionString = (pGetVersionString)GetProcAddress(dll, "RENDERDOC_GetVersionString");
@@ -445,6 +457,116 @@ void PrintCaptureHeader(ICaptureFile *file, const char *path)
   Field("driver", file->DriverName());
   Field("localReplay", (long long)file->LocalReplaySupport());
   Field("machine", file->RecordedMachineIdent());
+}
+
+// --------------------------------------------------------------------------- the version guard
+//
+// Replay must be done by an engine at least as new as the one that recorded the capture. The engine
+// checks the *logfile format* version itself and fails with a message of its own (rdcfile.cpp's
+// `FileIncompatibleVersion`), but the *program* version -- the number a reader is holding, and the
+// one that differs between the machine that captured and the machine that replays -- lives in the
+// container header, where nothing was looking at it. Before this guard a mismatch surfaced as
+// whatever the engine did next: a section it could not read, a resource it refused, or an answer
+// quietly produced by another version's decoding, which looks exactly like an answer.
+//
+// The comparison is MAJOR.MINOR: what `RENDERDOC_GetVersionString` returns ("1.46") and what the
+// header's recording string starts with ("1.46 e4bd23" -- version, then the commit). Unparsable
+// versions are *not* a refusal, because the file may be from a fork or a development build, and a
+// guard that guesses about a capture it cannot read is worse than no guard at all. So: older is
+// refused, equal and newer are allowed, unknown is said and passed on.
+
+bool ReadCaptureVersion(const char *path, CaptureVersion &out)
+{
+  FILE *f = fopen(path, "rb");
+  if(f == NULL)
+    return false;
+  unsigned char header[32] = {0};
+  const size_t read = fread(header, 1, sizeof(header), f);
+  fclose(f);
+  if(read != sizeof(header) || memcmp(header, "RDOC", 4) != 0)
+    return false;    // not one of ours: the engine's own OpenFile reports it, with its own message
+
+  out.logfile = (uint32_t)header[8] | ((uint32_t)header[9] << 8) | ((uint32_t)header[10] << 16) |
+                ((uint32_t)header[11] << 24);
+  const char *text = (const char *)header + 16;    // up to 16 bytes, NUL-padded
+  size_t length = 0;
+  while(length < 16 && text[length] != '\0')
+    length++;
+  out.program.assign(text, length);
+  return true;
+}
+
+bool ParseMajorMinor(const std::string &text, int &major, int &minor)
+{
+  size_t i = 0;
+  if(i < text.size() && (text[i] == 'v' || text[i] == 'V'))
+    i++;    // a release tag as a build writes it ("v1.46"), not a form this driver prints
+  const size_t first = i;
+  while(i < text.size() && text[i] >= '0' && text[i] <= '9')
+    i++;
+  if(i == first)
+    return false;
+  major = atoi(text.substr(first, i - first).c_str());
+  if(i >= text.size() || text[i] != '.')
+    return false;
+  i++;
+  const size_t second = i;
+  while(i < text.size() && text[i] >= '0' && text[i] <= '9')
+    i++;
+  if(i == second)
+    return false;
+  minor = atoi(text.substr(second, i - second).c_str());
+  return true;
+}
+
+int CompareMajorMinor(const std::string &engine, const std::string &capture, bool &known)
+{
+  int engineMajor = 0, engineMinor = 0, captureMajor = 0, captureMinor = 0;
+  known = ParseMajorMinor(engine, engineMajor, engineMinor) &&
+          ParseMajorMinor(capture, captureMajor, captureMinor);
+  if(!known)
+    return 0;
+  // Numerically, not as text: "1.9" is older than "1.10" and a string compare says the opposite.
+  if(engineMajor != captureMajor)
+    return engineMajor < captureMajor ? -1 : 1;
+  if(engineMinor != captureMinor)
+    return engineMinor < captureMinor ? -1 : 1;
+  return 0;
+}
+
+int GuardCaptureVersion(const char *pathAbs, const char *pathAsGiven)
+{
+  if(g_GetVersionString == NULL)
+    return 0;    // no version to compare with: the engine's own checks are all there is
+
+  CaptureVersion capture;
+  if(!ReadCaptureVersion(pathAbs, capture))
+    return 0;    // not a container this can read: `OpenFile` says so, with the engine's own message
+
+  const std::string engine = g_GetVersionString();
+  bool known = false;
+  const int order = CompareMajorMinor(engine, capture.program, known);
+  if(!known)
+  {
+    Log("note: cannot compare versions: %s says '%s' (logfile version %u) and this engine says "
+        "'%s'",
+        pathAsGiven, capture.program.c_str(), (unsigned)capture.logfile, engine.c_str());
+    return 0;
+  }
+  if(order < 0)
+    return Fail(
+        1,
+        "%s was recorded by RenderDoc %s, and this replay engine is %s: replay must be at "
+        "least the capture's version, because an older engine answers from another version's "
+        "decoding rather than reporting an error. Install a newer RenderDoc, or point at one "
+        "with `--dll <path>` or $RDC_RENDERDOC_DLL.",
+        pathAsGiven, capture.program.c_str(), engine.c_str());
+  if(order > 0)
+    Log("note: %s was recorded by RenderDoc %s; this engine is %s -- newer than the capture, which "
+        "is "
+        "allowed (replaying an older capture is the tested direction)",
+        pathAsGiven, capture.program.c_str(), engine.c_str());
+  return 0;
 }
 
 bool ParseInt(const char *text, int &value)

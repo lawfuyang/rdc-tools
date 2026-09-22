@@ -1,0 +1,123 @@
+# bin\replay_dump.exe batch <capture> build\goldens\desktop-1\driver.batch.txt
+# exit: 0
+--- stdout ---
+#=== info
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+pipelineType       1
+localRenderer      1
+remoteReplay       0
+vendor             6
+shaderDebugging    1
+pixelHistory       1
+chunks             2132
+resources          493
+textures           62
+buffers            149
+debugMessages      0
+#=== draws 12
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+23      0     FRDGBuilder::Execute
+28      1       ID3D12GraphicsCommandList::ResolveQueryData()
+29      1       ID3D12GraphicsCommandList::ResolveQueryData()
+30      1       ID3D12GraphicsCommandList::ResolveQueryData()
+46      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+47      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+48      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+49      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+50      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+51      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+52      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+53      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+totalActions       559
+totalCalls         187
+shown              12
+#=== textures
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+res326     dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.00 MB
+res327     dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.00 MB
+res340     dim=2 1x1x1 mips=1 arr=6 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2207    dim=2 2003x1254x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
+res2209    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2213    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2215    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2219    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.00 MB
+res2246    dim=2 128x32x1 mips=1 arr=1 smp=1 fmt=R16G16_UNORM 0.02 MB
+res2255    dim=2 2048x2048x1 mips=1 arr=1 smp=1 fmt=A8_UNORM 4.00 MB
+res60749   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res60750   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res60751   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res60752   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res60753   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res60754   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res60755   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res60757   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.06 MB
+res60758   dim=3 16x16x16 mips=1 arr=1 smp=1 fmt=R8G8B8A8_UINT 0.06 MB
+res60826   dim=2 256x64x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res60827   dim=2 32x32x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res60828   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res60829   dim=2 192x104x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.12 MB
+res60830   dim=3 32x32x16 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.12 MB
+res60843   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=D32S8_TYPELESS 12.38 MB
+res60857   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
+res60858   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
+res60859   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
+res60860   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
+res60861   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
+res60862   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
+res60863   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res60864   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.06 MB
+res61303   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32G32B32A32_FLOAT 0.06 MB
+res61304   dim=3 32x32x32 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 0.12 MB
+res61308   dim=2 512x512x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.25 MB
+res61309   dim=2 1024x512x1 mips=10 arr=1 smp=1 fmt=R16_FLOAT 1.38 MB
+res61312   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
+res61313   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61314   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61315   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61316   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61317   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61318   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61319   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61320   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res61321   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
+res61322   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res61323   dim=2 1x1x1 mips=1 arr=3 smp=1 fmt=R32_UINT 0.06 MB
+res61324   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
+res61325   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res61328   dim=2 1x1x1 mips=1 arr=3 smp=1 fmt=R32_UINT 0.06 MB
+res61329   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 9.88 MB
+res61330   dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
+res61331   dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.62 MB
+res61332   dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 1.25 MB
+res61333   dim=2 251x157x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.31 MB
+res61334   dim=2 126x79x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.12 MB
+res61335   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
+res61336   dim=2 63x40x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res61337   dim=2 32x20x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res61454   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
+total              62
+shown              62
+#=== debug
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+total              0
+--- stderr ---

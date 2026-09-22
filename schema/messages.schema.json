@@ -1,6 +1,6 @@
 {
   "title": "messages",
-  "description": "The engine's own messages, one row each (`eid <n>  <severity>  <text>`), plus the header. Rows are strings: they are the same text the terminal prints, so nothing is lost between the two forms.",
+  "description": "The engine's own messages, one row each (`eid <n>  <severity>  <text>`), plus the header. Rows are strings: they are the same text the terminal prints, so nothing is lost between the two forms. With `debug --group` a row is one *distinct* message (`eid <first>..<last>  <n>x  severity(n) category(n) source(n) id(n)  <text>`) and `total` counts the groups rather than the messages.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "messages", "total"],
   "properties": {

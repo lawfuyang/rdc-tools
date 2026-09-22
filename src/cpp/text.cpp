@@ -80,6 +80,34 @@ std::string SeverityText(MessageSeverity severity)
   return buf;
 }
 
+//: The names `--fail-on` takes, lowercase and exact like the stage names. `high` is the *most*
+//: severe (the enum's 0), so "fail on medium" means High or Medium: the threshold is a floor of
+//: severity, not a number to compare downwards. A table rather than a chain of ifs, because the
+//: accepted spellings are part of a command line and belong in one place.
+bool SeverityFromName(const char *name, MessageSeverity &out)
+{
+  static const struct
+  {
+    const char *m_Name;
+    MessageSeverity m_Severity;
+  } kSeverities[] = {
+      {"high", MessageSeverity::High},
+      {"medium", MessageSeverity::Medium},
+      {"low", MessageSeverity::Low},
+      {"info", MessageSeverity::Info},
+  };
+
+  for(size_t i = 0; i < sizeof(kSeverities) / sizeof(kSeverities[0]); i++)
+  {
+    if(name != NULL && strcmp(name, kSeverities[i].m_Name) == 0)
+    {
+      out = kSeverities[i].m_Severity;
+      return true;
+    }
+  }
+  return false;
+}
+
 std::string CounterText(GPUCounter counter)
 {
   char buf[32];

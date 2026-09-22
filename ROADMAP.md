@@ -110,9 +110,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 * **`watch <name>`** — given a reflection member name (`Light.intensity`, `Material.Opacity`), print its value at
   every event of the frame as a small table, so a uniform that is right at one draw and wrong at the next is one
   command instead of forty `cb` calls. Slow by nature (a cbuffer read per event), so it takes a range. (~4–6 h)
-* **`debug --group [--fail-on <severity>]`** — group messages by type/hash with counts and first/last eid, and
-  exit non-zero when anything at or above a severity appears: the driver-side sanity gate, and the source of the
-  summary's red-flag section. (~3 h)
 * **The driver as a library** — a thin C ABI over the same code, called from Python with `ctypes`, so the offline
   tool can query a frame in-process instead of one process per question. It makes the report's bundle an optimisation
   rather than a requirement ("ask the engine for just what the summary needs"), and removes the 28-process
@@ -155,9 +152,6 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 4. P1/P2 — Offline analysis: what the file knows that the frame does not
 
-* **CSV and Markdown tables** — `--format table|csv|markdown` on `draws`, `resources`, `descriptors`, `rootsig`,
-  `summary`, so results can be pasted into an issue or opened in a spreadsheet. (The replay driver has `--json`;
-  the offline tool is the cheap, device-free half.) (~2 h)
 * **Structural capture diff** — `diff <a.rdc> <b.rdc>` for the file's own view: same draw index or marker path,
   what changed in PSO/CBVs/streams/descriptors. It can say *"rp2 was a compute CBV at b0, now a vertex CBV at b1;
   `SkyViewLut` left the table"* because `draws` now carries the command-list state, resource names, descriptor
@@ -172,25 +166,13 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 5. P2 — Verification, regression and the bug atlas
 
-* **Schemas for the tool's own documents** — `report.json` has one (`rdc_schemas.REPORT_SCHEMA`, built in
-  Python because `schema/` is the driver's) and `replaydiff.json` (REFERENCE §4.16) carries a `schemaVersion`
-  but no checked shape, so `validate` cannot tell a reader whether a document it is handed is one this tool
-  wrote. The schema, plus a test that walks it against a document the tests write, closes the same gap for the
-  A/B that the report closed for itself. (~2 h)
-* **The driver's own golden text** — `goldens` (REFERENCE §4.17) pins the *offline* tool's output and validates
-  the documents the driver wrote, but the driver's **text** output per eid is still compared by hand
-  (`batch` a command list into a file, rebuild, diff). Checking that in needs a capture and a GPU on the
-  machine that regenerates it, so the shape of the item is a checked-in expectation per capture plus a
-  `batch`-based script that regenerates and diffs it — the offline goldens are the model. (~half a day)
 * **The captures' known-bug lists** — the corpus carries what is *known* about each capture
   (`goldens/captures.json`'s `known`, and the labels in `*.expect.json`), and for the two bundled frames that
   is "63 findings, none of them checked against a bug whose cause is known". The item is to make that list
   real: take one finding per capture, follow it to a cause in the frame (or in the engine's answer), and
   write the cause down — that is what turns the detectors from observations into verdicts, and it is the
   `unproven` gate in the report's own flags (REFERENCE §4.11). (~1 d, ongoing)
-* **Driver version guard** — compare `RENDERDOC_GetVersionString` with the capture's file version and refuse
-  clearly (replay must be ≥ the capture's version), with a `--dll <path>`/`$RDC_RENDERDOC_DLL` override and a
-  documented matrix of what has been tested. Today a mismatch surfaces as whatever the engine does next. (~4 h)
+
 ## 6. P2/P3 — Beyond the local desktop
 
 * **Remote replay** — capture on a phone, replay where the driver lives: RenderDoc's remote server plus
@@ -264,23 +246,6 @@ Phased, and each phase stands on its own — nothing here is blocked on somethin
 item of §1–§7 appears exactly once, so this is the whole list in one place rather than a selection of it; each
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
-
-**Phase 0 — the cheap instruments (~2 days, nothing blocked).** Five items of hours rather than days that
-make everything after them measurable, debuggable or shareable. Each is worth more before the work it guards
-than after it:
-
-1. **Driver version guard (§5, ~4 h)** — first, because a mismatch today surfaces as whatever the engine does
-   next, which would quietly invalidate the measurements the rest of this list rests on.
-2. **`debug --group [--fail-on <severity>]` (§1, ~3 h)** — the driver-side sanity gate, and the instrument
-   that makes the phases below debuggable instead of guessed at.
-3. **Schemas for the tool's own documents (§5, ~2 h)** — `replaydiff.json` carries a `schemaVersion` and no
-   checked shape; landing the schema now means every document written later (a sweep index, a harness
-   result) is checkable in the same style for almost nothing.
-4. **CSV and Markdown tables (§4, ~2 h)** — cheap, and it is what makes any later finding pasteable into an
-   issue or a spreadsheet.
-5. **The driver's own golden text (§5, ~half a day)** — the net under phases 2–3, modelled on the offline
-   `goldens` that already landed. It needs a GPU to regenerate, which is why its shape is a checked-in
-   expectation per capture plus a `batch`-based script that rediffs it.
 
 **Phase 1 — the offline questions this project was started for (~3½ days; no GPU, no capture).** The corpus's
 pair (`mobile-1` against `desktop-1`) is kept for one question — what changed between the same scene on two

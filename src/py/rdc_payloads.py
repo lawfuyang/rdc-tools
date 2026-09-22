@@ -501,10 +501,14 @@ def _apply_state_chunk(name: str, blob: Buffer, states: Dict[int, DrawState]) ->
             st['ib'] = (u64(blob, 9), u64(blob, 17))
     return True
 
-def _print_draw_state(state: Optional[DrawState], compute: bool, resources: Dict[int, ResourceInfo],
-                      heaps: Dict[int, Dict[int, DescriptorInfo]], sigs: Dict[int, RootSignature],
-                      binds: Dict[str, Dict[Tuple[str, int, int], str]]) -> None:
-    """Print the bindings in effect for one draw or dispatch (the indented lines under its row).
+def draw_state_lines(state: Optional[DrawState], compute: bool, resources: Dict[int, ResourceInfo],
+                     heaps: Dict[int, Dict[int, DescriptorInfo]], sigs: Dict[int, RootSignature],
+                     binds: Dict[str, Dict[Tuple[str, int, int], str]]) -> List[str]:
+    """The bindings in effect for one draw or dispatch, as the lines under its row.
+
+    Returned rather than printed, and that is the whole reason it is a function: `draws` prints them
+    indented, and `draws --format csv` folds them into one cell of a row, so the two forms of the same
+    draw cannot disagree about what was bound.
 
     `compute` selects the namespace: a dispatch uses the compute root parameters, a draw the
     graphics ones. Vertex streams, the index buffer and the render targets are graphics-only state.
@@ -514,11 +518,12 @@ def _print_draw_state(state: Optional[DrawState], compute: bool, resources: Dict
     with what the root signature says it holds (`_root_param_label`), which is what keeps an index
     from being read as something it is not.
 
-    The root descriptors are printed per kind (`CBV`, `SRV`, `UAV`) because the kind is the access:
+    The root descriptors are listed per kind (`CBV`, `SRV`, `UAV`) because the kind is the access:
     a UAV is reachable for reading *and* writing, which a bare resource id would not say.
     """
+    lines: List[str] = []
     if state is None:
-        return
+        return lines
     sig_id = state['compSig'] if compute else state['gfxSig']
     sig = sigs.get(sig_id) if sig_id is not None else None
 
@@ -529,30 +534,32 @@ def _print_draw_state(state: Optional[DrawState], compute: bool, resources: Dict
                        ('SRV', state['compSrv'] if compute else state['gfxSrv']),
                        ('UAV', state['compUav'] if compute else state['gfxUav'])):
         if roots:
-            print('        %s: %s' % (tag, '  '.join(
+            lines.append('%s: %s' % (tag, '  '.join(
                 '%s=res%d+0x%x%s' % (label(rp), res, off, rdc_resources._name_suffix(resources, res))
                 for rp, (res, off) in sorted(roots.items()))))
     tables = state['compTable'] if compute else state['gfxTable']
     if tables:
-        print('        Table: ' + '  '.join(
+        lines.append('Table: ' + '  '.join(
             '%s=heap%d[%d]%s' % (label(rp), heap, idx, _descriptor_label(heaps, resources, heap, idx)
                                  or rdc_resources._name_suffix(resources, heap))
             for rp, (heap, idx) in sorted(tables.items())))
     if compute:
-        return
+        return lines
     if state['rtv']:
-        print('        RTV: ' + '  '.join('res%d%s' % (res, rdc_resources._name_suffix(resources, res))
+        lines.append('RTV: ' + '  '.join('res%d%s' % (res, rdc_resources._name_suffix(resources, res))
                                          for res in state['rtv']))
     if state['dsv']:
-        print('        DSV: res%d%s' % (state['dsv'],
-                                        rdc_resources._name_suffix(resources, state['dsv'])))
+        lines.append('DSV: res%d%s' % (state['dsv'],
+                                       rdc_resources._name_suffix(resources, state['dsv'])))
     if state['vbs']:
-        print('        VB : ' + '  '.join(
+        lines.append('VB : ' + '  '.join(
             'res%d+0x%x(sz%d,st%d)%s' % (view + (rdc_resources._name_suffix(resources, view[0]),))
             for _, view in sorted(state['vbs'].items())))
     if state['ib']:
         ib_res, ib_off = state['ib']
-        print('        IB : res%d+0x%x%s' % (ib_res, ib_off, rdc_resources._name_suffix(resources, ib_res)))
+        lines.append('IB : res%d+0x%x%s' % (ib_res, ib_off,
+                                            rdc_resources._name_suffix(resources, ib_res)))
+    return lines
 
 __all__ = [
     'BARRIER_ACCESS',
@@ -562,12 +569,12 @@ __all__ = [
     'TEXTURE_BARRIER_DISCARD',
     '_apply_state_chunk',
     '_draw_state',
-    '_print_draw_state',
     'access_text',
     'clear_target',
     'copy_pair',
     'decode_chunk',
     'discard_target',
+    'draw_state_lines',
     'parse_barrier_groups',
     'parse_barriers',
     'parse_targets',

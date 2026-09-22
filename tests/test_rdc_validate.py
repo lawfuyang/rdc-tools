@@ -140,6 +140,14 @@ class TestSchemas(SchemaCase):
         self.assertEqual(R.schema_for_file('rt/96.png'), None)
         self.assertEqual(R.schema_for_file(os.path.join('cbuffers', '119_ps_0.json')), None)
 
+    def test_the_offline_documents_are_registered_as_kinds(self):
+        """The two documents the *offline tool* writes: `schema/` holds what the driver publishes, so
+        these two are this module's own data and are added to whatever folder a caller points at."""
+        self.assertIn('report', self.schemas)
+        self.assertIn('replaydiff', self.schemas)
+        self.assertEqual(R.schema_for_file('report.json'), 'report')
+        self.assertEqual(R.schema_for_file(os.path.join('diff', 'replaydiff.json')), 'replaydiff')
+
 
 # =========================================================================== the validator
 class TestValidator(unittest.TestCase):

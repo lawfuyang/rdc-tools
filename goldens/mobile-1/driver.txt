@@ -1,0 +1,76 @@
+# bin\replay_dump.exe batch <capture> build\goldens\mobile-1\driver.batch.txt
+# exit: 0
+--- stdout ---
+#=== info
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+pipelineType       1
+localRenderer      1
+remoteReplay       0
+vendor             6
+shaderDebugging    1
+pixelHistory       1
+chunks             723
+resources          133
+textures           15
+buffers            17
+debugMessages      0
+#=== draws 12
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+7       0     MobileSceneRender
+9       1       InitViews
+13      0     FRDGBuilder::Execute
+18      1       ID3D12GraphicsCommandList::ResolveQueryData()
+19      1       ID3D12GraphicsCommandList::ResolveQueryData()
+35      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+36      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+37      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+38      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+39      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+40      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+41      1       ID3D12GraphicsCommandList::CopyBufferRegion()
+totalActions       213
+totalCalls         59
+shown              12
+#=== textures
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+res326     dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.00 MB
+res2207    dim=2 2003x1254x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
+res2213    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2233    dim=2 256x64x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
+res2234    dim=2 32x32x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res2235    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res2236    dim=2 96x50x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res2237    dim=3 32x32x4 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res2254    dim=2 1024x32x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 0.12 MB
+res2255    dim=2 2048x2048x1 mips=1 arr=1 smp=1 fmt=A8_UNORM 4.00 MB
+res2268    dim=2 2004x628x1 mips=1 arr=1 smp=1 fmt=R32_UINT 4.94 MB
+res2269    dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 9.88 MB
+res2270    dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=D32S8_TYPELESS 12.38 MB
+res2273    dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
+res2700    dim=2 128x128x1 mips=8 arr=6 smp=1 fmt=R11G11B10_FLOAT 0.56 MB
+total              15
+shown              15
+#=== debug
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+total              0
+--- stderr ---

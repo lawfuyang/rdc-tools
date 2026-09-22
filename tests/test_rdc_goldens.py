@@ -199,6 +199,160 @@ class TestCorpus(GoldenCase):
         self.assertEqual(goldens.transcript_name(['descriptors', '15']), 'descriptors-15.txt')
 
 
+class TestDriverGoldens(GoldenCase):
+    """The driver's text golden: a corpus points at a *fake* driver, so the harness is checked here.
+
+    The real thing needs a GPU, a device and a 600 MB capture; the harness must not. What is exercised is
+    the part that is the harness's own: the batch file it writes, the redaction and the normalisation of
+    what came back, the distinction between a machine that cannot replay and a driver that broke, and the
+    rule that a failure is never written as an expectation.
+    """
+
+    #: Stands in for `bin/replay_dump.exe`: the same argv shape, the same `#=== <line>` markers, a log
+    #: line on stderr (which must not reach the golden), and three modes the corpus can ask for.
+    FAKE_DRIVER = '''import sys
+
+def main() -> int:
+    _command, capture, batch = sys.argv[1], sys.argv[2], sys.argv[3]
+    with open(batch, encoding="utf-8") as handle:
+        lines = [line.strip() for line in handle
+                 if line.strip() and not line.startswith("#")]
+    sys.stderr.write("[replay_dump]    1.2s  log file: <a timestamped log>\\n")
+    if "fail-env" in lines:
+        sys.stderr.write("error: cannot load renderdoc.dll (pass --dll <path>)\\n")
+        return 1
+    if "fail-hard" in lines:
+        return 3
+    sys.stderr.write("note: a finding that belongs in the golden\\n")
+    print("batch " + capture)
+    print("%-18s %s" % ("capture", capture))
+    print("%-18s %s" % ("renderdoc", "9.99"))
+    for line in lines:
+        print("#=== " + line)
+    return 0
+
+sys.exit(main())
+'''
+
+    def driver_corpus(self, driver_commands: List[List[str]], **capture: Any) -> str:
+        """A corpus whose one capture is *on this machine*, so the per-capture loop actually runs."""
+        self.write_fixture_capture()      # `<tmp>/capture.rdc`, which is the entry's path
+        script = self.path('fake_driver.py', self.FAKE_DRIVER.encode('utf-8'))
+        entry = self.capture_entry(commands=[], driverCommands=driver_commands, **capture)
+        return self.corpus([entry], driver={'argv': [sys.executable, os.path.basename(script)]})
+
+    def driver_file(self, name: str = 'fixture') -> str:
+        return os.path.join(self.tmp, goldens.GOLDENS_DIR, name, goldens.DRIVER_FILE)
+
+    def read(self, path: str) -> str:
+        with open(path, encoding='utf-8') as handle:
+            return handle.read()
+
+    def test_write_pins_the_text_and_check_then_accepts_it(self):
+        path = self.driver_corpus([['info'], ['draws', '12']])
+        code, written = self.run_goldens_code('--write', '--corpus', path)
+        self.assertEqual(code, 0)
+        self.assertIn(goldens.DRIVER_FILE, written)
+        text = self.read(self.driver_file())
+        self.assertIn('#=== info', text)                          # the batch file's lines, in order
+        self.assertIn('#=== draws 12', text)
+        self.assertIn('capture            <capture>', text)       # the path is the key
+        self.assertIn('renderdoc          <engine>', text)        # the engine is the environment
+        self.assertNotIn('log file', text)                        # its progress log is not the answer
+        self.assertIn('note: a finding', text)                    # ... a finding on stderr is
+        self.assertEqual(self.run_goldens_code('--check', '--corpus', path)[0], 0)
+
+    def test_the_batch_file_holds_the_corpus_commands_verbatim(self):
+        """One command per line, comments skipped: what `batch` reads, and what the golden proves ran."""
+        path = self.driver_corpus([['info'], ['draws', '12'], ['debug', '--group']])
+        self.run_goldens('--write', '--corpus', path)
+        batch = os.path.join(self.tmp, goldens.WORK_DIR, 'fixture', goldens.DRIVER_BATCH)
+        lines = [line.strip() for line in self.read(batch).splitlines()
+                 if line.strip() and not line.startswith('#')]
+        self.assertEqual(lines, ['info', 'draws 12', 'debug --group'])
+
+    def test_a_changed_driver_text_is_a_mismatch(self):
+        path = self.driver_corpus([['info']])
+        self.run_goldens('--write', '--corpus', path)
+        with open(self.driver_file(), 'a', encoding='utf-8') as handle:
+            handle.write('+ a line the driver never printed\n')
+        code, out = self.run_goldens_code('--check', '--corpus', path)
+        self.assertEqual(code, 1)
+        self.assertIn('%s differs' % goldens.DRIVER_FILE, out)
+
+    def test_a_machine_that_cannot_replay_is_not_a_mismatch(self):
+        """The same answer a capture that is not on this machine gets -- and said out loud."""
+        path = self.driver_corpus([['fail-env']])
+        code, out = self.run_goldens_code('--check', '--corpus', path)
+        self.assertEqual(code, 0)
+        self.assertIn('not compared (error: cannot load renderdoc.dll', out)
+        self.assertIn('the driver is not compared', out)
+
+    def test_a_failure_that_is_not_the_environments_is_reported_and_never_written(self):
+        path = self.driver_corpus([['fail-hard']])
+        code, out = self.run_goldens_code('--write', '--corpus', path)
+        self.assertEqual(code, 0)                                 # --write still exits 0 ...
+        self.assertIn('exited 3 with no output', out)
+        self.assertFalse(os.path.isfile(self.driver_file()),
+                         'a crash must not become an expectation')
+        self.assertEqual(self.run_goldens_code('--check', '--corpus', path)[0], 1)
+
+    def test_a_capture_with_no_driver_commands_gets_no_driver_file(self):
+        self.write_fixture_capture()
+        path = self.corpus([self.capture_entry(commands=[])])
+        self.run_goldens('--write', '--corpus', path)
+        self.assertFalse(os.path.isfile(self.driver_file()))
+
+    def test_a_driver_command_that_is_not_a_list_of_strings_is_refused(self):
+        for bad in ('info', [1, 2], []):
+            with self.subTest(command=bad):
+                self.write_fixture_capture()
+                path = self.corpus([self.capture_entry(commands=[], driverCommands=[bad])])
+                code, out = self.run_goldens_code('--check', '--corpus', path)
+                self.assertEqual(code, 2)
+                self.assertIn('driverCommands', out)
+
+    def test_a_missing_driver_is_reported_rather_than_faked(self):
+        """No driver built is the same answer as no capture here -- and the summary says which half ran."""
+        self.write_fixture_capture()
+        path = self.corpus([self.capture_entry(commands=[], driverCommands=[['info']])],
+                           driver={'argv': ['bin/replay_dump.exe']})
+        code, out = self.run_goldens_code('--check', '--verbose', '--corpus', path)
+        self.assertEqual(code, 0)
+        self.assertIn('not compared (bin/replay_dump.exe is not built', out)
+        self.assertIn('the driver is not compared', out)
+
+
+class TestDriverText(unittest.TestCase):
+    """The two pure filters a driver golden is built from, without a corpus or a process."""
+
+    def test_the_engines_own_version_is_normalised_away(self):
+        text = 'capture            x.rdc\nrenderdoc          1.46\ndriver             D3D12\n'
+        self.assertEqual(
+            goldens.normalise_driver(text),
+            'capture            x.rdc\nrenderdoc          <engine>\ndriver             D3D12\n')
+
+    def test_the_normalisation_is_only_the_fields_it_names(self):
+        """A capture named `renderdoc` is not a version field: the key has to be the whole first word."""
+        self.assertEqual(goldens.normalise_driver('renderdocs        1.46\n'), 'renderdocs        1.46\n')
+
+    def test_the_drivers_log_lines_are_not_findings(self):
+        err = ('[replay_dump]    0.0s  log file: C:\\a\\replay_dump_2026.log.txt\n'
+               '[replay_dump]    2.1s  opening the capture\n'
+               'error: cannot open x.rdc: not found\n')
+        self.assertEqual(goldens.driver_findings(err), ['error: cannot open x.rdc: not found'])
+        self.assertEqual(goldens.driver_findings(''), [])
+
+    def test_the_environment_failures_are_the_drivers_own_words(self):
+        self.assertTrue(goldens.driver_environment_failure(
+            'error: cannot load renderdoc.dll (pass --dll <path>)'))
+        self.assertTrue(goldens.driver_environment_failure(
+            'error: x.rdc was recorded by RenderDoc 1.99, and this replay engine is 1.46: replay must be '
+            'at least the capture\'s version'))
+        # A driver that broke is *not* the environment: this is what a golden must fail on.
+        self.assertEqual(goldens.driver_environment_failure('error: unknown option --grup for debug'), '')
+
+
 class TestTheCheckedInGoldensAreGeneric(unittest.TestCase):
     """No file under `goldens/` names a capture: the corpus carries a key and a digest, and the paths it
     does not carry live in the local file, which is not in git -- so this is checkable exactly where that
@@ -247,7 +401,7 @@ class TestTranscripts(GoldenCase):
     def test_write_produces_transcripts_that_check_then_accepts(self):
         code, written = self.run_goldens_code('--write', '--corpus', self.corpus_path)
         self.assertEqual(code, 0)
-        self.assertIn('transcripts written', written)
+        self.assertIn('transcripts and driver text written', written)
         with open(self.transcript_path(), encoding='utf-8') as handle:
             text = handle.read()
         self.assertIn('# summary <capture>', text)

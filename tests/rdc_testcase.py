@@ -16,6 +16,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from typing import Any, Callable, ClassVar, Dict, Optional, Sequence
 from unittest import mock
@@ -46,6 +47,36 @@ def capture_all(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
         func(*args, **kwargs)
     return out.getvalue() + err.getvalue()
 
+#: How `remove_tree` waits out a transient hold: this many tries, pausing `pause x attempt` between them
+#: (about four seconds in all). Named so a test can shorten them rather than sit through them.
+REMOVE_TRIES = 12
+REMOVE_PAUSE = 0.05
+
+def remove_tree(path: str) -> None:
+    """Remove a scratch directory, retrying while a child process still holds a file in it.
+
+    The suite runs parts of the tool in child processes (`rdc_scan` splits a file across workers), and a child
+    that is still shutting down holds an open handle on the capture it was reading: Windows then refuses to
+    unlink that file, or to remove the directory holding it, for a few milliseconds after the test that
+    started the child has finished. `shutil.rmtree(path, ignore_errors=True)` turned that race into a
+    *permanent* leak, which is what it did here -- five copies of this removal had grown (three swallowing the
+    failure, two raising, one class with none at all) and `%TEMP%` had accumulated 10,695 `rdc_*` entries,
+    6,926 of them scratch directories from this base class alone, before anyone looked. So there is one copy
+    now, it retries `REMOVE_TRIES` times, and then it raises: a directory that survives that is a real leak --
+    a mapping a test kept alive, say -- and should say so rather than be forgotten.
+    """
+    last: Optional[BaseException] = None
+    for attempt in range(REMOVE_TRIES):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:      # a child still holds something in it: wait, then try again
+            last = exc
+            time.sleep(REMOVE_PAUSE * (attempt + 1))
+    raise OSError('the scratch directory %s could not be removed: %s' % (path, last))
+
 class TempDirCase(unittest.TestCase):
     #: scratch directory created in `setUp` and removed by a cleanup hook.
     tmp: str
@@ -54,7 +85,7 @@ class TempDirCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp(prefix='rdc_unit_')
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(remove_tree, self.tmp)
         self.cache = os.path.join(self.tmp, 'cache')
         env = mock.patch.dict(os.environ, {'RDC_CACHE_DIR': self.cache})
         env.start()
@@ -91,7 +122,7 @@ class CmdCase(TempDirCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        shutil.rmtree(cls._src_dir, ignore_errors=True)
+        remove_tree(cls._src_dir)
 
     def setUp(self) -> None:
         super().setUp()

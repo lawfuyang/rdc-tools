@@ -25,6 +25,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
 
 import rdc_analysis as R            # noqa: E402
 import rdc_engine_schema as E       # noqa: E402
+from rdc_testcase import remove_tree   # noqa: E402
 from test_rdc_report import cbuffer, event, resource, write_bundle   # noqa: E402
 
 RDC = 'C:\\captures\\test.rdc'
@@ -65,6 +66,7 @@ class EngineCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp(prefix='rdc_engine_')
+        self.addCleanup(remove_tree, self.tmp)
         self.schemas = os.path.join(self.tmp, 'engine-schemas')
         os.makedirs(self.schemas)
         self._env = os.environ.get('RDC_ENGINE_SCHEMAS')

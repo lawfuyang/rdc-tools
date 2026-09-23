@@ -35,7 +35,7 @@ import rdc_chunkmap as chunkmap   # noqa: E402  (the detectors name chunks throu
 import rdc_detect_bundle          # noqa: E402  (the all-zero rule lives there: `_zero_sides` is it)he
 import rdc_report                 # noqa: E402  (patched by name: the corpus lookup is its global, not R's)
 import rdc_fixtures as F          # noqa: E402   #   capture fixture must be built with the same map)
-from rdc_testcase import CmdCase as _CmdCase   # noqa: E402
+from rdc_testcase import CmdCase as _CmdCase, remove_tree   # noqa: E402
 
 RDC = 'fixture.rdc'
 
@@ -162,10 +162,7 @@ class BundleCase(unittest.TestCase):
         self.addCleanup(self._remove_tmp)
 
     def _remove_tmp(self) -> None:
-        for dirpath, _dirs, files in os.walk(self.tmp, topdown=False):
-            for name in files:
-                os.remove(os.path.join(dirpath, name))
-            os.rmdir(dirpath)
+        remove_tree(self.tmp)
 
     def path(self, *parts: str) -> str:
         return os.path.join(self.tmp, *parts)

@@ -459,6 +459,17 @@ class CacheCase(TempDirCase):
         self.capture = self.path('c.rdc', F.capture(self.chunks, lz4=True, block_count=2))
         self.info = R.parse_container(self.capture)
         self.stream = b''.join(self.chunks)
+        # `parse_container` answers out of an `mmap` of the capture (REFERENCE 4.14) and the info keeps that
+        # mapping alive, so the scratch directory holding `c.rdc` cannot be removed while this attribute is
+        # set: on Windows a mapped file cannot be unlinked, and the *order* of the cleanups decides it (last
+        # registered, first run). Registered after the base class's removal so it runs before it -- without
+        # this, the three `cache clear` tests below left a `c.rdc` behind in `%TEMP%` on every run, which only
+        # became visible once the removal stopped swallowing its failures.
+        self.addCleanup(self._release_info)
+
+    def _release_info(self) -> None:
+        """Let go of the parsed container, and with it the mapping of the capture (see `setUp`)."""
+        self.__dict__.pop('info', None)
 
     def store(self, stream: Optional[bytes] = None, method: int = R.METHOD_LZ4,
               blocks: int = 2, section: int = 0) -> Optional[str]:

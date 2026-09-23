@@ -29,6 +29,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
         sys.path.insert(0, _p)
 
 import rdc_analysis as R          # noqa: E402
+from rdc_testcase import remove_tree   # noqa: E402
 
 SCHEMA_DIR = os.path.join(ROOT, 'schema')
 
@@ -214,10 +215,7 @@ class TestValidateCommand(unittest.TestCase):
         self.addCleanup(self._remove_tmp)
 
     def _remove_tmp(self) -> None:
-        for dirpath, _dirs, files in os.walk(self.tmp, topdown=False):
-            for name in files:
-                os.remove(os.path.join(dirpath, name))
-            os.rmdir(dirpath)
+        remove_tree(self.tmp)
 
     def schemas(self) -> Dict[str, Dict[str, Any]]:
         return R.load_schemas(SCHEMA_DIR)

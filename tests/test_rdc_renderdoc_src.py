@@ -37,6 +37,7 @@ import rdc_analysis as R             # noqa: E402
 import rdc_chunkmap as chunkmap      # noqa: E402
 import rdc_chunknames as chunknames  # noqa: E402
 import rdc_renderdoc_src as src      # noqa: E402
+from rdc_testcase import remove_tree   # noqa: E402
 
 #: What a populated tree needs, as paths under its root: the two enums the tool parses.
 CORE = os.path.join('renderdoc', 'core', 'core.h')
@@ -119,10 +120,7 @@ class SrcCase(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def _remove_tmp(self) -> None:
-        for dirpath, _dirs, files in os.walk(self.tmp, topdown=False):
-            for name in files:
-                os.remove(os.path.join(dirpath, name))
-            os.rmdir(dirpath)
+        remove_tree(self.tmp)
 
     def tree(self, name: str = 'renderdoc-src', core: bool = True, d3d12: bool = True,
              extra: Optional[Dict[str, str]] = None) -> str:

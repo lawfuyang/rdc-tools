@@ -21,7 +21,6 @@ import contextlib
 import io
 import json
 import os
-import shutil
 import struct
 import sys
 import tempfile
@@ -40,7 +39,7 @@ import rdc_analysis as R          # noqa: E402
 import rdc_chunkmap as chunkmap   # noqa: E402
 import rdc_fixtures as F          # noqa: E402
 import rdc_image                  # noqa: E402
-from rdc_testcase import CmdCase as _CmdCase   # noqa: E402
+from rdc_testcase import CmdCase as _CmdCase, remove_tree   # noqa: E402
 from test_rdc_report import cbuffer, event, resource, write_bundle   # noqa: E402
 
 
@@ -425,7 +424,7 @@ class BundleCase(unittest.TestCase):
         self.addCleanup(self._remove)
 
     def _remove(self) -> None:
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        remove_tree(self.tmp)
 
     def path(self, *parts: str) -> str:
         return os.path.join(self.tmp, *parts)

@@ -1,5 +1,5 @@
 # bin\replay_dump.exe batch <capture> build\goldens\desktop-1\driver.batch.txt
-# exit: 0
+# exit: 1
 --- stdout ---
 #=== info
 schemaVersion      1
@@ -120,4 +120,214 @@ driver             D3D12
 localReplay        1
 machine            Windows x86 64-bit 
 total              0
+#=== formats
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+format                       count         bytes  shape                      picture      why
+R8G8B8A8_TYPELESS                8       0.38 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
+B8G8R8A8_TYPELESS                9      49.39 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
+R10G10B10A2_UNORM                3      19.88 MB  4 x 0-bit unorm            no           the engine's format table has no layout for it (no components)
+R16G16B16A16_FLOAT              20     116.07 MB  4 x 16-bit float           yes          
+R16G16_UNORM                     1       0.02 MB  2 x 16-bit unorm           yes          
+A8_UNORM                         1       4.00 MB  1 x 8-bit unorm            no           a special layout (multi-plane or packed): the display path does not take it
+R11G11B10_FLOAT                  8      13.38 MB  3 x 0-bit float            no           the engine's format table has no layout for it (no components)
+R8_UNORM                         3       0.38 MB  1 x 8-bit unorm            yes          
+R8G8B8A8_UINT                    1       0.06 MB  4 x 8-bit uint             yes          
+D32S8_TYPELESS                   1      12.38 MB  2 x 0-bit typeless         no           the engine's format table has no layout for it (no components)
+R32_UINT                         5       0.31 MB  1 x 32-bit uint            yes          
+R32G32B32A32_FLOAT               1       0.06 MB  4 x 32-bit float           yes          
+R16_FLOAT                        1       1.38 MB  1 x 16-bit float           yes          
+textures           62
+bytes              228241408
+formatCount        13
+needCast           17
+noLayout           13
+#=== crosscheck
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                0
+from               1
+to                 1305
+scanned            144
+linksChecked       155
+bindingsChecked    1142
+bindingsUnmapped   625
+targetsChecked     177
+noRootParameters   66
+total              16
+eid 1186    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish > CanvasFlush > CanvasBatchedElements]
+eid 1195    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish]
+eid 1196    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish]
+eid 1197    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish]
+eid 1219    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
+eid 1224    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
+eid 1225    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
+eid 1226    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
+eid 1281    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
+eid 1282    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
+eid 1283    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
+eid 1284    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
+eid 1285    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
+eid 1300    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound
+eid 1301    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound
+eid 1305    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound
+shown              16
+stoppedEarly       off
+#=== state 304
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                304
+marker             FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere > ExecuteIndirect(maxCount 1, count <1>)
+api                1
+vs  res60965  
+cs  res61363  
+depthTarget        60843
+rootSignature      60951
+rp0   reg=0 space=0 vis=vs heap298+0x4434d
+rp0   t0  s0   cat(3) type(5) res61306
+rp0   t1  s0   cat(3) type(5) res60796
+rp0   t2  s0   cat(3) type(5) res60797
+rp0   t3  s0   cat(3) type(5) res60795
+rp0   t4  s0   cat(3) type(5) res61306
+rp0   t5  s0   cat(3) type(5) res60796
+rp0   t6  s0   cat(3) type(5) res60795
+rp0   t7  s0   cat(3) type(8) res60846
+rp0   t8  s0   cat(3) type(8) res60848
+rp0   t9  s0   cat(3) type(8) res60849
+rp0   t10 s0   cat(3) type(8) res60851
+rp0   t11 s0   cat(3) type(9) res60848
+rp0   t12 s0   cat(3) type(9) res60846
+rp0   t13 s0   cat(3) type(9) res60853
+rp0   t14 s0   cat(3) type(5) res60877
+rp0   t15 s0   cat(3) type(5) res60878
+rp0   t16 s0   cat(3) type(9) res60851
+rp0   t17 s0   cat(3) type(8) res60854
+rp0   t18 s0   cat(3) type(9) res60849
+rp0   t19 s0   cat(3) type(5) res60846
+rp0   t20 s0   cat(3) type(5) res60853
+rp0   t21 s0   cat(3) type(7) res61309
+rp0   t22 s0   cat(3) type(7) res61309
+rp0   t23 s0   cat(3) type(7) res61309
+rp0   t24 s0   cat(3) type(7) res61309
+rp0   t25 s0   cat(3) type(4) res60843
+rp0   t26 s0   cat(3) type(7) res61309
+rp0   t27 s0   cat(3) type(7) res61309
+rp0   t28 s0   cat(3) type(7) res61309
+rp0   t29 s0   cat(3) type(7) res61309
+rp0   t30 s0   cat(3) type(4) res61309
+rp0   t31 s0   cat(3) type(7) res61309
+rp0   t32 s0   cat(3) type(7) res61309
+rp0   t33 s0   cat(3) type(4) res61309
+rp0   t34 s0   cat(3) type(7) res60826
+rp0   t35 s0   cat(3) type(7) res60827
+rp0   t36 s0   cat(3) type(4) res60826
+rp0   t37 s0   cat(3) type(7) res60828
+rp0   t38 s0   cat(3) type(4) res60826
+rp0   t39 s0   cat(3) type(4) res60827
+rp0   t40 s0   cat(3) type(6) res315
+rp0   t41 s0   cat(3) type(7) res60829
+rp0   t42 s0   cat(3) type(7) res60830
+rp0   t43 s0   cat(3) type(4) res60826
+rp0   t44 s0   cat(3) type(4) res60827
+rp0   t45 s0   cat(3) type(9) res61310
+rp0   t46 s0   cat(3) type(5) res60795
+rp0   t47 s0   cat(3) type(5) res60796
+rp0   t48 s0   cat(3) type(5) res60797
+rp0   t49 s0   cat(3) type(5) res384
+rp0   t50 s0   cat(3) type(6) res342
+rp0   t51 s0   cat(3) type(9) res61310
+rp0   t52 s0   cat(3) type(5) res384
+rp0   t53 s0   cat(3) type(6) res342
+rp0   t54 s0   cat(3) type(5) res384
+rp0   t55 s0   cat(3) type(5) res61306
+rp0   t56 s0   cat(3) type(5) res60796
+rp0   t57 s0   cat(3) type(5) res60795
+rp0   t58 s0   cat(3) type(6) res315
+rp0   t59 s0   cat(3) type(4) res60758
+rp0   t60 s0   cat(3) type(4) res60749
+rp0   t61 s0   cat(3) type(4) res60750
+rp0   t62 s0   cat(3) type(4) res60751
+rp0   t63 s0   cat(3) type(4) res60752
+rp1   reg=0 space=0 vis=vs res1907
+rp2   reg=1 space=0 vis=vs res1907
+rp3   reg=2 space=0 vis=vs res1907
+{"x": 0.00, "y": 0.00, "width": 1368.00, "height": 856.00, "minDepth": 0.000, "maxDepth": 1.000, "enabled": true}
+{"x": 0, "y": 0, "width": 1368, "height": 856, "enabled": true}
+depthEnable        on
+depthWrites        on
+depthFunction      GreaterEqual
+stencilEnable      off
+stencilReadOnly    off
+alphaToCoverage    off
+independentBlend   on
+fail               Keep
+depthFail          Keep
+pass               Keep
+function           AlwaysTrue
+compareMask        255
+writeMask          255
+fail               Keep
+depthFail          Keep
+pass               Keep
+function           AlwaysTrue
+compareMask        255
+writeMask          255
+{"enabled": false, "writeMask": 0, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+#=== shaders 304
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                304
+marker             FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere > ExecuteIndirect(maxCount 1, count <1>)
+stage              vs
+resource           60965
+entry              Main__OPTIMIZED
+encoding           6
+bytes              35808
+hash               14c484071c8d5bf99e93587de0b7ff0f3ac627a95896f2b7f26f1b3d4a2ed43e
+cbuffer[0] View                         b0 s0 5996 bytes, 1 variables
+cbuffer[1] Scene                        b1 s0 188 bytes, 1 variables
+cbuffer[2] InstancedVFLooseParameters   b2 s0 96 bytes, 1 variables
+InstanceCulling_InstanceIdsBuffer t0 s0 n1
+Scene_GPUScene_GPUSceneInstanceSceneData t1 s0 n1
+Scene_GPUScene_GPUSceneInstancePayloadData t2 s0 n1
+Scene_GPUScene_GPUScenePrimitiveSceneData t3 s0 n1
+ATTRIBUTE0 reg0 c4 float
+ATTRIBUTE13 reg1 c1 uint
+SV_InstanceID0 reg2 c1 uint
+SV_VertexID0 reg3 c1 uint
+SV_Position0 reg0 c4 float
+stage              cs
+resource           61363
+entry              CopyEyeAdaptationToTextureCS
+encoding           6
+bytes              3668
+hash               74a568dbdeef7059ab12529c8f0861ddb352da51cdcc938829ead00071c343f6
+EyeAdaptationBuffer t0 s0 n1
+RWEyeAdaptationTexture u0 s0 n1
+threadId0 reg0 c3 uint
+#=== trace 304 --pixel 640,360
 --- stderr ---
+error: no ps shader is bound at eid 304

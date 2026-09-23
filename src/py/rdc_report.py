@@ -141,13 +141,14 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     runs.append({'detector': 'mismatched-msaa', 'ran': True, 'why': ''})
     flags.extend(detect_mismatched_msaa(bundle))
 
-    # The .rdc-side three: they need the chunk stream, so they need the capture path, and they need the
+    # The .rdc-side rules: they need the chunk stream, so they need the capture path, and they need the
     # RenderDoc source tree to name what they are looking at. Either being absent is a *skip* with the
     # reason, never a clean report, because "no marker is unbalanced" and "I could not tell markers apart"
     # are different answers and only one of them is worth anything.
     for detector, function in (('marker-imbalance', detect_marker_balance),
                                ('unattributed-draws', detect_unattributed_draws),
-                               ('zero-work', detect_zero_work)):
+                               ('zero-work', detect_zero_work),
+                               ('srgb-view-mismatch', detect_srgb_view_mismatch)):
         if not rdc_path:
             runs.append({'detector': detector, 'ran': False, 'why': 'no capture path given'})
             continue

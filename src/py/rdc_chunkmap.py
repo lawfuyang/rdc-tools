@@ -108,6 +108,13 @@ DISCARD_CHUNKS = ('List_DiscardResource',)
 #: shows a buffer being produced without being bound to a pipeline.
 COPY_CHUNKS = ('List_CopyBufferRegion', 'List_CopyTextureRegion')
 
+#: Resolves: a multisampled texture is read and a single-sample one written, with *which* subresource of
+#: each named in the payload. Two forms, and the payload says which: the plain one writes the raw
+#: subresource index of each side, the `Region` one adds a destination offset, an optional source rect and
+#: the resolve mode (REFERENCE 3.4). Decoded since 2026-09-22; before that a resource only a resolve
+#: touched read as unused in `deps`, because the chunk was counted as unattributed.
+RESOLVE_CHUNKS = ('List_ResolveSubresource', 'List_ResolveSubresourceRegion')
+
 #: The resource heaps the capture creates. `Device_CreateHeap1` is the same payload shape (the
 #: descriptor first, the heap id last), so one parse covers both; only the base form has been measured
 #: against real payloads, which is why only it is in `EXPECTED_LENGTHS`.
@@ -121,8 +128,8 @@ HEAP_CHUNKS = ('Device_CreateHeap', 'Device_CreateHeap1')
 #: claim about the frame.
 UNATTRIBUTED_CHUNKS = ('List_ResolveQueryData', 'List_BuildRaytracingAccelerationStructure',
                        'List_CopyRaytracingAccelerationStructure', 'List_ExecuteIndirect',
-                       'List_SetDescriptorHeaps', 'List_ResolveSubresource',
-                       'List_ResolveSubresourceRegion', 'List_CopyResource', 'List_CopyTiles',
+                       'List_SetDescriptorHeaps',
+                       'List_CopyResource', 'List_CopyTiles',
                        'List_WriteBufferImmediate', 'List_EmitRaytracingAccelerationStructurePostbuildInfo',
                        'List_CopyRaytracingAccelerationStructureRegion', 'List_SetPredication',
                        'List_ClearStateObject', 'List_BeginRenderPass')
@@ -148,6 +155,7 @@ EXPECTED_LENGTHS: Dict[str, Tuple[int, ...]] = {
     'List_SetComputeRootUnorderedAccessView': (28,),
     'List_IASetIndexBuffer': (9, 33),      # 9 = null view, 33 = present flag + view
     'List_CopyBufferRegion': (48,),        # cmdList, dst, dstOffset, src, srcOffset, numBytes
+    'List_ResolveSubresource': (36,),      # cmdList, dst, dstSub, src, srcSub, format
     'Device_CreateHeap': (72,),            # desc(40) | IID(24, its 8-byte array count included) | id
 }
 
@@ -560,6 +568,7 @@ __all__ = [
     'POP_MARKER_CHUNKS',
     'PUSH_MARKER_CHUNKS',
     'RENDERDOC_SRC',
+    'RESOLVE_CHUNKS',
     'RESOURCE_CHUNKS',
     'RESOURCE_KINDS',
     'STATE_CHUNKS',

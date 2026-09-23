@@ -32,6 +32,14 @@ class BundleEvent(TypedDict):
     depth: str
     rootParameters: int
     state: str
+    #: What the *call* asked the GPU to do, taken from the engine's action list by a driver from 2026-09-22 on:
+    #: a draw carries `vertices`/`instances`/`triangles` (`triangles` is 0 when the topology does not fix one,
+    #: and `vertices` is the index count when the draw is indexed), a dispatch carries
+    #: `groups`/`threadsPerGroup`/`threads`. Absent for an event that is not a call -- a state setter, a
+    #: marker, a barrier -- and from a bundle written before that driver, so read it with
+    #: `.get('volume')`: an empty result means "not measured here", which is not the same as "asked for
+    #: nothing".
+    volume: Dict[str, Any]
 
 class BundleUsage(TypedDict):
     eid: int
@@ -95,6 +103,16 @@ class ReportPass(TypedDict):
     otherShaders: List[str]
     blocks: List[str]
     firstTouched: List[str]
+    #: Work summed over the pass's calls, from the event rows' `volume`: `vertices`/`instances`/`triangles` for
+    #: a graphics pass, `threads` for a compute pass (a pass is one kind or the other -- the kind changing
+    #: starts a new pass -- so one unit is always zero). `volumeCalls` is how many of the pass's events carried
+    #: a volume at all: zero means this bundle has none, which the ranking reports as an unavailable input
+    #: rather than ranking every pass by a hard zero.
+    vertices: int
+    instances: int
+    triangles: int
+    threads: int
+    volumeCalls: int
 
 #: One red flag's required keys. `what` is the *observation*; what it means is the reader's, because a
 #: bundle can prove what the engine held, not what the frame intended. `certainty` is what the detector
@@ -385,6 +403,33 @@ def load_bundle(bundle_dir: str) -> BundleData:
     return BundleData(manifest=manifest, capture=capture, events=events, resources=resources,
                       messages=messages, counters=counters, states=states, cbuffers=cbuffers)
 
+def compact_count(count: int) -> str:
+    """A count as a reader compares them at a glance: `1204` -> `1.2 K`, `1234567` -> `1.2 M`.
+
+    The report's other measurements are already scaled this way (`%.1f Mpixel of targets`), and this one is the
+    largest number in the document by orders of magnitude: a frame's triangle count runs to millions.
+    """
+    for limit, suffix in ((1000000000, 'G'), (1000000, 'M'), (1000, 'K')):
+        if count >= limit:
+            return '%.1f %s' % (count / float(limit), suffix)
+    return '%d' % count
+
+def work_text(entry: ReportPass) -> str:
+    """What a pass's calls asked for, in the unit they asked in -- or an empty string when this bundle carries
+    no volume at all (a driver from before 2026-09-22, or a frame with no calls in it).
+
+    Empty rather than a line of zeros on purpose: the notable-inputs table already says the input is
+    unavailable, and `0 triangle(s)` on a ranking row reads as a measurement.
+
+    One unit, not both: a pass is a graphics run or a compute run (`reconstruct_passes` starts a new pass when
+    the call kind changes), so a pass with triangles has no threads and the other way round.
+    """
+    if not int(entry.get('volumeCalls', 0) or 0):
+        return ''
+    if entry['kind'] == 'compute':
+        return '%s thread(s) over %d call(s)' % (compact_count(int(entry['threads'])), entry['volumeCalls'])
+    return '%s triangle(s) over %d call(s)' % (compact_count(int(entry['triangles'])), entry['volumeCalls'])
+
 __all__ = [
     'BUNDLE_VERSION',
     'BundleData',
@@ -417,5 +462,7 @@ __all__ = [
     '_md',
     '_res_id',
     '_targets_text',
+    'compact_count',
     'load_bundle',
+    'work_text',
 ]

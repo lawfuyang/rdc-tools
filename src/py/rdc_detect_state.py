@@ -181,10 +181,13 @@ def detect_mismatched_msaa(bundle: BundleData) -> List[RedFlag]:
 
     `samples` is in the resource table and a resolve is a usage row, so the decidable half of the row needs
     no chunk payload: a texture with more than one sample that was used as a colour target and that no
-    resolve usage ever touched. The other half -- *which* subresource a resolve copied, and whether that was
-    the right one -- needs the `ResolveSubresource` payload, which a bundle does not carry, so it is not
-    claimed. A depth target is not judged: an MSAA depth buffer nobody resolves is the ordinary case, since
-    the depth test reads it directly rather than sampling it.
+    resolve usage ever touched. The other half -- *which* subresource a resolve copied -- is read from the
+    file rather than from a bundle: the `ResolveSubresource` payload is decoded offline (2026-09-22), so
+    `deps` prints every resolve as a read->write pair naming both subresources. What no rule claims is
+    whether a resolve was the *right* one: nothing in a capture says which slice was supposed to be
+    resolved, and a rule that guessed would be worse than one that admits it. A depth target is not judged:
+    an MSAA depth buffer nobody resolves is the ordinary case, since the depth test reads it directly rather
+    than sampling it.
     """
     lines: List[str] = []
     for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
@@ -299,9 +302,11 @@ def detect_format_units_suspicion(bundle: BundleData) -> List[RedFlag]:
     highlights come from. That is why this is a `[heuristic]`: the *type* says float and the target says 8
     bits, and what the values actually were is not in the bundle.
 
-    The row's other half, an sRGB/linear mismatch between the write and a later read, is *not* claimed: a
-    bundle does not say whether a later sampling view was sRGB or linear, and a rule that guessed would be
-    worse than this one that admits it.
+    The row's other half -- an sRGB/linear mismatch between the write and a later read -- is a *separate*
+    rule, and one that reads the file rather than the bundle: `detect_srgb_view_mismatch` compares each
+    texture's declared format against the formats the views over it declare (a resource declared `..._UNORM`
+    read through an `..._UNORM_SRGB` view). A bundle carries neither the view's format nor the resource's,
+    which is why that half is not claimed *here*.
     """
     lines: List[str] = []
     for first, last, state in _graphics_state_ranges(bundle):

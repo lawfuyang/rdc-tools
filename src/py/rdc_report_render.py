@@ -12,9 +12,10 @@ def report_caveats() -> List[str]:
     than one that never mentioned it."""
     return [
         'A pass here is a run of consecutive events with the same call kind, render targets and depth '
-        'target -- not a named pass. What a draw or a dispatch *asked for* is not in a bundle either: no '
-        'index or instance count and no thread count, because the engine\'s action list -- which has them, '
-        'and which `draws` reads -- is not part of what `dump` writes (ROADMAP §1).',
+        'target -- not a named pass. What a draw or a dispatch *asked for* is in a bundle written from '
+        '2026-09-22 on (`volume`, taken from the engine\'s action list); what is still missing is the finer '
+        'kind -- copy against clear against marker -- and a call\'s own name, which `draws` prints and a '
+        'bundle does not carry.',
         'A compute pass is a run of dispatches with the same pipeline and shaders, and its targets and '
         'depth are given as not applicable: a dispatch does not set the output-merge state, so what the '
         'engine reports there is leftover from an earlier call. What a dispatch *does* write (its UAVs) '
@@ -29,13 +30,16 @@ def report_caveats() -> List[str]:
         'and the section says which concepts that costs. The values printed with a concept are the members '
         'the table tags, as the bundle\'s cbuffer documents hold them: what the engine reported at that '
         'event, not what the shader made of it.',
-        'Twenty detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
+        'Twenty-one detectors run -- seven over the bundle, four over the usage chain, five over the pipeline '
         'state, one over the resource table and three over the capture\'s chunk stream -- and a finding is '
         'proven only where the corpus carries a cause for it (the capture\'s `known` list, matched by the '
         'capture\'s own SHA-256, REFERENCE §4.17); everything else is unproven, a lead rather than a verdict. '
         'What is not checked at all is stated rather than approximated: MSAA\'s *which '
-        'subresource did the resolve copy* half needs the ResolveSubresource payload, and the sRGB/linear half '
-        'of the format rule needs a later sampling view\'s sRGB flag -- neither is in a bundle. The pipeline '
+        'subresource did the resolve copy* half is read from the file (the `ResolveSubresource` payload, so '
+        '`deps` prints every resolve as a read->write pair naming both subresources), and the sRGB/linear '
+        'half of the format rule is a finding of its own (`srgb-view-mismatch`, from the resource table '
+        'against the view formats the capture declares). What no rule claims is whether a given resolve was '
+        'the *right* one: nothing in the capture says which slice was supposed to be resolved. The pipeline '
         'state is recorded '
         'per state *change*, not per event (the frame table above gives this bundle\'s count of state documents '
         'against its count of events), so a state rule is stated per range rather than per event; and a bundle '
@@ -45,10 +49,11 @@ def report_caveats() -> List[str]:
         '(texture against buffer -- the row names a binding, not its type), and a range/heap disagreement at '
         'a register no shader reads. A bundle whose driver did not resolve descriptor tables carries no slot '
         'rows, and the rules that read them are then reported as not looked at rather than as clean.',
-        'The notable lists rank what a bundle can measure -- calls, target bytes, resource churn, and counter '
-        'cost when the bundle was written with --with-counters -- and their own table says so where an input is '
-        'not available: a draw\'s vertex count is the first input of the rule and no bundle has it, because '
-        '`dump` writes no action list (ROADMAP §1). A recommendation is a lead, not a verdict: it names '
+        'The notable lists rank what a bundle can measure -- the work its calls asked for, calls, target '
+        'pixels, resource churn, and counter cost when the bundle was written with --with-counters -- and their '
+        'own table says so where an input is not available: the work volumes live in a bundle written from '
+        '2026-09-22 on, so a bundle older than that is ranked by calls alone and says which input it could not '
+        'read. A recommendation is a lead, not a verdict: it names '
         'the first instance of something, with the command that shows it, and the finding behind it is still '
         'unproven.',
         'Missing reflection is not reported as missing: a shader the engine has no reflection for is simply a '
@@ -401,8 +406,10 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
         if entry.get('marker'):
             lines.append('- the engine put it under `%s` (from the action list, not from state)'
                          % _md(str(entry['marker'])))
-        lines.append('- work: %d event(s) (%d graphics, %d compute) — events, not vertices: the bundle '
-                     'carries no counts' % (entry['events'], entry['graphics'], entry['compute']))
+        work = work_text(entry)
+        lines.append('- work: %d event(s) (%d graphics, %d compute)%s'
+                     % (entry['events'], entry['graphics'], entry['compute'],
+                        ' — %s' % work if work else ' — the bundle carries no counts for these calls'))
         lines.append('- targets: %s' % _targets_text(entry))
         if entry['kind'] != 'compute':
             lines.append('- depth: %s' % (entry['depth'] if _is_resource(entry['depth']) else 'none'))

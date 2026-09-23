@@ -188,7 +188,7 @@ class TestParseDescriptorHeaps(CmdCase):
     def test_a_view_write_records_its_slot_and_resource(self):
         heaps = self.heaps(self.ch('Device_CreateShaderResourceView',
                                    F.pl_descriptor_write(2233, heap=298, index=138456)))
-        self.assertEqual(heaps, {298: {138456: {'kind': 'srv', 'resource': 2233}}})
+        self.assertEqual(heaps, {298: {138456: {'kind': 'srv', 'resource': 2233, 'viewFormat': 0}}})
 
     def test_the_kind_comes_from_the_chunk_name(self):
         cases = [('Device_CreateConstantBufferView', 'cbv'), ('Device_CreateShaderResourceView', 'srv'),
@@ -197,11 +197,11 @@ class TestParseDescriptorHeaps(CmdCase):
         for name, kind in cases:
             with self.subTest(chunk=name):
                 heaps = self.heaps(self.ch(name, F.pl_descriptor_write(7, heap=1, index=2)))
-                self.assertEqual(heaps[1][2], {'kind': kind, 'resource': 7})
+                self.assertEqual(heaps[1][2], {'kind': kind, 'resource': 7, 'viewFormat': 0})
 
     def test_a_sampler_records_no_resource(self):
         heaps = self.heaps(self.ch('Device_CreateSampler', F.pl_descriptor_write(0, heap=299, index=0)))
-        self.assertEqual(heaps, {299: {0: {'kind': 'sampler', 'resource': 0}}})
+        self.assertEqual(heaps, {299: {0: {'kind': 'sampler', 'resource': 0, 'viewFormat': 0}}})
 
     def test_a_copy_moves_the_descriptor_into_the_destination_slot(self):
         # the real captures do exactly this: write into one heap, copy into the heap the frame binds
@@ -210,8 +210,8 @@ class TestParseDescriptorHeaps(CmdCase):
                   self.ch('Device_CopyDescriptorsSimple',
                           F.pl_copy_descriptors([(298, 138455, 300, 1047)]))]
         heaps = self.heaps(*chunks)
-        self.assertEqual(heaps[300][1047], {'kind': 'uav', 'resource': 2266})
-        self.assertEqual(heaps[298][138455], {'kind': 'uav', 'resource': 2266})
+        self.assertEqual(heaps[300][1047], {'kind': 'uav', 'resource': 2266, 'viewFormat': 0})
+        self.assertEqual(heaps[298][138455], {'kind': 'uav', 'resource': 2266, 'viewFormat': 0})
 
     def test_a_copy_of_an_unwritten_slot_records_nothing(self):
         heaps = self.heaps(self.ch('Device_CopyDescriptors',
@@ -227,7 +227,7 @@ class TestParseDescriptorHeaps(CmdCase):
                   self.ch('Device_CreateUnorderedAccessView',
                           F.pl_descriptor_write(2, heap=298, index=5))]
         heaps = self.heaps(*chunks)
-        self.assertEqual(heaps[298][5], {'kind': 'uav', 'resource': 2})
+        self.assertEqual(heaps[298][5], {'kind': 'uav', 'resource': 2, 'viewFormat': 0})
 
     def test_a_copy_after_a_write_wins(self):
         chunks = [self.ch('Device_CreateShaderResourceView',
@@ -235,7 +235,7 @@ class TestParseDescriptorHeaps(CmdCase):
                   self.ch('Device_CreateShaderResourceView',
                           F.pl_descriptor_write(2, heap=300, index=9)),
                   self.ch('Device_CopyDescriptors', F.pl_copy_descriptors([(298, 5, 300, 9)]))]
-        self.assertEqual(self.heaps(*chunks)[298][5], {'kind': 'srv', 'resource': 2})
+        self.assertEqual(self.heaps(*chunks)[298][5], {'kind': 'srv', 'resource': 2, 'viewFormat': 0})
 
     def test_a_write_payload_too_short_for_the_handle_is_skipped(self):
         self.assertEqual(self.heaps(self.ch('Device_CreateShaderResourceView', b'\x00' * 20)), {})
@@ -246,7 +246,7 @@ class TestParseDescriptorHeaps(CmdCase):
         heaps = self.heaps(self.ch('Device_CreateShaderResourceView',
                                    F.pl_descriptor_write(1, heap=300, index=9)),
                            self.ch('Device_CopyDescriptors', blob))
-        self.assertEqual(heaps[298][5], {'kind': 'srv', 'resource': 1})
+        self.assertEqual(heaps[298][5], {'kind': 'srv', 'resource': 1, 'viewFormat': 0})
         self.assertEqual(len(heaps[298]), 1)
 
     def test_an_empty_stream_has_no_heaps(self):

@@ -161,6 +161,35 @@ class TestTargetAndCopyPayloads(UsesCase):
         self.assertIsNone(R.copy_pair('List_CopyTextureRegion',
                                       F.u64b(7) + F.u64b(1) + F.u32b(7) + b'\x00' * 40))
 
+    def test_a_resolve_names_both_subresources(self):
+        """The plain form: 36 bytes, the format last, and the two subresources are what the MSAA question
+        needs -- *which* slice of the multisampled texture went where."""
+        self.assertEqual(R.parse_resolve('List_ResolveSubresource',
+                                         F.pl_resolve(7, 400, 401, dst_sub=1, src_sub=3, fmt=28)),
+                         {'destination': 400, 'destinationSubresource': 1, 'source': 401,
+                          'sourceSubresource': 3, 'format': 28, 'region': False})
+
+    def test_a_resolve_region_walks_its_optional_rect(self):
+        """The `Region` form puts the source subresource after a destination offset and the format after an
+        optional rect, so reading it as the plain form would name the wrong subresource: both lengths are
+        walked, and the flag is read rather than assumed."""
+        for rect in (False, True):
+            self.assertEqual(R.parse_resolve('List_ResolveSubresourceRegion',
+                                             F.pl_resolve_region(7, 400, 401, src_sub=2, fmt=28,
+                                                                 rect=rect)),
+                             {'destination': 400, 'destinationSubresource': 0, 'source': 401,
+                              'sourceSubresource': 2, 'format': 28, 'region': True})
+
+    def test_a_resolve_that_does_not_fit_is_refused(self):
+        """A payload of the wrong length names no resource at all: half a resolve read as a whole one would
+        attribute a use to a resource the payload does not name."""
+        self.assertIsNone(R.parse_resolve('List_ResolveSubresource', b'\x00' * 35))
+        self.assertIsNone(R.parse_resolve('List_ResolveSubresource', b'\x00' * 37))
+        self.assertIsNone(R.parse_resolve('List_ResolveSubresourceRegion',
+                                          F.pl_resolve_region(7, 1, 2)[:48]))
+        flag_without_rect = F.pl_resolve_region(7, 1, 2)[:40] + bytes([1]) + b'\x00' * 8
+        self.assertIsNone(R.parse_resolve('List_ResolveSubresourceRegion', flag_without_rect))
+
 
 # =========================================================================== the ledger
 class TestWalkUses(UsesCase):
@@ -252,6 +281,19 @@ class TestWalkUses(UsesCase):
         self.assertEqual(self.uses_of(ledger, 301), [('discard', 'discard')])
         self.assertEqual(self.uses_of(ledger, 400), [('write', 'copy-dst')])
         self.assertEqual(self.uses_of(ledger, 401), [('read', 'copy-src')])
+
+    def test_a_resolve_is_a_read_and_a_write(self):
+        """Both sides are uses, and each row names the *other* subresource -- which is the question a
+        resolve raises. Before this decode the chunk was counted as unattributed, so a resource only ever
+        resolved into read as unused in `deps`."""
+        ledger = self.ledger(self.ch('List_ResolveSubresource', F.pl_resolve(7, 400, 401, src_sub=3)))
+        self.assertEqual(self.uses_of(ledger, 400), [('write', 'resolve-dst')])
+        self.assertEqual(self.uses_of(ledger, 401), [('read', 'resolve-src')])
+        self.assertIn('subresource 3', ledger['resources'][400]['uses'][0]['detail'])
+        self.assertIn('to res400 subresource 0', ledger['resources'][401]['uses'][0]['detail'])
+        # and the chunk is no longer one of the kinds the walk only counts rather than attributes
+        self.assertNotIn('List_ResolveSubresource', R.UNATTRIBUTED_CHUNKS)
+        self.assertNotIn('List_ResolveSubresourceRegion', R.UNATTRIBUTED_CHUNKS)
 
     def test_a_transition_is_classified_by_the_state_it_enters(self):
         ledger = self.ledger(

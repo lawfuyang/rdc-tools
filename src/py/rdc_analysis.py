@@ -120,6 +120,7 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         detect_marker_balance as detect_marker_balance,
                         detect_messages as detect_messages,
                         detect_shader_io_mismatch as detect_shader_io_mismatch,
+                        detect_srgb_view_mismatch as detect_srgb_view_mismatch,
                         detect_unattributed_draws as detect_unattributed_draws,
                         detect_unbound_root_parameters as detect_unbound_root_parameters,
                         detect_zero_constant_blocks as detect_zero_constant_blocks,

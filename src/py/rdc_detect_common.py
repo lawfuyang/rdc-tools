@@ -178,6 +178,9 @@ DETECTOR_SEVERITY: Dict[str, Tuple[str, str]] = {
     'format-units-suspicion': (
         'medium', 'a float output into a narrow or non-linear target, where the units may not be what the '
                   'shader means'),
+    'srgb-view-mismatch': (
+        'medium', 'a texture declared linear read through an sRGB view: the same bits with and without the '
+                  'transfer function, which is a units disagreement between a write and a read'),
     'debug-message': (
         'medium', "the application's own complaint: its own severity is in the finding"),
     'marker-imbalance': (
@@ -210,6 +213,7 @@ DETECTOR_RECIPE: Dict[str, str] = {
     'marker-imbalance': "replay_dump draws '{rdc}'",
     'unattributed-draws': "replay_dump draws '{rdc}'",
     'zero-work': "replay_dump draws '{rdc}'",
+    'srgb-view-mismatch': "replay_dump usage '{rdc}' {resId}",
 }
 
 #: Used when a recipe needs a value the finding's evidence does not name: the action tree is in every capture

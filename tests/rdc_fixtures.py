@@ -246,14 +246,19 @@ def pl_root_signature(cmdlist: int, rootsig: int) -> bytes:
     return u64b(cmdlist) + u64b(rootsig)
 
 
-def pl_descriptor_write(resource: int, heap: int, index: int, length: int = 68) -> bytes:
-    """A `Device_Create*View` payload: the resource id at +16, the destination handle last.
+def pl_descriptor_write(resource: int, heap: int, index: int, length: int = 68,
+                        view_format: int = 0) -> bytes:
+    """A `Device_Create*View` payload: the resource id at +16, the view's format at +24, the handle last.
 
-    The tool reads exactly those two things -- the descriptor *kind* comes from the chunk name -- so
-    the bytes in between are zeros. `length` matches what the captures carry for an SRV (68); a UAV
-    payload is 80 in the captures, which is why the length is a parameter.
+    The tool reads the resource, the format (for an SRV/UAV/RTV, whose serialised description opens
+    with `DXGI_FORMAT Format;`) and the destination handle; the descriptor *kind* comes from the chunk
+    name. `length` matches what the captures carry for an SRV (68); a UAV payload is 80 in the
+    captures, which is why the length is a parameter. `view_format` is a `DXGI_FORMAT` *id* -- 29 is
+    `R8G8B8A8_UNORM_SRGB` in the bundled table, 28 the linear form -- and the rest of the description
+    stays zeros.
     """
-    return b'\x00' * 16 + u64b(resource) + b'\x00' * (length - 36) + u64b(heap) + u32b(index)
+    head = b'\x00' * 16 + u64b(resource) + u32b(view_format)
+    return head + b'\x00' * (length - 40) + u64b(heap) + u32b(index)
 
 
 def pl_copy_descriptors(entries: Sequence[Tuple[int, int, int, int]],
@@ -496,6 +501,28 @@ def pl_copy_texture(cmdlist: int, dst: int, src: int, dst_sub: int = 0, src_sub:
             + u32b(0) * 3 + u32b(1) * 3)
 
 
+def pl_resolve(cmdlist: int, dst: int, src: int, dst_sub: int = 0, src_sub: int = 0,
+               fmt: int = 0) -> bytes:
+    """`List_ResolveSubresource`: cmdList | dst | dstSubresource | src | srcSubresource | format.
+
+    36 bytes, which is what `EXPECTED_LENGTHS` checks it against. `fmt` is a `DXGI_FORMAT` *id* -- the
+    payload carries the number, not a name.
+    """
+    return u64b(cmdlist) + u64b(dst) + u32b(dst_sub) + u64b(src) + u32b(src_sub) + u32b(fmt)
+
+
+def pl_resolve_region(cmdlist: int, dst: int, src: int, dst_sub: int = 0, src_sub: int = 0,
+                      fmt: int = 0, rect: bool = False, mode: int = 0) -> bytes:
+    """`List_ResolveSubresourceRegion`: the same pair, a different order and an optional rect.
+
+    After the destination subresource come the destination offset (X, Y), then the source resource and
+    its subresource, then the source rect as a present byte plus four coordinates, then the format and
+    the resolve mode -- so the payload is 49 bytes without a rect and 65 with one.
+    """
+    body = u64b(cmdlist) + u64b(dst) + u32b(dst_sub) + u32b(0) + u32b(0) + u64b(src) + u32b(src_sub)
+    return body + (bytes([1]) + u32b(0) * 4 if rect else bytes([0])) + u32b(fmt) + u32b(mode)
+
+
 # --------------------------------------------------------------------------- root signatures
 #: `D3D12_ROOT_PARAMETER_TYPE` / `D3D12_DESCRIPTOR_RANGE_TYPE` by the words the tool uses.
 PARAM_KIND_CODES = {'table': 0, '32bit': 1, 'cbv': 2, 'srv': 3, 'uav': 4}
@@ -734,7 +761,9 @@ enum DXGI_FORMAT
   DXGI_FORMAT_UNKNOWN = 0,
   DXGI_FORMAT_R32G32B32A32_FLOAT = 2,
   DXGI_FORMAT_R16G16B16A16_FLOAT = 10,
+  DXGI_FORMAT_R8G8B8A8_TYPELESS = 27,
   DXGI_FORMAT_R8G8B8A8_UNORM = 28,
+  DXGI_FORMAT_R8G8B8A8_UNORM_SRGB = 29,
   DXGI_FORMAT_BC4_UNORM = 90,
 };
 '''

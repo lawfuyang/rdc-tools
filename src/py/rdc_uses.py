@@ -220,7 +220,7 @@ def walk_uses(stream: Buffer, names: Optional[Dict[int, str]] = None,
                                   unresolved=0)
     states: Dict[int, DrawState] = {}
     readable = (DRAW_CHUNKS + TARGET_CHUNKS + STATE_CHUNKS + CLEAR_CHUNKS + DISCARD_CHUNKS
-                + COPY_CHUNKS + BARRIER_CHUNKS + HEAP_CHUNKS + ('CreateAS',)
+                + COPY_CHUNKS + RESOLVE_CHUNKS + BARRIER_CHUNKS + HEAP_CHUNKS + ('CreateAS',)
                 + tuple(RESOURCE_CHUNKS))
     for eid, ch in enumerate(iter_chunks(stream), 1):
         name = names.get(ch['id'], '')
@@ -265,6 +265,22 @@ def walk_uses(stream: Buffer, names: Optional[Dict[int, str]] = None,
                 size = ' bytes=%d' % u64(blob, 40) if name == 'List_CopyBufferRegion' else ''
                 _use(ledger, pair[0], eid, 'write', 'copy-dst', name, 'from res%d%s' % (pair[1], size))
                 _use(ledger, pair[1], eid, 'read', 'copy-src', name, 'to res%d%s' % (pair[0], size))
+        elif name in RESOLVE_CHUNKS:
+            resolved = parse_resolve(name, blob)
+            if resolved is None:
+                ledger['failed'][name] = ledger['failed'].get(name, 0) + 1
+            else:
+                # Both rows name the *other* side's subresource, because that is the question a resolve
+                # raises: which slice of the multisampled texture was resolved into which of the
+                # single-sample one. Reading a resolve as a write-only would lose half of that, and
+                # reading it as nothing at all -- what happened before this decoder existed -- made a
+                # resource only ever resolved look unused in `deps`.
+                _use(ledger, resolved['destination'], eid, 'write', 'resolve-dst', name,
+                     'from res%d subresource %d' % (resolved['source'],
+                                                    resolved['sourceSubresource']))
+                _use(ledger, resolved['source'], eid, 'read', 'resolve-src', name,
+                     'to res%d subresource %d' % (resolved['destination'],
+                                                  resolved['destinationSubresource']))
         elif name in BARRIER_CHUNKS:
             if not _barrier_uses(ledger, eid, name, blob):
                 ledger['failed'][name] = ledger['failed'].get(name, 0) + 1

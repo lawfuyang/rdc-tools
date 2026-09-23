@@ -986,6 +986,16 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   ProfileAdd(kProfileActions, tKinds);
   Log("bundle: %d call(s) classified from the engine's action flags", callCount);
 
+  // What each call asked the GPU to do, from the same action tree (`CallVolumesByEid`): a draw's
+  // vertices and instances, a dispatch's workgroups. This is the input the report's rankings have
+  // been declaring unavailable -- "a draw's vertex count is the first input of the rule and no
+  // bundle has it" -- and it is in the action list the engine already gave us.
+  int volumeCalls = 0;
+  const ULONGLONG tVolume = Millis();
+  const std::map<int, CallVolume> callVolumes = CallVolumesByEid(ctrl, volumeCalls);
+  ProfileAdd(kProfileActions, tVolume);
+  Log("bundle: %d call(s) carry a work volume", volumeCalls);
+
   // The marker path of every event, from the same action list: one walk for the whole bundle rather
   // than one per event, because the tree is walked once per `MarkerPathAt` call.
   const ULONGLONG tMarkers = Millis();
@@ -1069,15 +1079,69 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       // `marker` is the engine's own marker path for this event (`A > B`), from the action list: it
       // is what lets an offline rule name a pass in the engine's vocabulary instead of describing
       // its state, and it survives a re-capture where an event id does not.
+      //
+      // `volume` is what the *call* asked for, and it is absent for an event that is not a call (a
+      // state setter, a marker, a barrier): a reader can tell "asked for nothing" from "not a
+      // call". A draw's triangles are folded here because the topology is state -- `PrimitiveCount`
+      // over the index/vertex count, times the instances, and 0 when the topology does not fix one
+      // (the convention `mesh` uses). A dispatch's thread count needs the shader's `[numthreads]`,
+      // so it is the call's own override when it has one (rare) and the bound compute shader's
+      // reflection otherwise; 0 is "the engine published neither", not "no threads".
+      std::string volume;
+      const std::map<int, CallVolume>::const_iterator vol = callVolumes.find(eid);
+      if(vol != callVolumes.end())
+      {
+        if(vol->second.m_bDispatch)
+        {
+          unsigned threadsPerGroup[3] = {vol->second.m_Threads[0], vol->second.m_Threads[1],
+                                         vol->second.m_Threads[2]};
+          if(threadsPerGroup[0] == 0 && threadsPerGroup[1] == 0 && threadsPerGroup[2] == 0)
+          {
+            const D3D12Pipe::Shader *cs = StageShader(st, ShaderStage::Compute);
+            if(cs != NULL && cs->reflection != NULL)
+            {
+              for(int i = 0; i < 3; i++)
+                threadsPerGroup[i] = cs->reflection->dispatchThreadsDimension[i];
+            }
+          }
+
+          long long threads = 0;
+          if(threadsPerGroup[0] > 0 && threadsPerGroup[1] > 0 && threadsPerGroup[2] > 0)
+          {
+            threads = (long long)vol->second.m_Groups[0] * vol->second.m_Groups[1] *
+                      vol->second.m_Groups[2] * threadsPerGroup[0] * threadsPerGroup[1] *
+                      threadsPerGroup[2];
+          }
+
+          volume =
+              Fmt("\"volume\": {\"groups\": [%u, %u, %u], \"threadsPerGroup\": [%u, %u, %u], "
+                  "\"threads\": %lld}",
+                  (unsigned)vol->second.m_Groups[0], (unsigned)vol->second.m_Groups[1],
+                  (unsigned)vol->second.m_Groups[2], threadsPerGroup[0], threadsPerGroup[1],
+                  threadsPerGroup[2], threads);
+        }
+        else
+        {
+          const long long instances = vol->second.m_Instances > 0 ? vol->second.m_Instances : 1;
+          const long long triangles =
+              vol->second.m_Count > 0
+                  ? PrimitiveCount(st->inputAssembly.topology, vol->second.m_Count) * instances
+                  : 0;
+          volume = Fmt("\"volume\": {\"vertices\": %lld, \"instances\": %lld, \"triangles\": %lld}",
+                       vol->second.m_Count, instances, triangles);
+        }
+        volume += ", ";
+      }
+
       ObjectRow(Fmt(
           "{\"eid\": %d, \"marker\": \"%s\", \"pso\": \"%s\", \"psoKind\": \"%s\", \"shaders\": "
           "\"%s\","
-          " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, \"state\": \"%s\"}",
+          " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, %s\"state\": \"%s\"}",
           eid,
           JsonEscape(markerPaths.count(eid) ? markerPaths.find(eid)->second : std::string()).c_str(),
           IdText(st->pipelineResourceId).c_str(), bCompute ? "compute" : "graphics",
           shaderIds.c_str(), targets.c_str(), depth.c_str(),
-          (unsigned)st->rootSignature.parameters.size(), stateHash.c_str()));
+          (unsigned)st->rootSignature.parameters.size(), volume.c_str(), stateHash.c_str()));
       eventsWritten++;
       ProfileAdd(kProfileEventRow, tRow);
 
@@ -1367,12 +1431,9 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     ArrayOpen("notInThisBundle");
     ObjectRow(std::string(
         "{\"what\": \"the finer kind of each call (draw against copy, clear or marker)\","
-        " \"why\": \"`psoKind` says whether the event is a dispatch and nothing more; the"
-        " rest, and the call's own name, are in the action list the engine exposes and this"
-        " bundle does not write\"}"));
-    ObjectRow(std::string(
-        "{\"what\": \"per-event triangle and thread counts\", \"why\": \"those live in the"
-        " captured call arguments, not in the pipeline state\"}"));
+        " \"why\": \"`psoKind` says whether the event is a dispatch, and `volume` says what a draw"
+        " or a dispatch asked for; the rest -- copy against clear against marker, and the call's"
+        " own name -- is in the action list the engine exposes and this bundle does not write\"}"));
     ObjectRow(std::string(
         "{\"what\": \"the marker *path* of an event that is outside every marker\", \"why\": \"the"
         " path is empty there, which is the truth rather than a missing measurement; `draws`"

@@ -573,6 +573,29 @@ class TestDecodeChunk(unittest.TestCase):
     def test_initial_contents_truncated(self):
         self.assertEqual(R.decode_chunk('InitialContents', b'\x00' * 31), [])
 
+    def test_resolve_subresource(self):
+        """A resolve prints both sides and both subresources: which slice of the multisampled texture went
+        where is the whole reason the payload is decoded."""
+        blob = F.pl_resolve(7, 400, 401, dst_sub=0, src_sub=3, fmt=28)
+        self.assertEqual(R.decode_chunk('List_ResolveSubresource', blob),
+                         ['cmdList=7 dst=res400 sub=0 src=res401 sub=3 format=28'])
+
+    def test_resolve_subresource_region(self):
+        """The `Region` form adds the destination offset, the optional rect and the resolve mode, and says
+        so in the line: a reader has to be able to tell which form produced it."""
+        for rect in (False, True):
+            blob = F.pl_resolve_region(7, 400, 401, src_sub=2, fmt=28, rect=rect)
+            self.assertEqual(R.decode_chunk('List_ResolveSubresourceRegion', blob),
+                             ['cmdList=7 dst=res400 sub=0 src=res401 sub=2 format=28 region'])
+
+    def test_resolve_payloads_that_do_not_fit_are_not_decoded(self):
+        # the plain form is exactly 36 bytes: a 35 or a 37 is a payload this decoder does not know
+        self.assertEqual(R.decode_chunk('List_ResolveSubresource', b'\x00' * 35), [])
+        self.assertEqual(R.decode_chunk('List_ResolveSubresource', b'\x00' * 37), [])
+        # a present rect flag with no rect behind it is neither form's length
+        cut = F.pl_resolve_region(7, 1, 2)[:40] + bytes([1]) + b'\x00' * 8
+        self.assertEqual(R.decode_chunk('List_ResolveSubresourceRegion', cut), [])
+
     def test_unknown_chunk_name(self):
         self.assertEqual(R.decode_chunk('List_SomethingElse', b'\x00' * 64), [])
         self.assertEqual(R.decode_chunk('', b'\x00' * 64), [])

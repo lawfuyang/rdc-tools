@@ -115,7 +115,7 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `Device_CreateRootSignature` | the serialiser's framing around a one-part DXBC container holding `RTS0` (found by its magic, cross-checked against the length at `+4`); the **id is the last 8 bytes** — see §8 for the signature's own layout |
 | `SetName` | `u64 objectId, u32 length, utf-8 name` — RenderDoc names every object, not only resources, which is what makes heaps and queues identifiable |
 | `Device_CreateDescriptorHeap` | `D3D12_DESCRIPTOR_HEAP_DESC` (type, count) + IID + the heap id at `length - 16` + the original GPU base — 56 bytes |
-| `Device_Create{ConstantBuffer,ShaderResource,UnorderedAccess,RenderTarget,DepthStencil}View` | the descriptor first — the **resource id is at +16** — and the destination `PortableHandle` last (`u64 heapId` at `length - 12`, `u32 index` at `length - 4`). 68 bytes for an SRV, 80 for a UAV in the captures |
+| `Device_Create{ConstantBuffer,ShaderResource,UnorderedAccess,RenderTarget,DepthStencil}View` | the descriptor first — the **resource id is at +16**, and for an SRV/UAV/RTV (whose serialised description opens with `DXGI_FORMAT Format;`) the **view's format is at +24**. A DSV carries `Flags` as well and a CBV has no format at all, so both are left as 0 rather than read at an offset belonging to another field. The destination `PortableHandle` is last (`u64 heapId` at `length - 12`, `u32 index` at `length - 4`). 68 bytes for an SRV, 80 for a UAV in the captures. The view's format is what `srgb-view-mismatch` compares a resource's declared format against (§4.11) |
 | `Device_CopyDescriptors` / `…Simple` | `u64 count`, then `count x (u32 heapType, dst PortableHandle, src PortableHandle)` — 28 bytes per entry (36 bytes for a single copy) |
 | `List_ResourceBarrier` | `u64 cmdList, u32 NumBarriers, u64 arrayCount`, then one entry per barrier — `u32 Type, u32 Flags` and the arm the type selects: a transition is 28 B (`u64 resId, u32 Subresource, u32 StateBefore, u32 StateAfter`), an aliasing barrier 24 (`u64 before, u64 after`) and a UAV barrier 16 (`u64 resId`). The serialiser writes the *active arm member by member*, so the entries are not one length and a decoder has to walk them by type |
 | `List_Barrier` | `u64 cmdList, u32 NumBarrierGroups, u64 arrayCount`, then per group `u32 Type (0/1/2 = global/texture/buffer), u32 NumBarriers, u64 count` and its elements: global 16 B (`SyncBefore, SyncAfter, AccessBefore, AccessAfter`), texture 60 B (the same six access words, `u64 resId`, a 24-byte subresource range, flags) and buffer 40 B (the access words, `u64 resId`, offset, size) |
@@ -124,6 +124,7 @@ with the command list's `ResourceId` (a `u64`), and a `D3D12BufferLocation` is s
 | `List_DiscardResource` | `u64 cmdList, u64 resId, OPT(D3D12_DISCARD_REGION)` — 17 bytes with no region, 37 with one |
 | `List_CopyBufferRegion` | `u64 cmdList, u64 dst, u64 dstOffset, u64 src, u64 srcOffset, u64 numBytes` (48 B, in `EXPECTED_LENGTHS`) |
 | `List_CopyTextureRegion` | `u64 cmdList`, a `D3D12_TEXTURE_COPY_LOCATION` on each side with `DstX/Y/Z` between them, then `OPT(D3D12_BOX)`. A location is `u64 resId, u32 Type, the arm the type selects` — and the types are the other way round from the obvious guess: **0 = a subresource index** (4 B, so the location is 16) and **1 = a placed footprint** (28 B, so 40). All five payloads in the captures here are 77 bytes and take the type-0 arm |
+| `List_ResolveSubresource` | `u64 cmdList, u64 dst, u32 dstSubresource, u64 src, u32 srcSubresource, u32 format` — **36 bytes**, in `EXPECTED_LENGTHS`, with the format last. The `Region` form (`List_ResolveSubresourceRegion`, the ID3D12GraphicsCommandList7 call) inserts the destination X/Y after the subresource, then the source subresource, then the optional source rect as a present byte + 16 bytes, then the format and the resolve mode: **49 bytes without a rect, 65 with one**, and an unreadable length is refused rather than read as a resolve of the wrong subresource. Decoded since 2026-09-22 as a read→write pair naming *which* subresource of each side (§4.15) — before that the two chunks were counted as unattributed, so a resource only ever resolved into read as unused |
 | `Device_CreateHeap` | the `D3D12_HEAP_DESC` (40 B: size, 20 B of properties, alignment, flags), the IID (24 B — its `Data4[8]` array carries its own `u64` count, which is why the payload is 72 and not 64) and the heap id at `length - 8` |
 | `InitialContents` | `u64 resourceId` + resource description, then the data — only the id and the first header bytes are decoded (`chunk <N>`); reading the contents is the replay driver's job |
 | `Device_CreatePipelineState` | created PSO id first, then the desc with inlined shader bytecode (DXBC containers embedded) |
@@ -504,9 +505,11 @@ which is why the checked-in copy cannot quietly go stale after a document change
 | appendix | the `replay_dump state` / `shaders` / `usage` commands that reproduce a pass, a claim and a notable row |
 
 **Notability is a stated rule, not a score.** Every notable list prints the inputs it ranks by, in order, with
-the way each is measured — and it prints the ones it could *not* use just as plainly: a draw's vertex count is
-the first input of the notable-pass ranking and no bundle carries it, because the replay API exposes no action list, and
-counter cost is only in a bundle written with `--with-counters`. A texture is ranked in *pixels*, not bytes,
+the way each is measured — and it prints the ones it could *not* use just as plainly: the *work* a pass's calls
+asked for is the first input of the notable-pass ranking, and it is in a bundle written from 2026-09-22 on (the
+driver takes it from the engine's action list, §9's `volume`); a bundle older than that carries none, and the
+table then says so rather than ranking every pass by a zero. Counter cost is only in a bundle written with
+`--with-counters`. A texture is ranked in *pixels*, not bytes,
 because a bundle records its dimensions and format but not its byte count; where one figure has to compare a
 texture with a buffer, it is counted at 4 bytes per pixel and the `~` on that estimate says so. Two claims the
 lists deliberately do not make: "read by 0 passes" is only printed for a resource the engine *tracked*, and a
@@ -595,19 +598,24 @@ target at all — an HDR frame, not a gap in the rules. That is the difference b
 the finding names what it keys off, so its silence is checkable too. The 601 MB `desktop-2` is dumped as a
 600-event window (`--max-events`), which the report's provenance states. From
 the capture's chunk stream: marker imbalance,
-unattributed draws, and calls that can only draw nothing (0 vertices/indices/instances/groups). A detector
+unattributed draws, calls that can only draw nothing (0 vertices/indices/instances/groups), and a texture
+declared with a linear format read through its sRGB form — the resource table's `format` against the view
+formats the descriptor writes declare, which is the half of the format rule a bundle cannot answer. A detector
 that could not look — no usage lists with `--no-usage`, no chunk-name map at all (no source tree *and* an
 empty bundled table), a capture that has moved — is reported as *skipped* with the reason, because "clean"
 and "not checked" are
 different answers, and a bundle with no findings says so without implying the frame is fine.
 
-What it does **not** do yet: MSAA's *which subresource did the resolve copy* half (the
-`ResolveSubresource` payload is not in a bundle) and the sRGB/linear half of the format rule (a later
-sampling view's sRGB flag is not either), both stated as unclaimed rather than guessed at; counters folded into
-the pass sections; and the two ranking inputs a bundle cannot carry (a draw's vertex count, §4.11 above). Passes
-are *state-derived*, not named — a run of events that agree on call kind and render targets, or on pipeline and
-shaders for a dispatch — and the report says so in its own words rather than describing a pass as something it
-has not established.
+What it does **not** do yet: counters folded into the pass sections; and the UAV side of a dispatch (§2's item,
+so a compute pass still says "targets and depth not applicable"). Two gaps it used to carry are closed, one on
+each side of the line: the *work* a pass's calls asked for is in a bundle written from 2026-09-22 on (the
+driver's `volume`, §9, taken from the engine's action list) and is the notable-pass ranking's first input, and
+the sRGB/linear half of the format rule is its own finding (`srgb-view-mismatch`, §4.11) read from the file —
+the resource table's declared format against the formats the views over it declare. MSAA's *which subresource*
+half is readable from the file too (`deps` prints every resolve as a read→write pair naming both subresources,
+§4.15); what stays unclaimed is whether a given resolve was the *right* one. Passes are *state-derived*, not
+named — a run of events that agree on call kind and render targets, or on pipeline and shaders for a dispatch —
+and the report says so in its own words rather than describing a pass as something it has not established.
 
 ### 4.13 Speed: what a long command costs, and the scan that splits
 
@@ -1661,7 +1669,7 @@ still the failure those commands report as `cannot create <what>`. It writes:
 |---|---|
 | `manifest.json` | bundle version, driver and RenderDoc version, the capture's absolute path, byte count and SHA-256, the flags used, the scan result, every written file with its size and hash, and a `notInThisBundle` list saying what it cannot contain and why |
 | `capture.json` | the capture header: API, driver, machine, feature flags (`shaderDebugging`, `pixelHistory`), counts, file size |
-| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, and a state hash. `psoKind` is the *call kind* from the capture's action tree — a dispatch or not — and not a reading of the bound shaders: on `desktop-1` every event has a compute shader bound, so the shaders would call all 2132 of them compute, draws included |
+| `events.json` | one record per id with bound state: eid, pipeline object and `psoKind` (graphics/compute), the shader id per stage, the render targets with format and dimensions, the depth target, the root-parameter count, a state hash, and — for a call — a `volume`. `psoKind` is the *call kind* from the capture's action tree — a dispatch or not — and not a reading of the bound shaders: on `desktop-1` every event has a compute shader bound, so the shaders would call all 2132 of them compute, draws included. `volume` is what the *call* asked for, taken from the same action list: a draw carries `vertices` (its index count, or its vertex count when the draw is not indexed), `instances` and `triangles` (`0` when the topology does not fix one — a patch list, a meshlet list), a dispatch carries `groups`, `threadsPerGroup` (the call's own override, else the bound shader's `[numthreads]`) and `threads`. It is absent for an event that is not a call, so a reader can tell "asked for nothing" from "not a call"; a bundle written before 2026-09-22 carries none at all, and the report says which of its rankings could not read it |
 | `states/<eid>.state.json` + `.shaders.json` | the full pipeline state and the reflection, written *through* the `state` and `shaders` commands, so a file is exactly what the command prints — including each stage's `hash` (the SHA-256 of its bytes), which is what `replaydiff` compares two bundles' shaders by (§4.16) |
 | `cbuffers/<eid>_<stage>_<slot>.json` | the named values of every constant block of every bound stage, at the state events |
 | `resources.json` | every resource: id, name, kind, format/dimensions or byte size, and its usage list with the first and last event that touches it || `messages.json` | debug messages as objects: eid, numeric severity, severity text, text |

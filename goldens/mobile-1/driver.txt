@@ -1,5 +1,5 @@
 # bin\replay_dump.exe batch <capture> build\goldens\mobile-1\driver.batch.txt
-# exit: 0
+# exit: 1
 --- stdout ---
 #=== info
 schemaVersion      1
@@ -73,4 +73,392 @@ driver             D3D12
 localReplay        1
 machine            Windows x86 64-bit 
 total              0
+#=== formats
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+format                       count         bytes  shape                      picture      why
+R8G8B8A8_TYPELESS                2       0.07 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
+R10G10B10A2_UNORM                3      19.88 MB  4 x 0-bit unorm            no           the engine's format table has no layout for it (no components)
+B8G8R8A8_TYPELESS                1       0.00 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
+R16G16B16A16_FLOAT               4       0.25 MB  4 x 16-bit float           yes          
+A8_UNORM                         1       4.00 MB  1 x 8-bit unorm            no           a special layout (multi-plane or packed): the display path does not take it
+R32_UINT                         1       4.94 MB  1 x 32-bit uint            yes          
+R11G11B10_FLOAT                  2      10.44 MB  3 x 0-bit float            no           the engine's format table has no layout for it (no components)
+D32S8_TYPELESS                   1      12.38 MB  2 x 0-bit typeless         no           the engine's format table has no layout for it (no components)
+textures           15
+bytes              54468608
+formatCount        8
+needCast           3
+noLayout           7
+#=== crosscheck
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                0
+from               1
+to                 540
+scanned            41
+linksChecked       110
+bindingsChecked    387
+bindingsUnmapped   304
+targetsChecked     28
+noRootParameters   16
+total              0
+shown              0
+stoppedEarly       off
+#=== state 289
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                289
+marker             FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+api                1
+vs  res3043   
+ps  res3044   
+cs  res2317   
+slot 0  res2269
+depthTarget        2270
+rootSignature      2293
+rp0   reg=0 space=0 vis=ps heap298+0x21ce9
+rp0   t0  s0   cat(3) type(4) res2700
+rp0   t1  s0   cat(3) type(4) res326
+rp0   t2  s0   cat(3) type(4) res2235
+rp0   t3  s0   cat(3) type(4) res2237
+rp0   t4  s0   cat(3) type(4) res2700
+rp0   t5  s0   cat(3) type(4) res326
+rp0   t6  s0   cat(3) type(5) res2253
+rp0   t7  s0   cat(3) type(4) res2269
+rp0   t8  s0   cat(3) type(4) res2213
+rp0   t9  s0   cat(3) type(4) res2254
+rp0   t10 s0   cat(3) type(4) res2273
+rp0   t11 s0   cat(3) type(4) res2255
+rp0   t12 s0   cat(3) type(0) none
+rp0   t13 s0   cat(3) type(0) none
+rp0   t14 s0   cat(3) type(0) none
+rp0   t15 s0   cat(3) type(0) none
+rp0   t16 s0   cat(3) type(0) none
+rp0   t17 s0   cat(3) type(0) none
+rp0   t18 s0   cat(3) type(0) none
+rp0   t19 s0   cat(3) type(0) none
+rp0   t20 s0   cat(3) type(0) none
+rp0   t21 s0   cat(3) type(0) none
+rp0   t22 s0   cat(3) type(0) none
+rp0   t23 s0   cat(3) type(0) none
+rp0   t24 s0   cat(3) type(0) none
+rp0   t25 s0   cat(3) type(0) none
+rp0   t26 s0   cat(3) type(0) none
+rp0   t27 s0   cat(3) type(0) none
+rp0   t28 s0   cat(3) type(0) none
+rp0   t29 s0   cat(3) type(0) none
+rp0   t30 s0   cat(3) type(0) none
+rp0   t31 s0   cat(3) type(0) none
+rp0   t32 s0   cat(3) type(0) none
+rp0   t33 s0   cat(3) type(0) none
+rp0   t34 s0   cat(3) type(0) none
+rp0   t35 s0   cat(3) type(0) none
+rp0   t36 s0   cat(3) type(0) none
+rp0   t37 s0   cat(3) type(0) none
+rp0   t38 s0   cat(3) type(0) none
+rp0   t39 s0   cat(3) type(0) none
+rp0   t40 s0   cat(3) type(0) none
+rp0   t41 s0   cat(3) type(0) none
+rp0   t42 s0   cat(3) type(0) none
+rp0   t43 s0   cat(3) type(0) none
+rp0   t44 s0   cat(3) type(0) none
+rp0   t45 s0   cat(3) type(0) none
+rp0   t46 s0   cat(3) type(0) none
+rp0   t47 s0   cat(3) type(0) none
+rp0   t48 s0   cat(3) type(0) none
+rp0   t49 s0   cat(3) type(0) none
+rp0   t50 s0   cat(3) type(0) none
+rp0   t51 s0   cat(3) type(0) none
+rp0   t52 s0   cat(3) type(0) none
+rp0   t53 s0   cat(3) type(0) none
+rp0   t54 s0   cat(3) type(0) none
+rp0   t55 s0   cat(3) type(0) none
+rp0   t56 s0   cat(3) type(0) none
+rp0   t57 s0   cat(3) type(0) none
+rp0   t58 s0   cat(3) type(0) none
+rp0   t59 s0   cat(3) type(0) none
+rp0   t60 s0   cat(3) type(0) none
+rp0   t61 s0   cat(3) type(0) none
+rp0   t62 s0   cat(3) type(0) none
+rp0   t63 s0   cat(3) type(0) none
+rp1   reg=0 space=0 vis=ps heap299+0x19
+rp1   s0  s0   cat(2) type(2) none
+rp1   s1  s0   cat(2) type(2) none
+rp1   s2  s0   cat(2) type(0) none
+rp1   s3  s0   cat(2) type(0) none
+rp1   s4  s0   cat(2) type(0) none
+rp1   s5  s0   cat(2) type(0) none
+rp1   s6  s0   cat(2) type(0) none
+rp1   s7  s0   cat(2) type(0) none
+rp1   s8  s0   cat(2) type(0) none
+rp1   s9  s0   cat(2) type(0) none
+rp1   s10 s0   cat(2) type(0) none
+rp1   s11 s0   cat(2) type(0) none
+rp1   s12 s0   cat(2) type(0) none
+rp1   s13 s0   cat(2) type(0) none
+rp1   s14 s0   cat(2) type(0) none
+rp1   s15 s0   cat(2) type(0) none
+rp1   s16 s0   cat(2) type(0) none
+rp1   s17 s0   cat(2) type(0) none
+rp1   s18 s0   cat(2) type(0) none
+rp1   s19 s0   cat(2) type(0) none
+rp1   s20 s0   cat(2) type(0) none
+rp1   s21 s0   cat(2) type(0) none
+rp1   s22 s0   cat(2) type(0) none
+rp1   s23 s0   cat(2) type(0) none
+rp1   s24 s0   cat(2) type(0) none
+rp1   s25 s0   cat(2) type(0) none
+rp1   s26 s0   cat(2) type(0) none
+rp1   s27 s0   cat(2) type(0) none
+rp1   s28 s0   cat(2) type(0) none
+rp1   s29 s0   cat(2) type(0) none
+rp1   s30 s0   cat(2) type(0) none
+rp1   s31 s0   cat(2) type(0) none
+rp2   reg=0 space=0 vis=vs heap298+0x21ce7
+rp2   t0  s0   cat(3) type(4) res2235
+rp2   t1  s0   cat(3) type(4) res2237
+rp2   t2  s0   cat(3) type(4) res2700
+rp2   t3  s0   cat(3) type(4) res326
+rp2   t4  s0   cat(3) type(4) res2235
+rp2   t5  s0   cat(3) type(4) res2237
+rp2   t6  s0   cat(3) type(4) res2700
+rp2   t7  s0   cat(3) type(4) res326
+rp2   t8  s0   cat(3) type(5) res2253
+rp2   t9  s0   cat(3) type(4) res2269
+rp2   t10 s0   cat(3) type(4) res2213
+rp2   t11 s0   cat(3) type(4) res2254
+rp2   t12 s0   cat(3) type(4) res2273
+rp2   t13 s0   cat(3) type(4) res2255
+rp2   t14 s0   cat(3) type(0) none
+rp2   t15 s0   cat(3) type(0) none
+rp2   t16 s0   cat(3) type(0) none
+rp2   t17 s0   cat(3) type(0) none
+rp2   t18 s0   cat(3) type(0) none
+rp2   t19 s0   cat(3) type(0) none
+rp2   t20 s0   cat(3) type(0) none
+rp2   t21 s0   cat(3) type(0) none
+rp2   t22 s0   cat(3) type(0) none
+rp2   t23 s0   cat(3) type(0) none
+rp2   t24 s0   cat(3) type(0) none
+rp2   t25 s0   cat(3) type(0) none
+rp2   t26 s0   cat(3) type(0) none
+rp2   t27 s0   cat(3) type(0) none
+rp2   t28 s0   cat(3) type(0) none
+rp2   t29 s0   cat(3) type(0) none
+rp2   t30 s0   cat(3) type(0) none
+rp2   t31 s0   cat(3) type(0) none
+rp2   t32 s0   cat(3) type(0) none
+rp2   t33 s0   cat(3) type(0) none
+rp2   t34 s0   cat(3) type(0) none
+rp2   t35 s0   cat(3) type(0) none
+rp2   t36 s0   cat(3) type(0) none
+rp2   t37 s0   cat(3) type(0) none
+rp2   t38 s0   cat(3) type(0) none
+rp2   t39 s0   cat(3) type(0) none
+rp2   t40 s0   cat(3) type(0) none
+rp2   t41 s0   cat(3) type(0) none
+rp2   t42 s0   cat(3) type(0) none
+rp2   t43 s0   cat(3) type(0) none
+rp2   t44 s0   cat(3) type(0) none
+rp2   t45 s0   cat(3) type(0) none
+rp2   t46 s0   cat(3) type(0) none
+rp2   t47 s0   cat(3) type(0) none
+rp2   t48 s0   cat(3) type(0) none
+rp2   t49 s0   cat(3) type(0) none
+rp2   t50 s0   cat(3) type(0) none
+rp2   t51 s0   cat(3) type(0) none
+rp2   t52 s0   cat(3) type(0) none
+rp2   t53 s0   cat(3) type(0) none
+rp2   t54 s0   cat(3) type(0) none
+rp2   t55 s0   cat(3) type(0) none
+rp2   t56 s0   cat(3) type(0) none
+rp2   t57 s0   cat(3) type(0) none
+rp2   t58 s0   cat(3) type(0) none
+rp2   t59 s0   cat(3) type(0) none
+rp2   t60 s0   cat(3) type(0) none
+rp2   t61 s0   cat(3) type(0) none
+rp2   t62 s0   cat(3) type(0) none
+rp2   t63 s0   cat(3) type(0) none
+rp3   reg=0 space=0 vis=vs heap299+0x3
+rp3   s0  s0   cat(2) type(2) none
+rp3   s1  s0   cat(2) type(2) none
+rp3   s2  s0   cat(2) type(2) none
+rp3   s3  s0   cat(2) type(2) none
+rp3   s4  s0   cat(2) type(2) none
+rp3   s5  s0   cat(2) type(2) none
+rp3   s6  s0   cat(2) type(2) none
+rp3   s7  s0   cat(2) type(2) none
+rp3   s8  s0   cat(2) type(2) none
+rp3   s9  s0   cat(2) type(2) none
+rp3   s10 s0   cat(2) type(2) none
+rp3   s11 s0   cat(2) type(2) none
+rp3   s12 s0   cat(2) type(2) none
+rp3   s13 s0   cat(2) type(2) none
+rp3   s14 s0   cat(2) type(2) none
+rp3   s15 s0   cat(2) type(2) none
+rp3   s16 s0   cat(2) type(2) none
+rp3   s17 s0   cat(2) type(2) none
+rp3   s18 s0   cat(2) type(2) none
+rp3   s19 s0   cat(2) type(2) none
+rp3   s20 s0   cat(2) type(2) none
+rp3   s21 s0   cat(2) type(2) none
+rp3   s22 s0   cat(2) type(2) none
+rp3   s23 s0   cat(2) type(2) none
+rp3   s24 s0   cat(2) type(0) none
+rp3   s25 s0   cat(2) type(0) none
+rp3   s26 s0   cat(2) type(0) none
+rp3   s27 s0   cat(2) type(0) none
+rp3   s28 s0   cat(2) type(0) none
+rp3   s29 s0   cat(2) type(0) none
+rp3   s30 s0   cat(2) type(0) none
+rp3   s31 s0   cat(2) type(0) none
+rp4   reg=0 space=0 vis=ps res1907
+rp5   reg=1 space=0 vis=ps res342
+rp6   reg=2 space=0 vis=ps res342
+rp7   reg=3 space=0 vis=ps res342
+rp8   reg=4 space=0 vis=ps res342
+rp9   reg=5 space=0 vis=ps res342
+rp10  reg=0 space=0 vis=vs res1907
+rp11  reg=1 space=0 vis=vs res342
+rp12  reg=2 space=0 vis=vs res1907
+{"x": 0.00, "y": 0.00, "width": 2003.00, "height": 1254.00, "minDepth": 0.000, "maxDepth": 1.000, "enabled": true}
+{"x": 0, "y": 0, "width": 2003, "height": 1254, "enabled": true}
+depthEnable        on
+depthWrites        on
+depthFunction      GreaterEqual
+stencilEnable      on
+stencilReadOnly    off
+alphaToCoverage    off
+independentBlend   on
+fail               Keep
+depthFail          Keep
+pass               Replace
+function           AlwaysTrue
+compareMask        0
+writeMask          255
+fail               Keep
+depthFail          Keep
+pass               Replace
+function           AlwaysTrue
+compareMask        0
+writeMask          255
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+#=== shaders 289
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                289
+marker             FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering > MobileBasePass > /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
+stage              vs
+resource           3043
+entry              Main
+encoding           6
+bytes              58712
+hash               94ea37fc69f8c0a3f715030076d12b92541b63c6bde473e8ee9729cd36edc5af
+cbuffer[0] View                         b0 s0 5996 bytes, 1 variables
+cbuffer[1] Primitive                    b1 s0 800 bytes, 1 variables
+cbuffer[2] MobileBasePass               b2 s0 3052 bytes, 1 variables
+View_DistantSkyLightLutTexture t0 s0 n1
+View_CameraAerialPerspectiveVolume t1 s0 n1
+ATTRIBUTE0 reg0 c4 float
+ATTRIBUTE1 reg1 c4 float
+ATTRIBUTE3 reg2 c4 half
+ATTRIBUTE8 reg3 c4 float
+ATTRIBUTE9 reg4 c4 half
+ATTRIBUTE10 reg5 c4 half
+ATTRIBUTE11 reg6 c4 half
+ATTRIBUTE12 reg7 c4 float
+SV_InstanceID0 reg8 c1 uint
+SV_VertexID0 reg9 c1 uint
+TEXCOORD10 reg0 c4 float
+TEXCOORD11 reg1 c4 float
+TEXCOORD7 reg2 c4 half
+TEXCOORD8 reg3 c4 float
+TEXCOORD9 reg4 c3 float
+SV_Position0 reg5 c4 float
+stage              ps
+resource           3044
+entry              Main
+encoding           6
+bytes              42756
+hash               1d1f813cbe58e71d9149d3773c63c5426d43695c540452dd76435307d7b83140
+cbuffer[0] View                         b0 s0 5996 bytes, 1 variables
+cbuffer[1] MobileReflectionCapture      b1 s0 172 bytes, 1 variables
+cbuffer[2] Primitive                    b2 s0 800 bytes, 1 variables
+cbuffer[3] IndirectLightingCache        b3 s0 268 bytes, 1 variables
+cbuffer[4] MobileDirectionalLight       b4 s0 428 bytes, 1 variables
+cbuffer[5] Material                     b5 s0 44 bytes, 1 variables
+MobileReflectionCapture_Texture t0 s0 n1
+MobileDirectionalLight_CloudMaskTexture t1 s0 n1
+TEXCOORD10 reg0 c4 float
+TEXCOORD11 reg1 c4 float
+TEXCOORD7 reg2 c4 half
+TEXCOORD8 reg3 c4 float
+TEXCOORD9 reg4 c3 float
+SV_Position0 reg5 c4 float
+SV_IsFrontFace0 reg6 c1 uint
+SV_Target0 reg0 c4 half
+stage              cs
+resource           2317
+entry              RenderCameraAerialPerspectiveVolumeCS
+encoding           6
+bytes              36764
+hash               d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be
+cbuffer[0] _RootShaderParameters        b0 s0 160 bytes, 2 variables
+cbuffer[1] View                         b1 s0 5996 bytes, 1 variables
+cbuffer[2] Atmosphere                   b2 s0 176 bytes, 1 variables
+cbuffer[3] SkyAtmosphere                b3 s0 156 bytes, 1 variables
+TransmittanceLutTexture t0 s0 n1
+MultiScatteredLuminanceLutTexture t1 s0 n1
+CameraAerialPerspectiveVolumeUAV u0 s0 n1
+threadId0 reg0 c3 uint
+#=== trace 289 --pixel 640,360
 --- stderr ---
+error: the engine produced no trace for pixel 640,360 at eid 289 (ps, res3044): sourceDebugInfo is 0
+       and its shader loading log is the search, in the engine's own words:
+       Did not find debug data for 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       Details
+       -------
+       No shader PDB filename specified using default 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       Shader filepath 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       No Recursive Search Paths
+       No Non-Recursive Search Paths
+       File not found using filepath 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       File not found in recursive directory search using filepath 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       File not found in files embedded in the capture using nickname 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       the debug data is what the engine steps a DXIL shader through, so it has to be findable: embedded in the shader with `-Zi -Qembed_debug`, or the PDB the shader names (the file the log above is about) in a folder given as `--pdb <dir>` -- the engine searches those directories recursively, by file name, and the name is a hash, so the folder is the part worth naming. A DXBC (SM5) shader is stepped from its own bytecode and needs none of this, so if that is what this capture holds, the cause is the invocation instead.
+       and its shader loading log is the search, in the engine's own words:
+       Did not find debug data for 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       Details
+       -------
+       No shader PDB filename specified using default 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       Shader filepath 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       No Recursive Search Paths
+       No Non-Recursive Search Paths
+       File not found using filepath 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       File not found in recursive directory search using filepath 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       File not found in files embedded in the capture using nickname 'ec6e6433f96a985d5086cd232bf42fd8.pdb'
+       the debug data is what the engine steps a DXIL shader through, so it has to be findable: embedded in the shader with `-Zi -Qembed_debug`, or the PDB the shader names (the file the log above is about) in a folder given as `--pdb <dir>` -- the engine searches those directories recursively, by file name, and the name is a hash, so the folder is the part worth naming. A DXBC (SM5) shader is stepped from its own bytecode and needs none of this, so if that is what this capture holds, the cause is the invocation instead.

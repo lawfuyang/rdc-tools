@@ -49,10 +49,30 @@ def capture_text(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
 
 
 def event(eid: int, kind: str = 'graphics', targets: Sequence[str] = (), depth: str = '0',
-          pso: str = '100', shaders: str = 'vs=2348 ', marker: str = '') -> Dict[str, Any]:
-    """One `events.json` record, with the fields the report reads spelled out."""
-    return {'eid': eid, 'marker': marker, 'pso': pso, 'psoKind': kind, 'shaders': shaders,
-            'targets': list(targets), 'depth': depth, 'rootParameters': 1, 'state': 'deadbeef'}
+          pso: str = '100', shaders: str = 'vs=2348 ', marker: str = '',
+          volume: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """One `events.json` record, with the fields the report reads spelled out.
+
+    `volume` is the work the call asked for, which a driver from 2026-09-22 on writes for a draw or a
+    dispatch: it is left out by default, because a bundle without it is the case the report has to keep
+    saying so about.
+    """
+    record: Dict[str, Any] = {'eid': eid, 'marker': marker, 'pso': pso, 'psoKind': kind, 'shaders': shaders,
+                              'targets': list(targets), 'depth': depth, 'rootParameters': 1,
+                              'state': 'deadbeef'}
+    if volume is not None:
+        record['volume'] = volume
+    return record
+
+
+def draw_volume(vertices: int, instances: int = 1, triangles: int = 0) -> Dict[str, Any]:
+    """A draw's volume, as the driver writes it: triangles are the caller's, because the topology decides them."""
+    return {'vertices': vertices, 'instances': instances, 'triangles': triangles}
+
+
+def dispatch_volume(groups: Sequence[int], threads: int, threads_per_group: Sequence[int] = ()) -> Dict[str, Any]:
+    """A dispatch's volume: workgroups, the threads they add up to, and the group size when it is not known."""
+    return {'groups': list(groups), 'threadsPerGroup': list(threads_per_group), 'threads': threads}
 
 
 def resource(resid: str, kind: str = 'texture', first: int = 0, name: str = '',
@@ -62,6 +82,19 @@ def resource(resid: str, kind: str = 'texture', first: int = 0, name: str = '',
                              'firstEvent': first, 'lastEvent': first}
     entry.update(extra)
     return entry
+
+
+def volume_resources() -> List[Dict[str, Any]]:
+    """The two targets the work-volume tests use: a large colour target and a tiny one.
+
+    They are here so a pass's footprint and its work can be made to *disagree* -- the big target costs pixels
+    and the small one does not -- which is what makes the ranking's first input observable rather than a
+    number that happens to sort the same way as the call count.
+    """
+    return [resource('10', first=100, name='SceneColour', width=1000, height=1000, depth=1, samples=1,
+                     format='B8G8R8A8_UNORM'),
+            resource('11', first=200, name='Tiny', width=10, height=10, depth=1, samples=1,
+                     format='B8G8R8A8_UNORM')]
 
 
 def write_json(root: str, name: str, doc: Any) -> None:
@@ -398,10 +431,10 @@ class TestReportDocument(BundleCase):
         self.passes(bundle)
         text = self.markdown(bundle)
         # Each gap points at where its work is tracked: the unproven detectors (the verification section), the
-        # ranking's unavailable inputs (the action list the roadmap would add to a bundle) and the counters (the
-        # driver's own section). The marker path is no longer one of the gaps -- the driver records it -- so the
-        # caveat speaks of the *bundle's* age instead, which is what the last needle checks.
-        for needle in ('REFERENCE §4.17', 'REFERENCE §9', 'ROADMAP §1'):
+        # ranking's inputs a bundle may not carry (the driver's section) and the counters (the driver's section
+        # again). The work volumes and the marker path are no longer gaps -- the driver writes both -- so those
+        # caveats speak of the *bundle's* age instead, which is what the last needle checks.
+        for needle in ('REFERENCE §4.17', 'REFERENCE §9', '2026-09-22'):
             self.assertIn(needle, text)
         self.assertIn('as of 2026-09-17', text)
         # The vocabulary's own two limits: what a name can say, and which names exist at all.
@@ -473,12 +506,85 @@ class TestReportNotables(BundleCase):
         self.assertTrue(any('single event' in reason for reason in single['why']))
 
     def test_an_input_the_bundle_cannot_answer_stays_in_the_table_with_its_reason(self):
+        """A bundle with no `volume` rows -- written by a driver from before 2026-09-22, or one whose frame has
+        no calls in it -- keeps the input in the table with its reason, rather than ranking every pass by a hard
+        zero that a reader would take for a measurement."""
         inputs = {entry['input']: entry for entry in self.document(self.two_passes())['notables']['passInputs']}
         primitives = [entry for entry in inputs.values() if entry['input'].startswith('primitives')][0]
-        self.assertFalse(primitives['available'], 'a bundle carries no action list')
-        self.assertIn('action list', primitives['why'])
+        self.assertFalse(primitives['available'], 'this bundle carries no per-event volume')
+        self.assertIn('no per-event volume', primitives['why'])
         self.assertFalse(inputs['counter cost']['available'])
         self.assertTrue(inputs['calls']['available'])
+
+    def test_the_work_volumes_are_summed_per_pass(self):
+        """A pass's numbers are the sum over its calls, and they are what the pass-by-pass bullet prints: the
+        bundle carries them per *event*, and the report's unit is the pass."""
+        bundle = self.path('v')
+        write_bundle(bundle,
+                     events=[event(100, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM'],
+                                   volume=draw_volume(2880, triangles=960)),
+                             event(101, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM'],
+                                   volume=draw_volume(2880, triangles=960)),
+                             event(200, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'],
+                                   volume=draw_volume(300, triangles=100))],
+                     resources=volume_resources())
+        self.report(bundle)
+        text = self.markdown(bundle)
+        doc = self.document(bundle)
+        first = [entry for entry in doc['passes'] if entry['firstEid'] == 100][0]
+        self.assertEqual((first['triangles'], first['vertices'], first['instances'], first['volumeCalls']),
+                         (1920, 5760, 2, 2))
+        second = [entry for entry in doc['passes'] if entry['firstEid'] == 200][0]
+        self.assertEqual((second['triangles'], second['volumeCalls']), (100, 1))
+        self.assertIn('1.9 K triangle(s) over 2 call(s)', text)
+        self.assertNotIn('the bundle carries no counts', text)
+        inputs = {entry['input']: entry for entry in doc['notables']['passInputs']}
+        self.assertTrue(inputs['primitives (vertices, triangles, threads)']['available'],
+                        'a bundle with volume rows can answer the first input of the ranking')
+        self.assertEqual(inputs['primitives (vertices, triangles, threads)']['why'], '',
+                         'a reason on an available input would be a contradiction')
+
+    def test_a_compute_pass_reports_threads_and_not_triangles(self):
+        """One unit per pass: a dispatch's work is threads (groups x [numthreads]), and a graphics pass's is
+        triangles. A pass is one kind or the other, so a reader is never comparing the two."""
+        bundle = self.path('c')
+        write_bundle(bundle, events=[event(100, kind='compute', pso='200', shaders='cs=500 ',
+                                           volume=dispatch_volume([8, 5, 2], 5120, [4, 4, 4]))],
+                     resources=volume_resources())
+        self.report(bundle)
+        doc = self.document(bundle)
+        entry = doc['passes'][0]
+        self.assertEqual((entry['threads'], entry['triangles'], entry['volumeCalls']), (5120, 0, 1))
+        self.assertEqual(doc['notables']['passes'][0]['values'][0], '5.1 K thread(s) over 1 call(s)')
+
+    def test_the_work_volume_outranks_the_call_count(self):
+        """The ranking's first input doing the job it was added for: one heavy call beats three light ones.
+
+        The second half is the same frame without the volumes -- the *old* behaviour, where the only work input
+        a bundle had was the call count -- and the order flips. Without that half the test would pass for a
+        ranking that ignored the volumes and happened to sort that way.
+        """
+        events = [event(100, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM'],
+                        volume=draw_volume(2880, triangles=960)),
+                  event(200, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'],
+                        volume=draw_volume(300, triangles=100)),
+                  event(201, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'],
+                        volume=draw_volume(300, triangles=100)),
+                  event(202, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'],
+                        volume=draw_volume(300, triangles=100))]
+        with_volume = self.path('w1')
+        write_bundle(with_volume, events=events, resources=volume_resources())
+        self.report(with_volume)
+        ranked = [row['passIndex'] for row in self.document(with_volume)['notables']['passes'] if row['rank']]
+        self.assertEqual(ranked[:2], [1, 2], 'the one heavy pass ranks above the three light ones')
+
+        no_volume = self.path('w2')
+        write_bundle(no_volume,
+                     events=[{k: v for k, v in entry.items() if k != 'volume'} for entry in events],
+                     resources=volume_resources())
+        self.report(no_volume)
+        old = [row['passIndex'] for row in self.document(no_volume)['notables']['passes'] if row['rank']]
+        self.assertEqual(old[:2], [2, 1], 'without the volumes the call count decides, which is the old order')
 
     def test_counter_cost_joins_the_ranking_when_the_bundle_has_counters(self):
         bundle = self.path('c')
@@ -1020,8 +1126,9 @@ class TestReportDetectors(BundleCase):
                           'dead-allocation', 'read-before-write', 'write-never-read',
                           'load-instead-of-clear', 'dead-compute', 'depth-logic', 'empty-scissor',
                           'stencil-without-writer', 'blend-in-opaque-pass', 'format-units-suspicion',
-                          'mismatched-msaa', 'marker-imbalance', 'unattributed-draws', 'zero-work'],
-                         'every detector is listed, whether it ran or was skipped')
+                          'mismatched-msaa', 'marker-imbalance', 'unattributed-draws', 'zero-work',
+                          'srgb-view-mismatch'],
+                          'every detector is listed, whether it ran or was skipped')
         runs = {run['detector']: run for run in self.document(bundle)['detectors']}
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
             self.assertFalse(runs[detector]['ran'], detector)
@@ -1352,6 +1459,21 @@ class StreamCase(_CmdCase):
     def dispatch(self, x: int, y: int = 1, z: int = 1) -> bytes:
         return self.chunk('List_Dispatch', F.u64b(0) + F.u32b(x) + F.u32b(y) + F.u32b(z))
 
+    def format_id(self, name: str) -> int:
+        """The `DXGI_FORMAT` id the bundled table gives a name: a fixture writes ids, a reader reads names."""
+        return {value: key for key, value in R.load_format_names().items()}[name]
+
+    def texture(self, rid: int, fmt: int, width: int = 64, height: int = 64) -> bytes:
+        """A committed texture, whose *declared* format is what the sRGB rule compares a view against."""
+        return self.chunk('Device_CreateCommittedResource',
+                          F.pl_committed_resource(
+                              rid, F.pl_resource_desc(2, width=width, height=height, fmt=fmt)))
+
+    def srv(self, rid: int, fmt: int, heap: int = 1, index: int = 0) -> bytes:
+        """An SRV write over a resource -- the only place a *view* format is recorded in a capture."""
+        return self.chunk('Device_CreateShaderResourceView',
+                          F.pl_descriptor_write(rid, heap=heap, index=index, view_format=fmt))
+
 
 class TestStreamDetectors(StreamCase):
     def test_marker_imbalance_is_found_both_ways(self):
@@ -1399,14 +1521,46 @@ class TestStreamDetectors(StreamCase):
         self.assertEqual(flags[0]['evidence'], ['List_DrawInstanced at chunk 1'])
         self.assertIn('dispatch 1x1x0', flags[1]['what'])
 
+    def test_a_linear_texture_read_through_an_srgb_view_is_a_question(self):
+        """The format rule's other half, and one a bundle cannot answer: the resource table says the bits are
+        `R8G8B8A8_UNORM` and a view written over the same resource declares `R8G8B8A8_UNORM_SRGB`, so the
+        same bits go through the transfer function on one path and not on the other."""
+        path = self.rdc(self.texture(2207, self.format_id('R8G8B8A8_UNORM')),
+                        self.srv(2207, self.format_id('R8G8B8A8_UNORM_SRGB')))
+        flags = R.detect_srgb_view_mismatch(path)
+        assert flags is not None
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0]['detector'], 'srgb-view-mismatch')
+        self.assertEqual(flags[0]['certainty'], 'question')
+        self.assertIn('res2207: declared R8G8B8A8_UNORM, and a view over it declares R8G8B8A8_UNORM_SRGB',
+                      flags[0]['evidence'][0])
+
+    def test_a_view_of_a_different_format_is_not_this_story(self):
+        """Two ways the rule must stay quiet. A resource that *is* sRGB has its transfer function on purpose,
+        and a view of a *different* format over one resource (a typeless read, an integer read as float) is
+        a different story with a different cause -- claiming it from the names would be the noisy kind."""
+        intended = self.rdc(self.texture(2208, self.format_id('R8G8B8A8_UNORM_SRGB')),
+                            self.srv(2208, self.format_id('R8G8B8A8_UNORM_SRGB')))
+        self.assertEqual(R.detect_srgb_view_mismatch(intended), [])
+
+        other = self.rdc(self.texture(2209, self.format_id('R8G8B8A8_TYPELESS')),
+                         self.srv(2209, self.format_id('R8G8B8A8_UNORM_SRGB')))
+        self.assertEqual(R.detect_srgb_view_mismatch(other), [])
+
+    def test_a_declared_texture_nobody_binds_a_view_of_is_not_claimed(self):
+        """A resource with no view over it has nothing to compare: the rule reads the *pair*, and half of a
+        pair is not an observation."""
+        path = self.rdc(self.texture(2210, self.format_id('R8G8B8A8_UNORM')))
+        self.assertEqual(R.detect_srgb_view_mismatch(path), [])
+
     def test_a_detector_that_could_not_look_says_so(self):
-        """Two families of detectors can be blocked, each with its own reason: the .rdc-side three need a
+        """Two families of detectors can be blocked, each with its own reason: the .rdc-side rules need a
         capture path, and the two binding rules need a bundle whose driver resolved descriptor tables."""
         bundle = self.path('b')
         write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
         _flags, runs = R.detect_all(R.load_bundle(bundle))
         skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
-        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work'):
+        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work', 'srgb-view-mismatch'):
             self.assertIn('no capture path given', skipped[detector])
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
             self.assertIn('no resolved descriptor tables', skipped[detector])
@@ -1414,7 +1568,7 @@ class TestStreamDetectors(StreamCase):
         missing = self.path('nowhere.rdc')
         _flags, runs = R.detect_all(R.load_bundle(bundle), missing)
         skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
-        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work'):
+        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work', 'srgb-view-mismatch'):
             self.assertIn('could not be read', skipped[detector])
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
             self.assertIn('no resolved descriptor tables', skipped[detector])

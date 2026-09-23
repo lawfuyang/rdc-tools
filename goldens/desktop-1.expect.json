@@ -10,7 +10,7 @@
     "passes": 47,
     "resources": 493,
     "findings": 63,
-    "detectors": 20
+    "detectors": 21
   },
   "findings": {
     "all-zero-constant-block": 6,

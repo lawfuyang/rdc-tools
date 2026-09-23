@@ -751,7 +751,8 @@ def check_labels(root: str, capture: GoldenCapture, expect: GoldenExpect) -> Tup
     path = os.path.join(root, str(capture.get('path', '')))
     for detector, function in (('marker-imbalance', rdc_detect_stream.detect_marker_balance),
                                ('unattributed-draws', rdc_detect_stream.detect_unattributed_draws),
-                               ('zero-work', rdc_detect_stream.detect_zero_work)):
+                               ('zero-work', rdc_detect_stream.detect_zero_work),
+                               ('srgb-view-mismatch', rdc_detect_stream.detect_srgb_view_mismatch)):
         if detector not in wanted:
             continue
         try:

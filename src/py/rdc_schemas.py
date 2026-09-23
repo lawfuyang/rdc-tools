@@ -103,6 +103,14 @@ REPORT_SCHEMA: Dict[str, Any] = _obj({
         'otherShaders': _arr(_text()),
         'blocks': _arr(_text()),
         'firstTouched': _arr(_text()),
+        #: The pass's work, summed from the event rows' `volume`. All zero with `volumeCalls` zero means the
+        #: bundle carries no volume at all -- a driver from before 2026-09-22 -- which is a fact the ranking
+        #: states rather than a pass that asked for nothing.
+        'vertices': {'type': 'integer'},
+        'instances': {'type': 'integer'},
+        'triangles': {'type': 'integer'},
+        'threads': {'type': 'integer'},
+        'volumeCalls': {'type': 'integer'},
     })),
     'engine': _obj({
         'engine': _text(),

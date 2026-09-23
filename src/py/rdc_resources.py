@@ -239,7 +239,15 @@ def apply_descriptor_chunk(name: str, blob: Buffer,
         if dst is None:
             return True
         resource = 0 if kind == 'sampler' else u64(blob, 16)
-        heaps.setdefault(dst[0], {})[dst[1]] = DescriptorInfo(kind=kind, resource=resource)
+        # The view's own `Format` for the kinds whose serialised description opens with it: an SRV, a UAV
+        # and an RTV all begin with `DXGI_FORMAT Format;` (`DoSerialise(D3D12_*_VIEW_DESC &)` in
+        # d3d12_serialise.cpp, then the view dimension), and the description starts after the 16-byte
+        # `D3D12Descriptor` (type, heap, index) and the resource -- so it is at +24. A DSV instead carries
+        # `Flags` and a CBV has no format at all, so both stay 0 rather than being read at an offset that
+        # belongs to another field. This is the one place a view format is available offline.
+        view_format = u32(blob, 24) if kind in ('srv', 'uav', 'rtv') and len(blob) >= 28 else 0
+        heaps.setdefault(dst[0], {})[dst[1]] = DescriptorInfo(kind=kind, resource=resource,
+                                                              viewFormat=view_format)
         return True
     if name in DESCRIPTOR_COPY_CHUNKS:
         count = u64(blob, 0) if len(blob) >= 8 else 0

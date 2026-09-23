@@ -57,12 +57,24 @@ def reconstruct_passes(events: Sequence[BundleEvent],
                            'marker': str(event.get('marker', '')),
                            'events': 0, 'graphics': 0, 'compute': 0, 'targets': targets,
                            'depth': depth, 'structure': _pass_structure(kind, targets, depth),
-                           'shaders': [], 'otherShaders': [], 'blocks': [], 'firstTouched': []})
+                           'shaders': [], 'otherShaders': [], 'blocks': [], 'firstTouched': [],
+                           'vertices': 0, 'instances': 0, 'triangles': 0, 'threads': 0, 'volumeCalls': 0})
 
         current = passes[-1]
         current['lastEid'] = int(event['eid'])
         current['events'] += 1
         current['graphics' if kind != 'compute' else 'compute'] += 1
+
+        # What this call asked for, when the bundle carries it (`BundleEvent.volume`): the sum over the pass is
+        # the pass's own work, and `volumeCalls` counts the events that contributed -- so a bundle written
+        # before the driver wrote volumes is reported as "not measured" rather than as a pass that asked for
+        # nothing.
+        volume = event.get('volume') or {}
+        if volume:
+            current['volumeCalls'] += 1
+            for key in ('vertices', 'instances', 'triangles', 'threads'):
+                current[key] += int(volume.get(key, 0) or 0)
+
         last_kind, last_targets, last_depth, last_dispatch = kind, targets, depth, dispatch
 
     for entry in passes:
@@ -218,11 +230,11 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
 # Detectors: the red flags.
 #
 # A detector is a pure function over the bundle that returns findings -- no printing, no presentation order,
-# no state. What it may say is bounded by what a bundle *proves*, and that is why there are three of them:
-# the rest of the report's rules need call arguments (zero work), the descriptor writes (unbound descriptors,
-# read-before-write), the action list (marker imbalance, unattributed draws) or the pipeline state (depth
-# logic, scissor, MSAA), and a bundle holds none of those. A detector that would have to guess is not written:
-# it would produce exactly the kind of confident wrong answer this tool exists to avoid.
+# no state. What it may say is bounded by what a bundle *proves*, and that is why the three kept here are the
+# ones that need nothing but the frame's own tables: the rules that need the descriptor writes (unbound
+# descriptors, read-before-write), the pipeline state (depth logic, scissor, MSAA) or the chunk stream (zero
+# work) live in the modules beside this one. A detector that would have to guess is not written: it would
+# produce exactly the kind of confident wrong answer this tool exists to avoid.
 __all__ = [
     'COMPUTE_STAGES',
     'GRAPHICS_APIS',

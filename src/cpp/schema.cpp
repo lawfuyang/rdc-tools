@@ -63,7 +63,20 @@ const SchemaDoc kSchemas[] = {
                     "description": "`<id> <w>x<h>x<d> <FORMAT>`, the output-merge state at this id"},
         "depth": {"type": "string", "description": "the depth target's resource id, `0` for none"},
         "rootParameters": {"type": "integer"},
-        "state": {"type": "string", "description": "hash of what the state file was written from"}
+        "state": {"type": "string", "description": "hash of what the state file was written from"},
+        "volume": {
+          "type": "object",
+          "description": "what the call asked the GPU to do, from the engine's action list; absent when the event is not a call, so a reader can tell `asked for nothing` from `not a call`. What is inside depends on `psoKind`: a **draw** has `vertices` (its index count, or its vertex count when the draw is not indexed), `instances`, and `triangles` -- `0` when the topology does not fix one (a patch list, a meshlet list); a **dispatch** has `groups` (workgroups), `threadsPerGroup` (the call's own override, else the bound shader's `[numthreads]`) and `threads` (`groups` x `threadsPerGroup`, `0` when neither published a size)",
+          "properties": {
+            "vertices": {"type": "integer"},
+            "instances": {"type": "integer"},
+            "triangles": {"type": "integer"},
+            "groups": {"type": "array", "items": {"type": "integer"}},
+            "threadsPerGroup": {"type": "array", "items": {"type": "integer"}},
+            "threads": {"type": "integer"}
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     }},

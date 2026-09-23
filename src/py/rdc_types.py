@@ -101,14 +101,23 @@ class ResourceInfo(TypedDict):
     gpuAddress: int
 
 class DescriptorInfo(TypedDict):
-    """One written descriptor-heap slot: what kind of view it holds and which resource it names.
+    """One written descriptor-heap slot: what kind of view it holds, which resource it names, and the
+    format the view declares.
 
     `kind` is `cbv` / `srv` / `uav` / `rtv` / `dsv` / `sampler`. `resource` is 0 for a sampler (a
     sampler points at no resource) and for a slot the capture never wrote -- heaps are created with
     up to a million slots, and only written ones are recorded.
+
+    `viewFormat` is a `DXGI_FORMAT` **id**, and it is the *view's* format rather than the resource's:
+    a texture declared `R8G8B8A8_UNORM` can be sampled through an `R8G8B8A8_UNORM_SRGB` view, and that
+    difference is the sRGB/linear question the report's format rule used to leave unclaimed. It is 0
+    when the payload does not carry one: a sampler and a CBV have no format in their serialised
+    description, a DSV's layout differs (it carries `Flags` too), and a payload too short to hold the
+    description is read as 0 rather than guessed at.
     """
     kind: str
     resource: int
+    viewFormat: int
 
 class DrawState(TypedDict):
     """The D3D12 command-list state `draws` reports at each draw.
@@ -174,6 +183,26 @@ class GroupBarrier(TypedDict):
     access: int
     layout: int
     flags: int
+
+class ResolveInfo(TypedDict):
+    """One `List_ResolveSubresource` / `List_ResolveSubresourceRegion` payload: an MSAA read into a
+    single-sample write, with the subresource of each side.
+
+    The two forms carry the same two resources and the same two subresource *indices*; the `Region`
+    one adds a destination offset, an optional source rect and a resolve mode, which is why it is the
+    longer payload and why `region` is false for the plain form. A subresource index is raw (the
+    payload's own number, mip and slice packed by the resource's description) -- what the report can
+    say from here is *which* subresource, not which mip and slice that is.
+
+    `format` is a `DXGI_FORMAT` id, 0 for `UNKNOWN` (the plain form allows it: the driver passes
+    `DXGI_FORMAT_UNKNOWN` when the call did not name one).
+    """
+    destination: int
+    destinationSubresource: int
+    source: int
+    sourceSubresource: int
+    format: int
+    region: bool
 
 class UseInfo(TypedDict):
     """One event's use of one resource, as an offline walk of the stream sees it.
@@ -318,6 +347,7 @@ __all__ = [
     'DxbcContainer',
     'DxbcPart',
     'GroupBarrier',
+    'ResolveInfo',
     'ResourceInfo',
     'ResourceUse',
     'RootParam',

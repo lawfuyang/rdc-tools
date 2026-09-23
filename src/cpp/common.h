@@ -441,6 +441,32 @@ std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUC
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
 std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 
+//: What one call asked the GPU to do, from the engine's action list: the *arguments of the call*,
+//: which the pipeline state does not carry. `ActionDescription::numIndices` is "the number of
+//: indices or vertices as appropriate for a draw action", so a non-indexed draw's vertex count
+//: lands in the same field, and `numInstances` is the engine's own instance count.
+//:
+//: Only the *numbers* are collected here. A draw's triangles are folded from the topology, which is
+//: state, so the caller does that where it has the state (`dump`'s event loop, through
+//: `PrimitiveCount`); a dispatch's thread count needs the shader's `[numthreads]`, which only the
+//: reflection has.
+//:
+//: `m_Threads` is the call's *own* override (`ActionDescription::dispatchThreadsDimension`), 0 when
+//: the call has none -- which is the usual case, and why the caller falls back to the reflection.
+struct CallVolume
+{
+  long long m_Count = 0;               // a draw's indices, or its vertices when it is not indexed
+  long long m_Instances = 0;           // a draw's instances
+  uint32_t m_Groups[3] = {0, 0, 0};    // a dispatch's workgroups
+  uint32_t m_Threads[3] = {0, 0,
+                           0};    // a dispatch's own threads-per-group override, 0 when it has none
+  bool m_bDispatch = false;
+};
+
+void CollectCallVolumes(const rdcarray<ActionDescription> &actions,
+                        std::map<int, CallVolume> &volumes);
+std::map<int, CallVolume> CallVolumesByEid(IReplayController *ctrl, int &calls);
+
 //: The largest event id in the action tree -- which is the frame's *last* event, not merely its
 //: largest action: every driver ends a capture's action list with an "End of Capture" action
 //: (`AddEvent()` then `AddAction()`, one such block per driver -- d3d12_commands.cpp has D3D12's),

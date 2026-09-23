@@ -126,6 +126,14 @@ def decode_chunk(name: Optional[str], blob: Buffer) -> List[str]:
                 out.append('cmdList=%d dst=%d src=%d%s'
                            % (u64(blob, 0), pair[0], pair[1],
                               ' bytes=%d' % u64(blob, 40) if name == 'List_CopyBufferRegion' else ''))
+        elif name in RESOLVE_CHUNKS:
+            resolved = parse_resolve(name, blob)
+            if resolved is not None:
+                out.append('cmdList=%d dst=res%d sub=%d src=res%d sub=%d format=%d%s'
+                           % (u64(blob, 0), resolved['destination'],
+                              resolved['destinationSubresource'], resolved['source'],
+                              resolved['sourceSubresource'], resolved['format'],
+                              ' region' if resolved['region'] else ''))
         elif name in HEAP_CHUNKS and len(blob) >= 16:
             out.append('size=%d heapId=%d' % (u64(blob, 0), u64(blob, len(blob) - 8)))
     except Exception as exc:  # noqa: BLE001 - see the comment above
@@ -407,6 +415,37 @@ def copy_pair(name: str, blob: Buffer) -> Optional[Tuple[int, int]]:
         return None                             # the source box is cut short
     return u64(blob, 8), u64(blob, src)
 
+def parse_resolve(name: str, blob: Buffer) -> Optional[ResolveInfo]:
+    """One resolve payload, or None when it does not fit either form's layout.
+
+    `List_ResolveSubresource` is `u64 cmdList, u64 dst, u32 dstSubresource, u64 src, u32
+    srcSubresource, u32 format` -- 36 bytes, which is in `EXPECTED_LENGTHS`, and the format is the last
+    field.
+
+    `List_ResolveSubresourceRegion` (the ID3D12GraphicsCommandList7 form) inserts the destination
+    offset after the subresource, then the source subresource, then the optional source rect as a
+    present-flag plus 16 bytes, and *then* the format and the resolve mode -- so the two ids are at
+    different offsets and the format is not last-but-one by the same arithmetic. Walking it means
+    knowing where the optional rect is, which is why the presence byte is read rather than assumed:
+    a payload of the wrong length is refused instead of being read as a resolve of the wrong
+    subresource.
+    """
+    if name == 'List_ResolveSubresource':
+        if len(blob) != 36:
+            return None
+        return ResolveInfo(destination=u64(blob, 8), destinationSubresource=u32(blob, 16),
+                           source=u64(blob, 20), sourceSubresource=u32(blob, 28),
+                           format=u32(blob, 32), region=False)
+
+    if len(blob) < 49:
+        return None
+    rect = 16 if blob[40] else 0
+    if len(blob) != 49 + rect:
+        return None
+    return ResolveInfo(destination=u64(blob, 8), destinationSubresource=u32(blob, 16),
+                       source=u64(blob, 28), sourceSubresource=u32(blob, 36),
+                       format=u32(blob, 41 + rect), region=True)
+
 def _draw_state() -> DrawState:
     """A fresh command-list state: nothing bound, no PSO, no root signature, no targets."""
     return DrawState(pso=None, gfxSig=None, compSig=None, gfxCbv={}, compCbv={}, gfxSrv={},
@@ -577,6 +616,7 @@ __all__ = [
     'draw_state_lines',
     'parse_barrier_groups',
     'parse_barriers',
+    'parse_resolve',
     'parse_targets',
     'state_text',
 ]

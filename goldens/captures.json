@@ -39,7 +39,7 @@
       "bytes": 63975987,
       "sha256": "6874db3c6981a6aac94ac07ae10432fe03ea7630a82f0b2bbb8ca5a78649b2ff",
       "api": "D3D12",
-      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 2,122 chunks, 52 draw/dispatch calls, 131 markers): the desktop half of the pair, and the capture the report's pinned numbers come from (1186 events / 47 passes / 493 resources / 63 findings from 20 detectors, AGENTS.md)",
+      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 2,122 chunks, 52 draw/dispatch calls, 131 markers): the desktop half of the pair, and the capture the report's pinned numbers come from (1186 events / 47 passes / 493 resources / 63 findings from 21 detectors, AGENTS.md)",
       "known": [
         "its markers balance, every draw and dispatch sits inside one, and no call is zero-work: the three file-side detectors fire nowhere in this frame",
         "the report over its bundle finds 63 things; one of them has had its cause followed to the frame and written down here, which is what turns that one from an observation into a verdict -- the other 62 stay unproven (REFERENCE §4.17)",
@@ -50,13 +50,19 @@
           "cause": "allocated for a path this frame does not run: the engine's own usage list for it is empty (usageCount 0, no first or last event), and the stream names the id only in its creation, its SetName and the capture's InitialContents section -- no call binds, copies or clears it. Two independent paths agree that nothing in the frame touches it, so the 48 MB it holds is allocated and unused",
           "verdict": "confirmed"
         },
-        "1186 ids carry bound state, which is every id up to the frame's last event (1305) -- not a claim about how many are draws"
+        "1186 ids carry bound state, which is every id up to the frame's last event (1305) -- not a claim about how many are draws",
+        "the driver batch exits **1** on purpose: its last command is `trace --pixel`, and on this capture the answer is a *refusal* (the shaders carry no debug data) -- the refusal's exit code and its wording are part of what the golden pins, so a run that suddenly succeeds is a change worth reading"
       ],
       "driverCommands": [
         ["info"],
         ["draws", "12"],
         ["textures"],
-        ["debug"]
+        ["debug"],
+        ["formats"],
+        ["crosscheck"],
+        ["state", "304"],
+        ["shaders", "304"],
+        ["trace", "304", "--pixel", "640,360"]
       ],
       "bundle": "build/goldens/desktop-1",
       "commands": [
@@ -89,13 +95,19 @@
           "evidence": "",
           "cause": "the reflection and the state's root parameters come from different namespaces at these events. This frame records graphics and compute on one command list (24563) and the state document reports a single `rootSignature`; at the events the finding names that is the compute signature (res2240), whose parameters are unset until the compute list sets them (chunks 261..268, before its first dispatch at 270) and which the engine reports set from its first compute event (119). So a cs shader's block is unset only in a state between dispatches; a ps or vs shader's block is declared by the *graphics* signature instead (res2286..res2293, root CBVs at b0..b5 s0) and set with SetGraphicsRootConstantBufferView before each draw (rp4..rp13; e.g. chunks 443..451 then the draw at 452). No call runs with any of these blocks unbound",
           "verdict": "not a defect"
-        }
+        },
+        "the driver batch exits **1** on purpose: its last command is `trace --pixel`, and on this capture the answer is a *refusal* (the shaders carry no debug data) -- the refusal's exit code and its wording are part of what the golden pins, so a run that suddenly succeeds is a change worth reading"
       ],
       "driverCommands": [
         ["info"],
         ["draws", "12"],
         ["textures"],
-        ["debug"]
+        ["debug"],
+        ["formats"],
+        ["crosscheck"],
+        ["state", "289"],
+        ["shaders", "289"],
+        ["trace", "289", "--pixel", "640,360"]
       ],
       "bundle": "build/goldens/mobile-1",
       "commands": [

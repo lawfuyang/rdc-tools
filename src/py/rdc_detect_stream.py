@@ -7,6 +7,7 @@ from rdc_types import *  # noqa: F401,F403  (the buffer shapes these detectors c
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_cache  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_stream  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_resources  # noqa: F401  (used qualified: the resource table and the descriptor heaps)
 
 # The two markers the tree is built from live in `rdc_chunkmap` (which owns the chunk-name facts) and are
 # imported rather than re-declared: `passdiff` walks the same two families, and a definition copied here
@@ -168,6 +169,66 @@ def detect_zero_work(path: str) -> Optional[List[RedFlag]]:
             })
     return flags
 
+def detect_srgb_view_mismatch(path: str) -> Optional[List[RedFlag]]:
+    """A texture declared linear and sampled through an sRGB view (question).
+
+    The half of the format rule that a *bundle* cannot answer -- `detect_format_units_suspicion` claims
+    the other half (a float output into a narrow linear target), and says so. This one reads the file:
+    the resource table's `format` says the texture's bits are a plain `..._UNORM` format, and the
+    `Format` field of a descriptor written over the same resource declares the sRGB spelling of it, so
+    the same bits are read through the transfer function on one path and without it on the other. Both
+    come from payloads the offline decoder already walks -- the resource descriptor and the view write
+    (`DescriptorInfo`'s `viewFormat`, REFERENCE 3.4 for where the format sits in the payload).
+
+    Only the *same format read two ways* is claimed. A view of a different format over one resource (a
+    typeless texture read as sRGB, an integer texture read as float) is a different story with a
+    different cause, and claiming it from the names alone would be the noisy kind of rule.
+    """
+    _info, stream, _how = rdc_cache.load_stream(path)
+    names = rdc_chunkmap.load_chunk_names()
+    if not names:
+        return None
+    formats = rdc_resources.load_format_names()
+    resources = rdc_resources.parse_resource_table(stream, names)
+    heaps = rdc_resources.parse_descriptor_heaps(stream, names)
+
+    # The heaps hold *slots*, so this is the one step between "what the frame bound" and "what this
+    # resource is read as": every view format declared over each resource id.
+    views: Dict[int, List[str]] = {}
+    for heap in heaps.values():
+        for slot in heap.values():
+            declared = formats.get(int(slot.get('viewFormat', 0) or 0), '')
+            rid = int(slot.get('resource', 0) or 0)
+            if rid and declared:
+                views.setdefault(rid, []).append(declared)
+
+    lines: List[str] = []
+    for rid, resource in sorted(resources.items()):
+        if not str(resource.get('kind', '')).startswith('texture'):
+            continue
+        declared = formats.get(int(resource.get('format', 0) or 0), '')
+        # A resource that *is* sRGB is not this story; nor is one whose format has no name here, which is
+        # the case where the two spellings cannot be compared at all.
+        if not declared or declared.endswith('_SRGB'):
+            continue
+        srgb = sorted({name for name in views.get(rid, []) if name == declared + '_SRGB'})
+        if not srgb:
+            continue
+        name = ' '.join(str(resource.get('name', '')).split())
+        lines.append('res%d%s: declared %s, and a view over it declares %s'
+                     % (rid, ' "%s"' % name if name else '', declared, srgb[0]))
+
+    if not lines:
+        return []
+    return [{
+        'detector': 'srgb-view-mismatch',
+        'what': '%d texture(s) declared with a linear format are read through its sRGB form: the same bits '
+                'go through the transfer function on one path and not on the other' % len(lines),
+        'evidence': [line[:160] for line in lines[:UNATTRIBUTED_LIMIT]],
+        'certainty': 'question',
+        'unproven': True,
+    }]
+
 #: `b0 s0` in a reflection row: the register and space a constant block is expected at. The `cbuffer[0]`
 #: form is what `shaders <eid>` writes and it is the only reflection row whose format is pinned down here
 #: by real output; the read-only and write-only resource rows are not parsed until a capture shows them.
@@ -177,6 +238,7 @@ __all__ = [
     'UNATTRIBUTED_LIMIT',
     '_named_chunks',
     'detect_marker_balance',
+    'detect_srgb_view_mismatch',
     'detect_unattributed_draws',
     'detect_zero_work',
 ]

@@ -83,17 +83,19 @@ commands are instant (REFERENCE §4.8; a cache *hit* is an `mmap`, and a cold ru
 wrote rather than holding the 1.5 GB stream on the heap), walks the
 SDChunk stream, names chunks for the capture's driver (`--driver`/`$RDC_DRIVER`, D3D12 by default), decodes the
 main D3D12 draw/pipeline/CBV/vertex-buffer payloads, the barriers, the render-target
-bindings, the clears, the discards and the copies (the use ledger behind `deps` and `memory`, REFERENCE §4.15),
+bindings, the clears, the discards, the copies and the resolves, plus the view format each descriptor write
+declares (the use ledger behind `deps` and `memory`, REFERENCE §4.15),
 the resource table
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (REFERENCE §4.10) and the root signatures (REFERENCE §3.4), inventories the
 DXBC/DXIL containers, audits the formats it finds (`formats`, the offline half of the driver's audit), and can
 check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
-rendered image, the cross-checks between a shader's reflection and the state it is given (`crosscheck`), the
-per-pass counter fold (`counters --per-pass`), the picture commands with their subresources and overlays
-(`image`, `textures --save`, `cubemap`, `sheet`), the format coverage audit (`formats`), one shader
-invocation stepped from its inputs through every step to its outputs (`trace`), and the bundle the report
-generator reads (`dump` +
+rendered image, what each call asked for (`volume`: a draw's vertices/instances/triangles, a dispatch's
+groups and threads, from the engine's action list), the cross-checks between a shader's reflection and the
+state it is given (`crosscheck`), the per-pass counter fold (`counters --per-pass`), the picture commands
+with their subresources and overlays (`image`, `textures --save`, `cubemap`, `sheet`), the format coverage
+audit (`formats`), one shader invocation stepped from its inputs through every step to its outputs (`trace`),
+and the bundle the report generator reads (`dump` +
 `bundle-verify`). The offline tool has a
 hermetic unittest suite (`python src\py\rdc_analysis.py selftest`) and is clean under Pyright
 "Standard" (`npx --yes pyright@latest`); the driver has a build-and-baseline harness in the (gitignored)
@@ -140,18 +142,8 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ## 1. P1 — the extract the tool already knows how to do
 
-Four items, each one an *existing* answer that is not being asked for: the API call is in the header, the
-offline decode is a sibling of one already written, or the caveat that says it is missing names the reason
-that has since expired. None of them is blocked on anything.
-
-* **The work volume of every event, in a bundle** — how many vertices/instances/triangles a draw asked for and
-  how many threads a dispatch started. *Why*: the report's own caveat says "a draw's vertex count is the first
-  input of the rule and no bundle has it, because the replay API exposes no action list" — and that reason has
-  expired: `draws` walks the action list today, and `ActionDescription` carries `numIndices`, `numInstances` and
-  `dispatchDimension` (`control_types.h`, `data_types.h`). *How*: `dump` writes a volume row per event, and the
-  report's pass table and call ranking — today a rank over *counts*, and honest about it — rank by geometry
-  instead, which is the difference between "the pass with the most draw calls" and "the pass with the most
-  triangles". *Blocks*: nothing. **~0.5 d.**
+Two items, each one an *existing* answer that is not being asked for: the API call is in the header, or the
+offline decode is a sibling of one already written. Neither is blocked on anything.
 
 * **A picture's statistics: `histogram` and the min/max of a target** — `GetMinMax(textureId, sub, typeCast)`
   and `GetHistogram(textureId, sub, typeCast, minval, maxval, channels)` are in the replay API
@@ -172,15 +164,6 @@ that has since expired. None of them is blocked on anything.
   its dearest event — with the counter that *is* the cost named, as `counters` already does. *Blocks*: nothing.
   **~1 d.**
 
-* **The corpus pins the commands landed since** — `goldens/` compares the driver on four commands per capture
-  (`info`, `draws`, `textures`, `debug`), so everything landed after that — `state`, `shaders`, `cb`, `formats`,
-  `trace`, `cubemap`, `sheet`, `counters`, `crosscheck`, `pixelhistory`, `patch` — would drift unnoticed: the
-  corpus is the only gate that catches "this command prints something different now", and it does not look at
-  them. *Why*: it is the safety net every change in this repository leans on, and it is cheapest to extend
-  right after the commands exist. *How*: add the commands whose output is stable on the three local captures
-  (and for `trace`: the refusal on a capture without debug data, and the 31-step trace on the HobbyRenderer
-  one). *Blocks*: nothing. **~0.5 d.**
-
 ## 2. P2 — new analysis on top of them
 
 * **`replaydiff` over counters** — "did my change help, and where". The project's own regression workflow is two
@@ -198,13 +181,6 @@ that has since expired. None of them is blocked on anything.
   access list it already walks — `DescriptorAccess` carries the stage and the slot but no direction, and the
   reflection's `readWriteResources` is what supplies it. Then the report can name a dispatch's targets and the
   ledger gains compute writes. **~1 d.**
-
-* **The two offline gaps the report names, decoded** — the `ResolveSubresource` payload (so the MSAA rule can
-  say *which* subresource was resolved, not that a resolve happened) and the sampling view's sRGB flag (so the
-  sRGB half of the format rule stops being unchecked). *Why*: the caveat names both precisely, and both are
-  more of the work the offline parser already does for the sibling payloads (barriers, render-target bindings,
-  clears, discards, copies) and the descriptor heaps. *How*: offline only, fixtures and hermetic tests, no
-  device — the two rules then report a verdict instead of "not looked at". **~0.5–1 d.**
 
 * **A permutation table for the frame** — which shaders this frame actually uses: per stage, the hash, the
   entry point, how many events bind it, the first and last eid, and the reflection summary. *Why*: feature
@@ -243,31 +219,21 @@ item of §1–§3 appears exactly once, so this is the whole list in one place r
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**Phase 1 — the cheap extracts, one sitting each.** Nothing blocked, nothing invented, and each either
-unblocks an analysis that is already shipped or protects what is:
+**Phase 1 — the questions a person actually asks.** Each of these is a number a reader wants and cannot get
+without running two commands and joining them by hand:
 
-1. **The work volume of every event (§1, ~0.5 d)** — the report's ranking has been waiting for it, and the
-   action list is already being walked for `draws`.
-2. **The corpus pins the commands landed since (§1, ~0.5 d)** — while `formats`/`trace`/`cubemap`/`sheet` are
-   fresh and their output is stable on the three local captures.
-3. **The MSAA resolve and the sRGB flag, decoded offline (§2, ~0.5–1 d)** — hermetic, and it turns two "not
-   looked at" rows into verdicts.
-
-**Phase 2 — the analysis they feed.** These are the questions a person actually asks of a frame, which today
-take two commands and a hand-join:
-
-4. **The frame's time per pass (§1, ~1 d)** — then "the pass with the most triangles" has a cost beside it.
-5. **A picture's statistics (§1, ~1 d)** — the numeric form of "look at the PNG".
-6. **`replaydiff` over counters (§2, ~0.5–1 d)** — after 4, because the per-pass share is what a comparison
+1. **The frame's time per pass (§1, ~1 d)** — then "the pass with the most triangles" has a cost beside it.
+2. **A picture's statistics (§1, ~1 d)** — the numeric form of "look at the PNG".
+3. **`replaydiff` over counters (§2, ~0.5–1 d)** — after 1, because the per-pass share is what a comparison
    differs over.
-7. **A permutation table for the frame (§2, ~1 d)** — feature study, and it costs a dedup of what the bundles
+4. **A permutation table for the frame (§2, ~1 d)** — feature study, and it costs a dedup of what the bundles
    already carry.
-8. **What a dispatch writes (§2, ~1 d)** — the largest P2 item, and the one that opens compute.
+5. **What a dispatch writes (§2, ~1 d)** — the largest P2 item, and the one that opens compute.
 
-**Phase 3 — settle the two probes, then decide.** One session each, and the answer decides whether a bigger
+**Phase 2 — settle the two probes, then decide.** One session each, and the answer decides whether a bigger
 item exists:
 
-9. **Why the pixel path of `trace` produces nothing (§3, ~0.5 d)** — fix the message, or document the engine's
+6. **Why the pixel path of `trace` produces nothing (§3, ~0.5 d)** — fix the message, or document the engine's
    limit in the words of the measurement.
-10. **Does a patched shader carry debug info? (§3, ~0.5 d)** — if it does, "change the shader, then step it"
-    is the next feature; if not, it is one paragraph in REFERENCE.
+7. **Does a patched shader carry debug info? (§3, ~0.5 d)** — if it does, "change the shader, then step it"
+   is the next feature; if not, it is one paragraph in REFERENCE.

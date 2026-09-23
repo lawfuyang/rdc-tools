@@ -34,10 +34,12 @@ ODDITY_LIMIT = 15
 #: for, so a ranking that quietly skipped it would be the misleading kind of quiet.
 PASS_INPUTS: List[NotableInput] = [
     {'input': 'primitives (vertices, triangles, threads)',
-     'how': "the draw's or dispatch's own argument, from the capture's action tree",
+     'how': "the draw's or dispatch's own argument, summed over the pass's calls, from the action list the "
+            'driver reads into every event row it has one for',
      'available': False,
-     'why': 'a bundle carries no action list -- the replay API exposes none, so no capture argument is in one '
-            '(REFERENCE §9). Every count below is therefore a count of *calls*, not of the work inside them.'},
+     'why': 'this bundle carries no per-event volume: it was written by a driver from before 2026-09-22, or it '
+            'has no calls in it at all. Every count below is therefore a count of *calls*, not of the work '
+            'inside them.'},
     {'input': 'calls',
      'how': "the pass's own events of its kind: a graphics pass is a run of draws with the same targets, so its "
             'graphics-event count is its draw count, and a compute pass is a run of dispatches',
@@ -217,12 +219,21 @@ def notable_passes(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple[Li
 
     # The key is the input table's order, most significant first, and the pass index breaks ties: a report that
     # reshuffles between runs of the same bundle is not one a reader can diff.
-    ranked = sorted(passes, key=lambda e: (-calls(e), -footprint(e), -len(e['firstTouched']),
+    #
+    # The two work units are separate keys rather than one number, because they are not comparable: a graphics
+    # pass has triangles and a compute pass threads, and a pass is one kind or the other (a kind change starts
+    # a new pass), so in practice one of the two is zero and the order they are compared in never decides a
+    # graphics pass against a compute one -- which is the only way a ranking could be wrong about them.
+    ranked = sorted(passes, key=lambda e: (-e['triangles'], -e['threads'], -calls(e), -footprint(e),
+                                           -len(e['firstTouched']),
                                            -_counter_cost(bundle, e['firstEid'], e['lastEid'])[0], e['index']))
     rows: Dict[int, NotablePass] = {}
     for rank, entry in enumerate(ranked[:NOTABLE_LIMIT], 1):
         values = ['%d call(s)' % calls(entry), '%.1f Mpixel of targets' % (footprint(entry) / 1000000.0),
                   '%d resource(s) first used here' % len(entry['firstTouched'])]
+        work = work_text(entry)
+        if work:
+            values.insert(0, work)
         if have_counters:
             total, count = _counter_cost(bundle, entry['firstEid'], entry['lastEid'])
             values.append('counter cost %.3f over %d row(s)' % (total, count))
@@ -263,8 +274,12 @@ def notable_passes(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple[Li
         entry = next(e for e in passes if e['index'] == index)
         row = rows.get(index)
         if row is None:
+            work = work_text(entry)
+            values = ['%d call(s)' % calls(entry), '%d event(s)' % entry['events']]
+            if work:
+                values.insert(0, work)
             row = NotablePass(passIndex=index, firstEid=entry['firstEid'], lastEid=entry['lastEid'], rank=0,
-                              why=[], values=['%d call(s)' % calls(entry), '%d event(s)' % entry['events']])
+                              why=[], values=values)
             rows[index] = row
         row['why'].extend(reason for reason in odd[index] if reason not in row['why'])
 
@@ -388,9 +403,12 @@ def notables(bundle: BundleData, passes: Sequence[ReportPass]) -> Notables:
     """Both notable lists and the rules they were built by: the whole content of the report's section."""
     pass_rows, pass_notes = notable_passes(bundle, passes)
     resource_rows, resource_notes = notable_resources(bundle, passes)
-    # The two inputs whose availability is a fact about *this* bundle rather than about the tool: the table says
-    # which this frame could answer, so a reader can see what the order above was computed from.
-    per_bundle = {'counter cost': bool(bundle['counters']),
+    # The three inputs whose availability is a fact about *this* bundle rather than about the tool: the table
+    # says which this frame could answer, so a reader can see what the order above was computed from. The work
+    # volumes are per event, so "some pass has one" is the question -- nothing else reads the field.
+    per_bundle = {'primitives (vertices, triangles, threads)':
+                      any(int(p.get('volumeCalls', 0) or 0) for p in passes),
+                  'counter cost': bool(bundle['counters']),
                   'passes reading it': str(bundle['manifest'].get('resourceUsage', '')) == 'collected'}
     inputs = [_per_bundle(entry, per_bundle.get(entry['input'], entry['available']))
               for entry in PASS_INPUTS]

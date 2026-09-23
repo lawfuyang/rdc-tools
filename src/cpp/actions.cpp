@@ -156,6 +156,50 @@ std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls)
   return kinds;
 }
 
+//: The same walk, for what each call asked the GPU to do (`CallVolume`, common.h): a draw's counts
+//: from `numIndices`/`numInstances`, a dispatch's workgroups from `dispatchDimension` and its
+//: thread-group override from `dispatchThreadsDimension`.
+//:
+//: The same flag split as `CollectDispatchKinds`, and for the same reason: a mesh dispatch is
+//: draw-side (it renders to targets), a ray dispatch is dispatch-side. A call the flags do not name
+//: -- which is every state setter, marker and barrier -- gets no entry at all rather than a zero
+//: one, so a reader can tell "this event asked for nothing" from "this event is not a call".
+void CollectCallVolumes(const rdcarray<ActionDescription> &actions, std::map<int, CallVolume> &volumes)
+{
+  for(size_t i = 0; i < actions.size(); i++)
+  {
+    const ActionDescription &action = actions[i];
+    CallVolume volume;
+    if((action.flags & (ActionFlags::Dispatch | ActionFlags::DispatchRay |
+                        ActionFlags::BuildAccStruct)) != ActionFlags::NoFlags)
+    {
+      volume.m_bDispatch = true;
+      for(int axis = 0; axis < 3; axis++)
+      {
+        volume.m_Groups[axis] = action.dispatchDimension[axis];
+        volume.m_Threads[axis] = action.dispatchThreadsDimension[axis];
+      }
+      volumes[(int)action.eventId] = volume;
+    }
+    else if((action.flags & (ActionFlags::Drawcall | ActionFlags::MeshDispatch)) !=
+            ActionFlags::NoFlags)
+    {
+      volume.m_Count = (long long)action.numIndices;
+      volume.m_Instances = (long long)action.numInstances;
+      volumes[(int)action.eventId] = volume;
+    }
+    CollectCallVolumes(action.children, volumes);
+  }
+}
+
+std::map<int, CallVolume> CallVolumesByEid(IReplayController *ctrl, int &calls)
+{
+  std::map<int, CallVolume> volumes;
+  CollectCallVolumes(ctrl->GetRootActions(), volumes);
+  calls = (int)volumes.size();
+  return volumes;
+}
+
 //: Recursive half of `LastEventId`: the maximum `ActionDescription::eventId` in the tree. Events
 //: are numbered in the order the capture recorded them, so the maximum is the last one -- and the
 //: last one is always the "End of Capture" action every driver appends while loading (an

@@ -135,7 +135,7 @@ class TestTableSlots(SigCase):
         params = (('table', 0, 0, 0, 0, [('srv', 0, 1, 0, 0)]),)
         sig = R._parse_root_signature(F.root_signature(list(params)))
         assert sig is not None
-        heaps = {300: {5: R.DescriptorInfo(kind='srv', resource=100)}}
+        heaps = {300: {5: R.DescriptorInfo(kind='srv', resource=100, viewFormat=0)}}
         facts = [fact for fact in R._table_slots(sig['params'][0], 300, 5, heaps) if fact is not None]
         self.assertEqual((facts[0].kind, facts[0].resource, facts[0].declared), ('srv', 100, 'srv'))
 

@@ -514,16 +514,13 @@ BIND_NAMES_VERSION = 1
 #: How much of a stream a sidecar's identity covers, at each end. Hashing 1.5 GB per command would cost
 #: more than the scan it saves; 64 KB at each end plus the stream cache's own name (path, size, mtime,
 #: section and cache version hashed into it, REFERENCE 4.8) is what makes a stale answer unreadable.
-BIND_NAMES_SAMPLE = 64 << 10
+#: The recipe itself lives in `rdc_cache.stream_digest`, because a second derived answer
+#: (`rdc_psos.shader_index`) keys itself the same way and two copies would drift.
+BIND_NAMES_SAMPLE = rdc_cache.DERIVED_SAMPLE
 
 def _stream_digest(stream: Buffer) -> str:
-    """`sha256` of the stream's first and last `BIND_NAMES_SAMPLE` bytes (the whole stream if shorter)."""
-    import hashlib
-    if len(stream) <= 2 * BIND_NAMES_SAMPLE:
-        return hashlib.sha256(bytes(stream)).hexdigest()
-    digest = hashlib.sha256(bytes(stream[:BIND_NAMES_SAMPLE]))
-    digest.update(bytes(stream[len(stream) - BIND_NAMES_SAMPLE:]))
-    return digest.hexdigest()
+    """`sha256` of the stream's first and last `BIND_NAMES_SAMPLE` bytes (see `rdc_cache.stream_digest`)."""
+    return rdc_cache.stream_digest(stream)
 
 def _load_bind_names(stream: Buffer,
                      source: CacheEntry) -> Optional[Dict[str, Dict[Tuple[str, int, int], str]]]:

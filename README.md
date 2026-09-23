@@ -247,9 +247,10 @@ python src\py\rdc_analysis.py draws    'capture.rdc' 40   # the stream's own acc
 sub-seconds once the stream is cached (REFERENCE §4.8), and that the hermetic test suite covers. Each table
 below gives the tool's own usage with one concrete capture.
 
-Three things shape every command rather than just one. `--format table|csv|markdown` is taken by the nine that
-print rows — `resources`, `descriptors`, `summary`, `draws`, `rootsig`, `formats`, `vram`, `rootsig-check` and
-`diff` — where `table` is the default rendering and `csv`/`markdown` print the same rows as a spreadsheet or an
+Three things shape every command rather than just one. `--format table|csv|markdown` is taken by the ten that
+print rows — `resources`, `descriptors`, `summary`, `draws`, `rootsig`, `formats`, `psos`, `vram`,
+`rootsig-check` and `diff` — where `table` is the default rendering and `csv`/`markdown` print the same rows as a
+spreadsheet or an
 issue wants them while moving the prose around them to stderr, so stdout stays a table (REFERENCE §4).
 `--driver D3D11|D3D12|Vulkan|OpenGL|GLES` (or `$RDC_DRIVER`; the flag wins) names the capture's API for every
 command's chunk names — the bundled table is D3D12's, so another driver needs the source tree `bootstrap`
@@ -300,6 +301,7 @@ progress lines and `$RDC_NO_CACHE` to read the stream from scratch, none of whic
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
+| `psos` | the pipeline state objects the frame creates and the shaders each one holds, by hash: the id a command list binds, its stages, all three of a container's identities, whether its debug data is embedded (`ilbd`) or needs its PDB, and how many `SetPipelineState` calls name it. `--hash <h>` answers one hash — any of the three, by prefix — from an index cached beside the stream, and **exits 1** when it is not in the capture (REFERENCE §4.22) | `psos 'capture.rdc'`, `psos 'capture.rdc' --hash ec6e6433f96a985d50` |
 | `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or any tool of your own that can take a shader | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
 

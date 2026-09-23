@@ -40,6 +40,11 @@ python rdc_analysis.py formats  <rdc>          # which formats the file holds, a
   python rdc_analysis.py count    <rdc> <pattern> [pattern ...]
   python rdc_analysis.py hex      <rdc> <start> <length>
   python rdc_analysis.py dxbc     <rdc> [verbose]
+  python rdc_analysis.py psos     <rdc> [maxRows] [--hash <hash>] [--format table|csv|markdown]
+                                                         # the pipeline state objects and the shaders
+                                                         #   each one holds, by hash; --hash answers one
+                                                         #   hash (either flavour) from the cached index
+                                                         #   and exits 1 when it is not in the capture
   python rdc_analysis.py dump-chunk <rdc> <chunkIndex> <outfile>
   python rdc_analysis.py dump-shaders <rdc> <outdir>
   python rdc_analysis.py report   <rdc> <bundleDir> [outDir]   # frame report from `replay_dump dump`
@@ -77,8 +82,8 @@ python rdc_analysis.py formats  <rdc>          # which formats the file holds, a
   python rdc_analysis.py selftest [-v] [-k <substring>]   # run the unit-test suite
   python rdc_analysis.py <cmd> <rdc> ... [--format table|csv|markdown]
                                                          # `draws`, `resources`, `descriptors`,
-                                                         #   `rootsig` and `summary` print a CSV or a
-                                                         #   Markdown table instead of the terminal's
+                                                         #   `rootsig`, `psos` and `summary` print a CSV or
+                                                         #   a Markdown table instead of the terminal's
                                                          #   own: the same rows, with the prose around
                                                          #   them on stderr so stdout stays a table
 
@@ -167,6 +172,7 @@ from rdc_chunkmap import *  # noqa: F401,F403  (re-exported for the CLI and test
 from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_psos import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_formats import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_table import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -296,6 +302,25 @@ def _take_driver(cmd: str, argv: Sequence[str]) -> List[str]:
         del rest[index:index + 2]
     return rest
 
+def _take_hash(cmd: str, argv: Sequence[str]) -> Tuple[List[str], Optional[str]]:
+    """`(argv without --hash <hash>, the hash it named)`, taken out before the positionals are read.
+
+    The same rule as `--format` and `--drop`, for the same reason: written as `psos <rdc> --hash abc 8`, the
+    hash would otherwise be read as the row limit. One hash only -- a lookup is one question -- and a
+    `--hash` with nothing after it, or with nothing in it, is a usage error rather than an empty answer.
+    """
+    rest = list(argv)
+    want: Optional[str] = None
+    if '--hash' in rest:
+        index = rest.index('--hash')
+        if index + 1 >= len(rest) or not rest[index + 1]:
+            print('usage: rdc_analysis.py %s <rdc> [maxRows] [--hash <hash>] [--format %s]'
+                  % (cmd, '|'.join(rdc_table.FORMATS)))
+            sys.exit(2)
+        want = rest[index + 1]
+        del rest[index:index + 2]
+    return rest, want
+
 def _take_drops(cmd: str, argv: Sequence[str]) -> Tuple[List[str], List[str]]:
     """`(argv without the --drop pairs, the filters they named)`, in the order they were written.
 
@@ -415,6 +440,10 @@ def _dispatch() -> None:
     elif cmd == 'rootsig':
         rest, fmt = _take_format('rootsig', argv)
         cmd_rootsig(path, _arg(rest, 3, 40), fmt)
+    elif cmd == 'psos':
+        rest, fmt = _take_format('psos', argv)
+        rest, want_hash = _take_hash('psos', rest)
+        sys.exit(cmd_psos(path, _arg(rest, 3, 40), fmt, want_hash))
     elif cmd == 'dump-chunk':
         cmd_dump_chunk(path, int(argv[3]), argv[4])
     elif cmd == 'dump-shaders':

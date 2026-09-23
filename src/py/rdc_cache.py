@@ -175,10 +175,11 @@ def stream_source(path: str, info: CaptureInfo, section_index: int = 0) -> Optio
     return _cache_entry(path, info, section_index)
 
 #: Suffixes of *derived* cache files: a small file beside a stream named `<stream stem><suffix>`, holding
-#: an answer computed from that stream (`.bindnames.json` is the whole-stream DXBC search, REFERENCE 4.13).
-#: Listed here, with the streams they belong to, so `cache clear` reclaims them too -- and so `cache list`
-#: can say how much of the directory is an answer rather than a stream.
-DERIVED_SUFFIXES = ('.bindnames.json',)
+#: an answer computed from that stream (`.bindnames.json` is the whole-stream DXBC search, REFERENCE 4.13;
+#: `.psos.json` is the PSO/shader index, REFERENCE 4.22). Listed here, with the streams they belong to, so
+#: `cache clear` reclaims them too -- and so `cache list` can say how much of the directory is an answer
+#: rather than a stream.
+DERIVED_SUFFIXES = ('.bindnames.json', '.psos.json')
 
 def sidecar_path(source: CacheEntry, suffix: str) -> str:
     """Where a derived answer about `source`'s stream lives: the stream's own name, another suffix.
@@ -190,6 +191,27 @@ def sidecar_path(source: CacheEntry, suffix: str) -> str:
     because a name can only be as unique as what goes into it.
     """
     return os.path.splitext(source['file'])[0] + suffix
+
+#: How much of a stream a derived answer's identity covers, at each end. Hashing 1.5 GB per command would
+#: cost more than the scan it saves; 64 KB at each end, on top of the stream cache's own name (which
+#: already hashes the capture's path, size, mtime, section and cache version, REFERENCE 4.8), is what makes
+#: a stale answer unreadable rather than wrong.
+DERIVED_SAMPLE = 64 << 10
+
+def stream_digest(stream: Buffer) -> str:
+    """`sha256` of the stream's first and last `DERIVED_SAMPLE` bytes (the whole stream if it is shorter).
+
+    What a derived sidecar stamps into itself (`rdc_resources.shader_bind_names`,
+    `rdc_psos.shader_index`): the sidecar's *name* already ties it to the capture the stream was
+    decompressed from, and this ties it to the bytes, so a stream that changed without the capture's mtime
+    changing is still refused.
+    """
+    import hashlib
+    if len(stream) <= 2 * DERIVED_SAMPLE:
+        return hashlib.sha256(bytes(stream)).hexdigest()
+    digest = hashlib.sha256(bytes(stream[:DERIVED_SAMPLE]))
+    digest.update(bytes(stream[len(stream) - DERIVED_SAMPLE:]))
+    return digest.hexdigest()
 
 @rdc_profile.timed('stream: cache write')
 def cache_store(path: str, info: CaptureInfo, section_index: int, stream: Buffer, method: int,
@@ -381,6 +403,7 @@ __all__ = [
     'CACHE_MAGIC',
     'CACHE_SUFFIX',
     'CACHE_VERSION',
+    'DERIVED_SAMPLE',
     'DERIVED_SUFFIXES',
     'METHOD_LZ4',
     'METHOD_RAW',
@@ -409,6 +432,7 @@ __all__ = [
     'get_stream',
     'load_stream',
     'sidecar_path',
+    'stream_digest',
     'stream_source',
     'stream_stats',
 ]

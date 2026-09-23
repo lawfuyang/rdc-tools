@@ -213,10 +213,12 @@ which replay does not expose.
 | `deps` | `<rdc> [maxResources=40] [table\|dot\|mermaid]` | who writes what and who reads it, from the capture's own stream: writes/reads per resource with the first and last event, `read-before-write` and `write-never-read` flagged and their evidence printed, and the same graph in DOT or Mermaid (§4.15) |
 | `memory` | `<rdc> [maxRows=20]` | what the frame's memory adds up to: placement and kind with byte totals, capture-relative lifetimes, the aliasing barriers it hands memory over with, heaps ranked by what sharing could save, and every figure's caveat (§4.15) |
 | `rootsig` | `<rdc> [maxSigs=40] [--format table|csv|markdown]` | every root signature the capture creates: version, cost in root-argument DWORDs, static samplers, flags, and each parameter with its type, register, space and descriptor ranges |
+| `psos` | `<rdc> [maxRows=40] [--hash <hash>] [--format table\|csv\|markdown]` | the pipeline state objects the frame creates and the shaders each one holds, by hash: the id a command list binds, kind, how many `SetPipelineState` calls name it, whether its debug data is embedded or needs a PDB, and each stage's hash. `--hash` answers one hash -- any of a container's three identities, by prefix -- from the cached index, **exit 1** when it is not in the capture (§4.22) |
 | `dump-chunk` | `<rdc> <index> <outfile>` | writes the chunk payload to a file |
 
-**`--format table|csv|markdown` on the five row commands** (`draws`, `resources`, `descriptors`, `rootsig`,
-`summary`) prints the same rows as a CSV or a Markdown table instead of the terminal's own layout, for
+**`--format table|csv|markdown` on the commands that print rows** (`draws`, `resources`, `descriptors`,
+`rootsig`, `summary`, `formats`, `psos`, `vram`, `rootsig-check`, `diff`) prints the same rows as a CSV or a
+Markdown table instead of the terminal's own layout, for
 pasting into an issue or opening in a spreadsheet. `table` is the default and is the command's own printing,
 byte for byte. In the other two **stdout is the table alone** and the lines the terminal form prints around
 it (`resources: 542 ids (516 with a descriptor, 528 named)`, `total resources: 542 (shown 40)`) go to
@@ -844,12 +846,13 @@ walks all 29,212 chunks in Python and slices every payload; `summary` and `marke
 0.8 s), the `re` pass `strings` and `names` are built on (14.5 s, split across processes -- §4.13), and the
 report's detectors (1.4 s of a 2.5 s `report`). The walk itself is 0.038 s, so splitting those loop bodies
 across processes would mean handing each worker the chunk index for its slice -- a real change, for about a
-second. The line on derived artefacts has moved exactly once since, and §4.13's fourth look is where: the
-whole-stream DXBC search is cached *beside* a stream the cache already holds (`rdc_cache.sidecar_path`),
-because that answer is a property of the stream, is asked for by four commands and by both halves of `diff`,
-and costs 0.3-0.5 s each time. A general container or name index over a capture is still declined, for the
-reason that paragraph gives: it is a new class of artefact with its own invalidation, which one small answer
-about a file that already has a cache entry is not.
+second. The line on derived artefacts has moved twice since: the whole-stream DXBC search is cached *beside* a
+stream the cache already holds (`rdc_cache.sidecar_path`), because that answer is a property of the stream,
+is asked for by four commands and by both halves of `diff`, and costs 0.3-0.5 s each time -- and `psos`'
+own index (§4.22) is the second, cached the same way and for the same reason, because it is one answer
+about one file that already has a cache entry. What is still declined is a *general* container or name
+index over a capture: one that anything could be looked up in, with its own invalidation and no single
+question behind it, is a different kind of artefact from an answer this tool computes for its own commands.
 
 ### 4.15 The frame's uses and its memory: `deps` and `memory`
 
@@ -1279,6 +1282,79 @@ other twenty-nine, and it should not be silent either. `sweep.json` is validated
 schema before it is written (§4.12) — a document this tool cannot validate is a document a consumer cannot
 either, and `validate <out>/sweep.json <schemaDir>` needs no kind, because the file's name says which one
 it is.
+
+### 4.22 The pipelines and their shaders: `psos`
+
+Where `dxbc` (§4.5) is a container inventory, `psos` is the *join*: which pipeline state objects the frame
+creates, which shader each stage of each one holds, and how to get from a hash you were handed — a line in a
+log, a `.pdb` name, another tool's output — back to the shader and to the draws that use it.
+
+**The edges are already in the file.** A capture's pipeline-creation chunks carry the whole description,
+each stage's DXBC/DXIL container verbatim included, so this is a payload read and not a decompile: 14
+payloads holding 606 KB over `Android Renderer.rdc`'s 374 MB stream, 43 holding 2.4 MB over
+HobbyRenderer's 1.47 GB, parsed by `parse_dxil_containers` — the same parser `dxbc` uses — in 1–3 ms. No
+session and no device (`trace`'s own floor is a replay session, measured 1.8–3.7 s, of which the debug
+attempt itself is noise), nothing decompiled, nothing written to disk, and no shader files extracted: the
+containers are read in place.
+
+**The id is the PSO's own resource id**, read from the payload's tail, so the table joins to `draws`' `pso=`
+column and to any `List_SetPipelineState` payload. Three chunk forms create a pipeline object and all three
+are read (`rdc_psos.PSO_FORMS`):
+
+| chunk (`d3d12_device_wrap2.cpp` / `_wrap.cpp`) | inline ids | the id's place in the tail | bytecode order | the ids' own order |
+|---|---|---|---|---|
+| `Device_CreatePipelineState` | 8, a C array | `n - 80` | VS,PS,DS,HS,GS,AS,MS,CS | VS,HS,DS,GS,PS,CS,AS,MS |
+| `Device_CreateGraphicsPipeline` | 5, a C array | `n - 56` | VS,PS,DS,HS,GS | VS,HS,DS,GS,PS |
+| `Device_CreateComputePipeline` | 1, a single `ResourceId` | `n - 16` | CS | CS |
+
+Both orders are the *engine's own* (`d3d12_serialise.cpp` for the bytecodes, the two `Serialise_Create*`
+functions for the ids) and they differ in every graphics form, which is why neither is derived from the
+other. The array framing is the part that has to be right: a C array is written with its **element count
+first**, so eight ids are 8 + 64 bytes and the id sits at `n - 80` — reading `n - 72` answers with the count
+word, which is how seven pipelines of one capture came to answer to the id `8`, and how a listing can look
+complete while every row is wrong. That count word is also the tail's own check (it must be the form's id
+count), and a payload that fails it is *counted and said* — an older capture whose serialiser predates the
+inline ids — rather than silently missing, because a table that omits a PSO looks like a frame that has
+none.
+
+**A stage is a pairing, not a copy.** The containers appear in the payload in the bytecode order above, and
+which of those stages exist is known from the tail's non-zero ids; the two are zipped, and only when the
+counts agree — otherwise the stages print as `?` rather than as a guess. Three independent checks stand
+behind the labels: every parsed id is one the capture's command lists actually bind (14/14 on the UE
+capture, 43/43 on HobbyRenderer), no id appears twice, and every container whose own `OSG1` signature speaks
+agrees with its label (16 agreements, no disagreement on the UE capture — including the pixel shader whose
+PDB the engine went looking for, which is `pso 3042`'s and `pso 3048`'s `ps`). A mesh shader writes
+`SV_Position` exactly as a vertex shader does, so HobbyRenderer's two mesh pipelines are the one case the
+signature cannot confirm; the inline ids are what settle them.
+
+**Three identities, and none of them is another's value.** `dxbc` prints a container's **header hash**
+(bytes 4..20); a shader's **`HASH` part** (20 bytes on every container measured here, its digest the last
+16) is what `dxc -Fd` names a `.pdb` after — measured: `trace`'s refusal on the UE capture asks for
+`ec6e6433f96a985d5086cd232bf42fd8.pdb`, and that value is one pixel shader's `HASH` part, not any header
+hash in the file. The **third** is what the driver side prints: a bundle's per-stage `hash` is
+`sha256(rawBytes)` (`commands_state.cpp`), and measured on `desktop-1`'s event 1003 all three of its
+stages' hashes landed on a container in the capture, each with `size` equal to the bundle's `bytes` — so
+the file side and the driver side join by a hash neither of them computes the same way, and asking `psos`
+about a hash copied out of a bundle is answered rather than refused. `--hash` takes any of the three, by
+prefix (eight characters is already specific; every match is printed, and a container serialised more than
+once is one answer listing its offsets), and answers with the container, all three identities, its debug
+data, and every pipeline and stage that binds it.
+
+**`ILDB` is the column that decides whether `trace` can run at all.** A DXIL shader is stepped *through*
+the debug bitcode in its own container, so 46 of HobbyRenderer's 53 containers need nothing else while all
+22 of the UE capture's need their PDB found by name (`--pdb <dir>`, §9.4). `psos` says which of the two a
+frame's shaders are before any session is paid for — the difference between a capture that can be debugged
+offline and one that needs a folder of symbol files.
+
+**The index is cached beside the stream cache** (`.psos.json`, `rdc_cache.sidecar_path`), keyed on the
+stream's length and `rdc_cache.stream_digest` — the identity the bind names' sidecar uses too (§4.13). The
+version covers *how the index is built* and not only what it stores: it moved twice while this was written,
+once when reading the older chunk forms turned 7 PSOs into 43 and once when the ids' framing was corrected,
+and both times the sidecar already on disk held an answer the new code would gladly have served. A digest
+cannot catch that — the stream did not change, the answer did — so the number is the only thing that can
+say "this file is not what this build computes". With it, a hash lookup is a dictionary hit: 0.24 s from a
+cold shell (Python plus the cache read) against 0.65 s for the same command doing the whole-stream scan, and
+no scan on a 1.5 GB capture at all.
 
 ---
 

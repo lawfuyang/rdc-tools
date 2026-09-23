@@ -87,7 +87,9 @@ bindings, the clears, the discards, the copies and the resolves, plus the view f
 declares (the use ledger behind `deps` and `memory`, REFERENCE §4.15),
 the resource table
 (id → kind/size/name, REFERENCE §4.9), the descriptor heaps (REFERENCE §4.10) and the root signatures (REFERENCE §3.4), inventories the
-DXBC/DXIL containers, audits the formats it finds (`formats`, the offline half of the driver's audit), and can
+DXBC/DXIL containers and joins them to the pipelines that bind them, by any of a container's three
+identities (`psos`, REFERENCE §4.22), audits the formats it finds (`formats`, the offline half of the
+driver's audit), and can
 check its own parse (`verify`). The replay driver (REFERENCE §9) is the other
 half: it asks the engine what no file read can answer — names, values, decoded textures, geometry, the
 rendered image, what each call asked for (`volume`: a draw's vertices/instances/triangles, a dispatch's
@@ -187,8 +189,12 @@ offline decode is a sibling of one already written. Neither is blocked on anythi
   study on a UE capture is mostly "how many permutations does this frame really contain, and is the one I am
   editing even in it?" — the bundles carry `states/<eid>.shaders.json` with a `hash` per stage already, so the
   table is a dedup and a count, and `replaydiff` already compares two frames' shaders by that hash. *How*:
-  offline over a bundle (state events), presented as a report section or a `permutations <bundle>` command;
-  the raw `.rdc` side is `dxbc`'s container inventory. **~1 d.**
+  offline over a bundle (state events), presented as a report section or a `permutations <bundle>` command.
+  The **raw `.rdc` half is landed** (`psos`, REFERENCE §4.22): the pipelines, their stages, all three of a
+  container's identities and the `ILDB` answer, from the file — so what is left is the *bundle* half (the
+  per-stage event counts, entry point and reflection summary, which only a replay has) and the join, whose
+  key is measured: a bundle's `hash` is `sha256` of the container, which `psos` now keys on (3 of 3 stages of
+  `desktop-1`'s event 1003). **~0.5 d.**
 
 ## 3. P3 — probes whose answer is not known yet
 
@@ -226,8 +232,8 @@ without running two commands and joining them by hand:
 2. **A picture's statistics (§1, ~1 d)** — the numeric form of "look at the PNG".
 3. **`replaydiff` over counters (§2, ~0.5–1 d)** — after 1, because the per-pass share is what a comparison
    differs over.
-4. **A permutation table for the frame (§2, ~1 d)** — feature study, and it costs a dedup of what the bundles
-   already carry.
+4. **A permutation table for the frame (§2, ~0.5 d)** — feature study; the file's half is `psos` now, and what
+   is left costs a dedup of what the bundles already carry.
 5. **What a dispatch writes (§2, ~1 d)** — the largest P2 item, and the one that opens compute.
 
 **Phase 2 — settle the two probes, then decide.** One session each, and the answer decides whether a bigger

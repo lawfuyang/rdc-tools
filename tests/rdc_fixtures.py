@@ -374,6 +374,10 @@ def pl_index_buffer(cmdlist: int, resid: int, offset: int, size: int, fmt: int,
 
 
 def pl_create_pso(pso_id: int, tail: bytes = b'\xAB\xCD' * 16) -> bytes:
+    """The minimal form: the id then whatever bytes. `decode_chunk`'s test pins its preview's tail with
+    this, so it stays deliberately unfaithful to the real layout -- a payload that says what it is fed and
+    nothing else. `pl_create_pso_stages` below is the one that models the engine's framing.
+    """
     return u64b(pso_id) + tail
 
 
@@ -576,6 +580,67 @@ def pl_create_root_sig(resid: int, sig: bytes, node_mask: int = 0, gap: int = 16
             + u64b(len(container)) + b'\x00' * 16 + u64b(resid))
 
 
+#: The pipeline-creation forms `pl_create_pso` can build: `(how many inline ids, whether they are an array)`.
+#: `Device_CreateComputePipeline` writes a single `ResourceId`, the two graphics forms a C array
+#: (`d3d12_device_wrap.cpp` / `d3d12_device_wrap2.cpp`) -- the framing a parser gets wrong quietly.
+PSO_FORMS: Dict[str, Tuple[int, bool]] = {
+    'Device_CreatePipelineState': (8, True),
+    'Device_CreateGraphicsPipeline': (5, True),
+    'Device_CreateComputePipeline': (1, False),
+}
+
+#: The order each form writes its stage bytecodes in (`d3d12_serialise.cpp`), and the order of its own
+#: `InlineShaderIDs` array -- which is a *different* order in both graphics forms.
+PSO_STAGE_ORDER: Dict[str, Tuple[str, ...]] = {
+    'Device_CreatePipelineState': ('VS', 'PS', 'DS', 'HS', 'GS', 'AS', 'MS', 'CS'),
+    'Device_CreateGraphicsPipeline': ('VS', 'PS', 'DS', 'HS', 'GS'),
+    'Device_CreateComputePipeline': ('CS',),
+}
+PSO_INLINE_ORDER: Dict[str, Tuple[str, ...]] = {
+    'Device_CreatePipelineState': ('VS', 'HS', 'DS', 'GS', 'PS', 'CS', 'AS', 'MS'),
+    'Device_CreateGraphicsPipeline': ('VS', 'HS', 'DS', 'GS', 'PS'),
+    'Device_CreateComputePipeline': ('CS',),
+}
+
+
+def pl_create_pso_stages(resid: int, shaders: Sequence[Tuple[str, bytes]],
+                         form: str = 'Device_CreatePipelineState', root_sig: int = 1,
+                         state: int = 16, count_word: Optional[int] = None,
+                         inline_ids: Optional[Sequence[int]] = None,
+                         root_blob: bytes = b'') -> bytes:
+    """A pipeline-creation payload in the layout `rdc_psos` reads -- the staged form of `pl_create_pso`.
+
+    `u64 pRootSignature | u64 (an empty root-signature blob) | each stage's bytecode as
+    `u64 len | bytes | u64 len` | `state` bytes of everything that follows them | riid(16) | the id (8) |
+    the inline shader ids`, with the ids' own framing and both orders taken from `PSO_FORMS` -- so a
+    fixture is a payload the parser has to *pair* rather than a list it can copy, and a stage's bytecodes
+    and its inline id sit in different positions on purpose.
+
+    `count_word` overrides the array's element count and `inline_ids` the ids themselves, for a test that
+    wants a tail this is not (a capture older than the inline ids, or the wrong number of them), and
+    `root_blob` fills the root-signature field with a container -- a `RTS0` blob is a DXBC container that
+    must not be mistaken for a stage.
+    """
+    order, inline = PSO_STAGE_ORDER[form], PSO_INLINE_ORDER[form]
+    given = dict(shaders)
+    body = b''
+    for stage in order:
+        if stage in given:
+            blob = given[stage]
+            body += u64b(len(blob)) + blob + u64b(len(blob))
+    ids = [1000 + order.index(stage) for stage in inline] if inline_ids is None else list(inline_ids)
+    for i, stage in enumerate(inline):
+        if stage not in given:
+            ids[i] = 0
+    count, is_array = PSO_FORMS[form]
+    assert count == len(inline)
+    header = (u64b(root_sig) + (u64b(len(root_blob)) + root_blob + u64b(len(root_blob))
+                                if root_blob else u64b(0)))
+    return (header + body + b'\x00' * state + b'\x00' * 16 + u64b(resid)
+            + (u64b(count if count_word is None else count_word) if is_array else b'')
+            + b''.join(u64b(v) for v in ids))
+
+
 def rdef(binds: Sequence[Tuple[str, str, int, int]], target_version: int = 0x501,
          stage: int = 0x4353) -> bytes:
     """An `RDEF` part: `(name, kind, register, space)` per binding (`dxbc_container.cpp` layout).
@@ -688,6 +753,13 @@ enum class D3D12Chunk : uint32_t
   Queue_BeginEvent,
   Queue_SetMarker,
   Queue_ExecuteCommandLists,
+
+  // The two older pipeline forms (`d3d12_device_wrap.cpp`), which `pl_create_pso` can build. Their ids
+  // here are this fixture's own: the tree's numbering is written over the bundled table's (chunkmap.py
+  // `load_chunk_names`), and the bundled table's 1009 for `Device_CreateGraphicsPipeline` is taken by
+  // `Queue_ExecuteCommandLists` above -- which is exactly how a name goes missing.
+  Device_CreateGraphicsPipeline = 1090,
+  Device_CreateComputePipeline,
 
   List_SetPipelineState = 1200,
   List_SetGraphicsRootSignature,

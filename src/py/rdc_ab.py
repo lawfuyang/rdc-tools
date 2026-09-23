@@ -741,6 +741,16 @@ def compare_images(a: AbSide, b: AbSide, files_a: Sequence[Tuple[int, int, str]]
     pixel while `detail_left` lasts -- decoding is ~0.15 s per megabyte in Python, so the caller caps how
     many -- and the rest are named with the reason they were not compared. An image nobody looked at must
     never read as an image that did not change.
+
+    **Measured: the decode is the cost, and it is not one a process pool helps with.** On this machine
+    `replaydiff --with-images` is 9.6 s against 0.6 s at `--image-detail 0`, i.e. *one* 1080p pair is ~9 s;
+    decoding one of its PNGs is ~6 s (198-452 KB of file for ~8 MB decoded, so 0.25-0.4 s per decoded
+    megabyte, against the 0.15 s/MB the constant above was written from). A pool over the pairs was tried
+    and removed: the default compares a single pair, so there was nothing to split, and at eight workers a
+    multi-pair run measured *slower* (11.4 s against 9.9 s) -- the workers are memory-bandwidth bound and
+    the spawn is not free. What would pay is moving the unfiltering into the C helpers the tool already
+    ships (`bin/rdc_lz4.dll`, the way `_lz4_c_function` is used); that is a new kernel, and this comment is
+    the measurement a reader needs to decide whether to write it.
     """
     if not with_images:
         return []

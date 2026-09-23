@@ -866,6 +866,42 @@ std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUC
                                     CompType resultType, const std::vector<PassRange> &passes,
                                     const std::vector<ActionNode> &rows)
 {
+  // One pass over the calls and one over the results, with each row *bucketed* into its pass,
+  // rather than a scan of every call and every result per pass: the old shape was O(passes x (calls
+  // + results)) and a frame with a few hundred passes and five figures of counter results is where
+  // that shows.
+  //
+  // The bucket holds *indices* in the array's own order, so each pass sums the same values in the
+  // same order it used to -- floating-point addition is not associative, and a tidier-looking sort
+  // by event id would have changed the last digits of a total that a reader compares between
+  // captures. The passes are ordered and do not overlap (`PassesFromActions`), which is what makes
+  // `upper_bound` on `m_First` the right question.
+  std::vector<std::vector<size_t>> resultBuckets(passes.size());
+  std::vector<int> callCounts(passes.size(), 0);
+  for(size_t i = 0; i < results.size(); i++)
+  {
+    if(results[i].counter != cost)
+      continue;
+    const int id = (int)results[i].eventId;
+    const size_t at =
+        (size_t)(std::upper_bound(passes.begin(), passes.end(), id,
+                                  [](int eid, const PassRange &r) { return eid < r.m_First; }) -
+                 passes.begin());
+    if(at > 0 && id <= passes[at - 1].m_Last)
+      resultBuckets[at - 1].push_back(i);
+  }
+  for(size_t i = 0; i < rows.size(); i++)
+  {
+    if(!rows[i].m_bCall)
+      continue;
+    const size_t at =
+        (size_t)(std::upper_bound(passes.begin(), passes.end(), rows[i].m_Eid,
+                                  [](int eid, const PassRange &r) { return eid < r.m_First; }) -
+                 passes.begin());
+    if(at > 0 && rows[i].m_Eid <= passes[at - 1].m_Last)
+      callCounts[at - 1]++;
+  }
+
   std::vector<PassCost> costs;
   costs.reserve(passes.size());
   for(size_t p = 0; p < passes.size(); p++)
@@ -875,17 +911,10 @@ std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUC
     pc.m_Name = passes[p].m_Name;
     pc.m_First = passes[p].m_First;
     pc.m_Last = passes[p].m_Last;
-    for(size_t i = 0; i < rows.size(); i++)
-      if(rows[i].m_bCall && rows[i].m_Eid >= pc.m_First && rows[i].m_Eid <= pc.m_Last)
-        pc.m_Events++;
-    for(size_t i = 0; i < results.size(); i++)
+    pc.m_Events = callCounts[p];
+    for(size_t k = 0; k < resultBuckets[p].size(); k++)
     {
-      if(results[i].counter != cost)
-        continue;
-      const int id = (int)results[i].eventId;
-      if(id < pc.m_First || id > pc.m_Last)
-        continue;
-      const double value = CounterValueAsDouble(results[i], resultType);
+      const double value = CounterValueAsDouble(results[resultBuckets[p][k]], resultType);
       pc.m_Sum += value;
       if(pc.m_Measured == 0 || value > pc.m_Max)
         pc.m_Max = value;
@@ -1374,7 +1403,7 @@ int CmdFind(IReplayController *ctrl, ICaptureFile *file, const char *path, const
   int calls = 0;
   bool bTruncated = false;
   const std::vector<ActionNode> rows = ActionTree(ctrl, calls, bTruncated);
-  const std::map<int, std::string> paths = MarkerPaths(ctrl);
+  const std::map<int, std::string> &paths = MarkerPaths(ctrl);
 
   PrintCaptureHeader(file, path);
   Field("needle", want);

@@ -69,19 +69,28 @@ def cmd_dxbc(path: str) -> None:
     is the replay driver's (REFERENCE §9). The tool used to guess at it by scanning containers for
     GI-ish strings and `TEXCOORD6..12`; that harvest was a worse answer to a question replay answers
     exactly, so it was removed rather than kept.
+
+    The rows come from `rdc_psos.container_list`, i.e. from the cached index when there is one: what
+    discovers the containers is a whole-stream `find` (0.43 s of this command's 0.58 s on the 1.55 GB UE
+    capture, and it grows with the stream), and the rows it yields *are* this command's answer -- so paying
+    it once per capture instead of once per call is what the index is for. Imported inside the function
+    because `rdc_psos` reads this module's parser, and importing it at the top would close a cycle.
     """
+    import rdc_psos
+
     info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
     rows: List[DxbcRow] = []
-    for off, size, h, parts in parse_dxil_containers(stream, rdc_cache.stream_source(path, info)):
-        names = [p[0] for p in parts]
-        osg = next((p for p in parts if p[0] == 'OSG1'), None)
+    for row in rdc_psos.container_list(stream, rdc_cache.stream_source(path, info)):
+        names = [p[0] for p in row['parts']]
+        osg = next((p for p in row['parts'] if p[0] == 'OSG1'), None)
         osg_s = part_strings(stream, osg[1], osg[2], 3) if osg else []
         stage = 'root-sig' if 'RTS0' in names else (
             'PS' if any('SV_Target' in s for s in osg_s) else
             'VS' if any('SV_Position' in s for s in osg_s) else
             'CS' if 'CS' in names else '?')
-        rows.append({'off': off, 'size': size, 'hash': h, 'stage': stage, 'parts': names})
+        rows.append({'off': row['offset'], 'size': row['size'], 'hash': row['hash'], 'stage': stage,
+                     'parts': names})
     print('DXBC/DXIL containers: %d' % len(rows))
     by_stage: Dict[str, List[DxbcRow]] = {}
     for r in rows:

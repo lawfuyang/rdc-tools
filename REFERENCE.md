@@ -846,13 +846,29 @@ walks all 29,212 chunks in Python and slices every payload; `summary` and `marke
 0.8 s), the `re` pass `strings` and `names` are built on (14.5 s, split across processes -- §4.13), and the
 report's detectors (1.4 s of a 2.5 s `report`). The walk itself is 0.038 s, so splitting those loop bodies
 across processes would mean handing each worker the chunk index for its slice -- a real change, for about a
-second. The line on derived artefacts has moved twice since: the whole-stream DXBC search is cached *beside* a
-stream the cache already holds (`rdc_cache.sidecar_path`), because that answer is a property of the stream,
-is asked for by four commands and by both halves of `diff`, and costs 0.3-0.5 s each time -- and `psos`'
-own index (§4.22) is the second, cached the same way and for the same reason, because it is one answer
-about one file that already has a cache entry. What is still declined is a *general* container or name
-index over a capture: one that anything could be looked up in, with its own invalidation and no single
-question behind it, is a different kind of artefact from an answer this tool computes for its own commands.
+second. The line on derived artefacts has moved four times now, each one the same shape: an answer that is a property
+of the *stream*, asked for by more than one command, cached beside the stream the cache already holds
+(`rdc_cache.sidecar_path`) and stamped with the stream's length and `rdc_cache.stream_digest`. The
+whole-stream DXBC search was the first (four commands and both halves of `diff`, 0.3-0.5 s each time); `psos`'
+index (§4.22) the second; and the survey that produced this paragraph added two more, both of them the tool's
+*slowest* commands, where the win is what a reader notices:
+
+| sidecar | what it saves | measured |
+|---|---|---|
+| `.bindnames.json` | the DXBC search behind `draws`/`rootsig`/`diff` | 0.30 s of a 0.51 s `draws` (REFERENCE §4.13) |
+| `.psos.json` | the same search for `dxbc`/`dump-shaders`/`psos` | `dxbc` 0.91 s → 0.23 s |
+| `.names.json` | the `re` pass `names` filters | `names` 1.71 s → 0.14 s |
+| `.strings.json` | the same pass's ranked head, for `strings` | `strings` 2.71 s → 0.14 s |
+
+Each is keyed on the question it answers as well as the stream -- `names` and `strings` store their `minlen`,
+and `strings` stores the *ranked head* rather than the 1.2 M unique strings, because a sidecar of that size
+would cost more to read than the scan costs to run. Two things are still declined, and both were measured
+rather than assumed. A *general* container or name index over a capture, for the reason this paragraph has
+always given: one that anything could be looked up in, with its own invalidation and no single question behind
+it, is a different kind of artefact. And a **C string kernel**: `re.finditer` is 93% of one slice's serial scan
+(2.421 s of 2.603 s over a 200 MB slice), but that scan is already split across processes and what a kernel
+cannot remove is the per-run decode and the merge of 1.2 M unique strings -- with the ranking cached at 0.14 s,
+a kernel would have to beat that, and the measurement says it would not.
 
 ### 4.15 The frame's uses and its memory: `deps` and `memory`
 
@@ -1827,10 +1843,16 @@ needs a deadline and a serial fallback rather than an unbounded wait.
 
 **The same driver is a library** (`bin/rdc_replay.dll`, ABI in `src/cpp/api.h`, Python caller
 `src/py/rdc_replay.py`). `replay_dump.exe` is one command per process, which is right for a command line and
-wrong for a tool that asks several questions: the standup is ~4 s on a small capture and ~11 s on a 1.4 GB
-one, and every process pays it again. The library builds from the *same sources* — one command language, one
-dispatcher, so a library line and a batch line mean the same thing — and what it adds is a session held open
-across calls:
+wrong for a tool that asks several questions: the standup is the engine opening the capture — measured on the
+1.55 GB UE capture, `info` 7.07 s and `state` 7.30 s, while six commands through one session were 7.14 s in
+total, so a command run alone is ~7 s of engine around ~6 ms of work. The library builds from the *same
+sources* — one command language, one dispatcher, so a library line and a batch line mean the same thing — and
+what it adds is a session held open across calls. The same idea has four spellings now: `batch <rdc> <file>`
+for a file, `--repl`/`--stdin` for a terminal or a pipe, `multi <rdc> <line>...` for a command line, and this
+library for a caller with its own handle. `multi` was added when the measurement above was taken: writing a
+temporary batch file to ask three questions of one event was the common case, and every spelling pays the
+session exactly once (`CommandSequence` in `replay_dump.cpp` is the loop they share, so a line's meaning
+cannot drift between them):
 
 | ABI | what it does |
 |---|---|

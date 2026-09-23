@@ -386,7 +386,7 @@ struct ActionNode
 bool IsMarkerPush(ActionFlags flags);
 bool IsCallFlags(ActionFlags flags);
 std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &bTruncated);
-std::map<int, std::string> MarkerPaths(IReplayController *ctrl);
+const std::map<int, std::string> &MarkerPaths(IReplayController *ctrl);
 std::string MarkerPathAt(IReplayController *ctrl, int eid);
 
 //: `text` lowercased, for the case-insensitive halves of a search (`find`, a marker path given
@@ -778,6 +778,10 @@ int CmdUsage(IReplayController *ctrl, ICaptureFile *file, const char *path, cons
 int CmdProbe(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxEid);
 int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
              const std::filesystem::path &batchPath);
+//: Several commands on one command line (`multi <rdc> "state 413" "shaders 413"`), run in one
+//: session: a batch file's syntax with the lines given in hand instead of in a file.
+int CmdMulti(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::vector<std::string> &args);
 
 // --------------------------------------------------------------------------- the CLI (replay_dump.cpp)
 //

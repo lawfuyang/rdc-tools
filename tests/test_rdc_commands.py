@@ -27,8 +27,10 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
         sys.path.insert(0, _p)
 
 import rdc_analysis as R          # noqa: E402
+import rdc_cache                    # noqa: E402  (the derived-suffix list)
 import rdc_chunkmap as chunkmap     # the tests patch the module that *owns* a name,
 import rdc_resources as resources   #   because a star import copies it and a copy cannot
+import rdc_scan                     # noqa: E402  (the scan the two head-caches replace)
 import rdc_fixtures as F          # noqa: E402
 from rdc_testcase import CmdCase as _CmdCase, capture_text, capture_all   # noqa: E402
 
@@ -410,6 +412,64 @@ class TestLoadStream(CmdCase):
         # not compare equal to a `bytes` however equal its contents are.
         self.assertEqual(bytes(stream), b''.join(chunks))
         self.assertEqual(how, 'lz4(1 blocks)')
+
+
+class TestStringAndNameSidecars(CmdCase):
+    """The two head-caches (`strings`, `names`): the cache may only answer with what the scan would have.
+
+    Both commands are `re` passes over the whole capture -- the tool's slowest work by far -- and both are
+    deterministic for a `(stream, minlen)`: the rows are ranked the same way every time, so the sidecar holds
+    a *copy* of the answer rather than an approximation of it. What is pinned here is that the second call is
+    the first call's answer, that a different `minlen` is a different question rather than a hit, that a
+    larger request rebuilds the head, and that the suffixes are ones `cache clear` reclaims.
+    """
+
+    DATA = b'AAAAAA\x00AAAAAA\x00BBBBBB\x00ShaderName\x00BasePass\x00'
+
+    def stream_and_source(self) -> tuple:
+        """This test's stream and a cache-file stand-in beside it: the sidecar lands in the test's root."""
+        path = self.cap(self.ch('PushMarker', self.DATA))
+        _info, stream, _how = R.load_stream(path)
+        source_file = os.path.join(self.tmp, 'sidecar.bin')
+        with open(source_file, 'wb') as fh:
+            fh.write(b'RDCCACHE' + b'\x00' * 8)
+            fh.write(stream)
+        source = {'file': source_file, 'hdrLen': 16, 'streamLen': len(stream), 'section': 0, 'method': 1,
+                  'blocks': 1, 'srcPath': 'test', 'srcSize': len(stream), 'srcMtime': 1}
+        return stream, source
+
+    def test_the_strings_head_is_the_scan_it_replaces(self):
+        stream, source = self.stream_and_source()
+        expected = R.string_ranking(stream, None, 6, 5)
+        self.assertEqual(R.string_ranking(stream, source, 6, 5), expected)
+        with mock.patch.object(rdc_scan, 'scan_runs', side_effect=AssertionError('scanned again')):
+            self.assertEqual(R.string_ranking(stream, source, 6, 5), expected)
+
+    def test_the_name_rows_are_the_scan_they_replace(self):
+        stream, source = self.stream_and_source()
+        expected = R.name_like_strings(stream, None, 6)
+        self.assertTrue(expected, 'the fixture has no name-like string to check against')
+        self.assertEqual(R.name_like_strings(stream, source, 6), expected)
+        with mock.patch.object(rdc_scan, 'scan_runs', side_effect=AssertionError('scanned again')):
+            self.assertEqual(R.name_like_strings(stream, source, 6), expected)
+
+    def test_a_different_minlen_is_not_a_hit(self):
+        stream, source = self.stream_and_source()
+        R.string_ranking(stream, source, 6, 5)
+        with mock.patch.object(rdc_scan, 'scan_runs', wraps=rdc_scan.scan_runs) as scan:
+            R.string_ranking(stream, source, 4, 5)
+        self.assertTrue(scan.called, 'another question was served out of this one sidecar')
+
+    def test_asking_for_more_rows_rebuilds_the_head(self):
+        stream, source = self.stream_and_source()
+        _unique, five = R.string_ranking(stream, source, 6, 1)
+        _unique2, more = R.string_ranking(stream, source, 6, 5)
+        self.assertGreaterEqual(len(more), len(five))
+        self.assertEqual(more[:len(five)], five)
+
+    def test_the_suffixes_are_ones_the_cache_clears(self):
+        self.assertIn(R.STRINGS_SUFFIX, rdc_cache.DERIVED_SUFFIXES)
+        self.assertIn(R.NAMES_SUFFIX, rdc_cache.DERIVED_SUFFIXES)
 
 
 # =========================================================================== text mining

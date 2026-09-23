@@ -387,6 +387,7 @@ badly (REFERENCE §9).
 | `dump` | the whole frame to disk as a bundle the offline tool reads: `events.json`, `states/`, `cbuffers/`, `resources.json`, `messages.json` and a manifest with every hash; `--with-images`, `--textures`, `--with-counters`, `--since`/`--until`/`--max-events` bound the work | `dump 'capture.rdc' bundle --with-images` |
 | `bundle-verify` | re-hashes a bundle with no device and no DLL, so it can be checked anywhere | `bundle-verify bundle` |
 | `batch` | runs every command in a file against one open capture, paying the open once; each line's output is preceded by `#=== <line>` so a stream can be split again | `batch 'capture.rdc' run.txt > before.txt` |
+| `multi` | the same thing from a command line: one line per argument, in the batch syntax, all in one session — measured, `info` and `state` are 7.07 s and 7.30 s on a 1.55 GB capture while six commands in one session are 7.14 s in total | `multi 'capture.rdc' "state 413" "shaders 413" "crosscheck 413"` |
 | `schema` | the JSON Schema of each `--json` document kind (28 of them); `--out <dir>` writes them, `--check <dir>` fails when the checked-in folder and the driver disagree | `schema --check schema`, `schema state` |
 | `selftest` | the driver checking itself — JSON writer, schema table, help text, the DLL it loads — with no capture | `selftest` |
 | `--repl` / `--stdin` | keep the capture open and read commands from the terminal or a pipe, one per line, exactly as a batch file spells them; `help` and `quit` work | `.\bin\replay_dump.exe 'capture.rdc' --repl` |

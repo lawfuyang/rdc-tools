@@ -471,7 +471,10 @@ def check_stream(stream: Buffer, names: Optional[Dict[int, str]] = None,
         pad_len = min(ch['pad_len'], max(0, len(stream) - ch['pad_start']))
         pad = stream[ch['pad_start']:ch['pad_start'] + pad_len]
         padding_bytes += pad_len
-        stale = sum(1 for b in pad if b)
+        # `len - count(0)` rather than a per-byte loop: this is one of the few places the walk reads every
+        # padding byte of the stream (up to 63 per chunk, 11,923 chunks on the 1.55 GB capture), and the
+        # loop was pure Python over all of them.
+        stale = len(pad) - pad.count(0)
         if stale:
             stale_chunks += 1
             stale_bytes += stale

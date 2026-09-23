@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(HERE)
@@ -30,6 +31,58 @@ def write(path: str, document: object) -> str:
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(document, handle)
     return path
+
+
+class TestTheExeSession(TempDirCase):
+    """`--exe` runs every line in one session and splits that one stream into per-line transcripts.
+
+    A session is ~7 s of engine on the 1.55 GB UE capture and a command inside it is ~6 ms, so the exe path's
+    whole job is to put every line in *one* process. It used to run `dump` alone: `--commands` was honoured
+    through the library and silently dropped through the exe, which is one question with two answers, and the
+    reason `_transcript_body` exists rather than a second copy of the loop.
+    """
+
+    def test_the_body_is_what_sits_between_the_markers(self) -> None:
+        text = '#=== a\n1\n#=== b\n2\n3\n'
+        self.assertEqual(sweep._transcript_body(text, 'a'), '1\n')
+        self.assertEqual(sweep._transcript_body(text, 'b'), '2\n3\n')
+        self.assertIsNone(sweep._transcript_body(text, 'c'), 'a missing marker read as an empty transcript')
+
+    def test_every_line_goes_to_one_multi_session(self) -> None:
+        bundle = os.path.join(self.tmp, 'bundle')
+        os.makedirs(bundle, exist_ok=True)
+        stdout = (b'#=== dump "x"\n{"a": 1}\n#=== state 5\n{"state": true}\n'
+                  b'#=== draws 3\n{"draws": []}\n')
+        proc = mock.Mock(returncode=0, stdout=stdout, stderr=b'')
+        with mock.patch.object(sweep.subprocess, 'run', return_value=proc) as run:
+            code, _seconds, note = sweep.run_lines('cap.rdc', self.tmp, bundle, ['state 5', 'draws 3'],
+                                                   False, False, os.path.join(self.tmp, 'log.txt'))
+        self.assertEqual((code, note), (0, ''))
+        argv = run.call_args[0][0]
+        self.assertEqual(argv[1], 'multi', 'the exe path did not use one session for every line')
+        self.assertEqual(argv[2], 'cap.rdc')
+        self.assertEqual(len(argv), 3 + 3, 'the dump line and both extra lines belong to the one call')
+        self.assertTrue(argv[3].startswith('dump '), argv[3])
+        self.assertIn('state 5', argv)
+        self.assertIn('draws 3', argv)
+        with open(os.path.join(bundle, sweep.transcript_name('state 5')), encoding='utf-8') as fh:
+            self.assertEqual(fh.read(), '{"state": true}\n')
+        with open(os.path.join(bundle, sweep.transcript_name('draws 3')), encoding='utf-8') as fh:
+            self.assertEqual(fh.read(), '{"draws": []}\n')
+
+    def test_a_line_the_session_did_not_reach_is_a_failure(self) -> None:
+        # The stream is one text for several lines: a line with no marker of its own did not run, and an
+        # empty transcript written for it would read as "this command answered nothing".
+        bundle = os.path.join(self.tmp, 'bundle')
+        os.makedirs(bundle, exist_ok=True)
+        proc = mock.Mock(returncode=0, stdout=b'#=== dump "x"\n{"a": 1}\n', stderr=b'')
+        with mock.patch.object(sweep.subprocess, 'run', return_value=proc):
+            code, _seconds, note = sweep.run_lines('cap.rdc', self.tmp, bundle, ['state 5'],
+                                                   False, False, os.path.join(self.tmp, 'log.txt'))
+        self.assertEqual(code, 1)
+        self.assertIn('state 5', note)
+        self.assertFalse(os.path.exists(os.path.join(bundle, sweep.transcript_name('state 5'))),
+                         'a transcript was written for a line that did not run')
 
 
 class TestTheParts(TempDirCase):

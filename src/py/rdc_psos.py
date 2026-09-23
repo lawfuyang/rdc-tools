@@ -83,7 +83,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, TypedDict
 #: the answer did -- and neither can care: the number is the only thing that can say "this file is not what
 #: this build computes".
 PSOS_SUFFIX = '.psos.json'
-PSOS_VERSION = 4
+PSOS_VERSION = 5
 
 #: The stage order the stream desc's bytecodes are written in (`d3d12_serialise.cpp`), and the order of the
 #: engine's own `InlineShaderIDs` array (`d3d12_device_wrap2.cpp`). They differ -- a payload's order is not
@@ -175,7 +175,7 @@ class ContainerRow(TypedDict):
     hash: str
     shaderHash: str
     sha256: str
-    parts: List[str]
+    parts: List[Tuple[str, int, int]]
     ilbd: bool
 
 class PsoIndex(TypedDict):
@@ -183,6 +183,17 @@ class PsoIndex(TypedDict):
     psos: List[PsoRow]
     containers: List[ContainerRow]
     undecoded: int
+
+def container_list(stream: Buffer, source: Optional[CacheEntry] = None) -> List[ContainerRow]:
+    """The stream's containers, from the cached index when there is one.
+
+    This is what `dxbc` and `dump-shaders` read instead of running their own whole-stream `find`: the
+    container rows *are* that answer -- offsets, sizes, hashes, and each part with its own offset and
+    length -- so a command that needs them pays the find once per capture rather than once per call.
+    Measured on the 1.55 GB UE capture, the find is 0.43 s of `dxbc`'s 0.58 s, and it grows with the
+    stream while a sidecar read does not.
+    """
+    return shader_index(stream, source)['containers']
 
 def _shader_hash(stream: Buffer, parts: Sequence[DxbcPart]) -> str:
     """The `HASH` part's digest as hex, or '' when the container has no such part.
@@ -205,7 +216,7 @@ def container_rows(stream: Buffer, source: Optional[CacheEntry] = None) -> List[
         rows.append({'offset': offset, 'size': extent, 'hash': h,
                      'shaderHash': _shader_hash(stream, parts),
                      'sha256': hashlib.sha256(bytes(stream[offset:offset + extent])).hexdigest(),
-                     'parts': [p[0] for p in parts],
+                     'parts': [(str(p[0]), int(p[1]), int(p[2])) for p in parts],
                      'ilbd': any(p[0] == 'ILDB' for p in parts)})
     return rows
 
@@ -323,7 +334,8 @@ def _load_index(stream: Buffer, source: CacheEntry) -> Optional[PsoIndex]:
                      for row in psos],
             'containers': [{'offset': int(row[0]), 'size': int(row[1]), 'hash': str(row[2]),
                             'shaderHash': str(row[3]), 'sha256': str(row[4]),
-                            'parts': [str(p) for p in row[5]], 'ilbd': bool(row[6])}
+                            'parts': [(str(p[0]), int(p[1]), int(p[2])) for p in row[5]],
+                            'ilbd': bool(row[6])}
                            for row in containers],
             'undecoded': int(document.get('undecoded', 0)),
         }
@@ -348,7 +360,8 @@ def _store_index(stream: Buffer, source: CacheEntry, index: PsoIndex) -> None:
         'psos': [[row['id'], row['offset'], row['kind'], row['refs'],
                   [[s['stage'], s['hash']] for s in row['shaders']]] for row in index['psos']],
         'containers': [[row['offset'], row['size'], row['hash'], row['shaderHash'], row['sha256'],
-                        row['parts'], int(row['ilbd'])] for row in index['containers']],
+                        [[p[0], p[1], p[2]] for p in row['parts']], int(row['ilbd'])]
+                       for row in index['containers']],
     }
     tmp = path + '.tmp'
     try:
@@ -427,7 +440,7 @@ def _debug_text(container: Optional[ContainerRow]) -> str:
         return '-'
     if container['ilbd']:
         return 'ilbd'
-    if 'DXIL' in container['parts'] or 'SHDR' in container['parts']:
+    if any(p[0] in SHADER_PARTS for p in container['parts']):
         return 'pdb'
     return '-'
 
@@ -522,7 +535,8 @@ def _print_hash(index: PsoIndex, want: str) -> int:
         uses = _uses(index, digest)
         print('hash %s (%s)' % (digest, HASH_KIND_TEXT.get(which, which)))
         print('    container : %s, %d bytes, parts %s%s'
-              % (', '.join('@%d' % c['offset'] for c in copies), row['size'], ','.join(row['parts']),
+              % (', '.join('@%d' % c['offset'] for c in copies), row['size'],
+                 ','.join(p[0] for p in row['parts']),
                  ('' if len(copies) == 1 else '   (%d identical copies in the stream)' % len(copies))))
         if row['shaderHash'] and row['shaderHash'] != digest:
             print('    shader    : %s   (the name a PDB for this shader takes)' % row['shaderHash'])
@@ -556,6 +570,7 @@ __all__ = [
     'STAGE_BYTECODE_ORDER',
     'build_index',
     'cmd_psos',
+    'container_list',
     'container_rows',
     'parse_pso_payload',
     'shader_index',

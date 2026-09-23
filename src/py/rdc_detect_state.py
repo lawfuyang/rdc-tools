@@ -236,6 +236,9 @@ def detect_blend_in_opaque_pass(bundle: BundleData) -> List[RedFlag]:
     is also where the bundle's `psoKind` comes from) -- so when the driver starts writing them per event,
     this rule should prefer the pass's own name and say which it used.
     """
+    # The resources by id, once. The loop below asks "which resource is bound at this slot" per slot per
+    # state range, and answering that by scanning `bundle['resources']` each time is O(ranges x slots x R).
+    by_id = {_res_id(str(one.get('resource', ''))): one for one in bundle['resources']}
     lines: List[str] = []
     for first, last, state in _graphics_state_ranges(bundle):
         merger = state.get('outputMerger')
@@ -254,8 +257,7 @@ def detect_blend_in_opaque_pass(bundle: BundleData) -> List[RedFlag]:
             blend = blends[index] if index < len(blends) and isinstance(blends[index], dict) else None
             if blend is None or not blend.get('enabled'):
                 continue
-            target = next((one for one in bundle['resources']
-                           if _res_id(str(one.get('resource', ''))) == resource), None)
+            target = by_id.get(resource)
             name = ' '.join(str(target.get('name', '')).split()) if target else ''
             lowered = name.lower()
             if not any(pattern in lowered for pattern in OPAQUE_TARGET_NAMES):
@@ -308,6 +310,9 @@ def detect_format_units_suspicion(bundle: BundleData) -> List[RedFlag]:
     read through an `..._UNORM_SRGB` view). A bundle carries neither the view's format nor the resource's,
     which is why that half is not claimed *here*.
     """
+    # One id -> resource map for the whole rule, as in `detect_blend_in_opaque_pass`: the alternative is a
+    # scan of every resource per slot per state range.
+    by_id = {_res_id(str(one.get('resource', ''))): one for one in bundle['resources']}
     lines: List[str] = []
     for first, last, state in _graphics_state_ranges(bundle):
         documents = bundle['states'].get(str(first)) or {}
@@ -334,8 +339,7 @@ def detect_format_units_suspicion(bundle: BundleData) -> List[RedFlag]:
             kind, raw = outputs[slot]
             if kind not in ('float', 'half', 'double'):
                 continue
-            target = next((one for one in bundle['resources']
-                           if _res_id(str(one.get('resource', ''))) == bound[slot]), None)
+            target = by_id.get(bound[slot])
             if target is None or str(target.get('kind')) != 'texture':
                 continue
             bits = _unorm_bits(str(target.get('format', '')))

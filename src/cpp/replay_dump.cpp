@@ -164,6 +164,7 @@ void Usage()
       "§9)\n"
       "  bundle-verify <dir>               check a bundle's hashes and sizes (no device, no DLL)\n"
       "  batch   <rdc> <file>              run every command in <file> against one open capture\n"
+      "  multi   <rdc> <line>...           several commands from a command line, in one session\n"
       "  schema  [<name>] [--out|--check <dir>]   the JSON Schema for each --json document (no "
       "capture, no DLL)\n"
       "  selftest                          this program checking itself: writer, schemas, help, "
@@ -213,9 +214,12 @@ void Usage()
       "A batch file holds one command per line, in the same syntax minus the executable and the\n"
       "capture (`state 270 --json`), with `#` for comments. Each line's output is preceded by a\n"
       "`#=== <line>` marker so a stream can be split again. This is the cheap way to run many\n"
-      "commands: opening a capture and standing the replay engine up costs ~3 s on a small "
-      "capture\n"
-      "and ~10 s on a 1.4 GB one, and batch pays it once for the whole file.\n"
+      "commands: opening a capture and standing the replay engine up costs ~7 s on a 1.5 GB "
+      "capture,\n"
+      "and batch pays it once for the whole file. `multi <rdc> \"state 270\" \"shaders 270\"` is "
+      "the\n"
+      "same thing from a command line -- one line per argument, spelled exactly as a batch file\n"
+      "spells it -- for a caller that has the lines in hand and no file to put them in.\n"
       "\n"
       "`counters --per-pass` folds one counter over each pass: `FetchCounters` answers per event "
       "and\n"
@@ -1132,6 +1136,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
   }
   if(!strcmp(cmd, "dump"))
     return CmdDump(ctrl, file, path, args, bWantDisasm);
+  if(!strcmp(cmd, "multi"))
+    return CmdMulti(ctrl, file, path, args);
   if(!strcmp(cmd, "bundle-verify") && args.size() > 1)
     return CmdBundleVerify(args[1].c_str());
 
@@ -1191,9 +1197,77 @@ std::string WithoutBom(const std::string &text)
   return text;
 }
 
+//: The body `batch`, `--repl`/`--stdin` and `multi` all are: one line at a time against one open
+//: capture.
+//:
+//: Factored out when `multi` was added rather than written a third time, because the expensive part
+//: is the session they share and the subtle parts are the same in all three: the `#=== <line>`
+//: marker that lets a caller split the stream back into one output per command, `probe`'s rule (it
+//: forces non-events, which leaves stale state behind, so it belongs in its own run -- whichever of
+//: the two ran second would answer wrong), and keeping the worst exit code so a scripted run still
+//: gets a useful status.
+struct CommandSequence
+{
+  const char *what = "batch";
+  int ret = 0;
+  int ran = 0;
+  bool sawProbe = false;
+  bool sawOther = false;
+
+  //: Runs one line; blank and `#` lines are skipped, as in a batch file, and `false` says skipped
+  //: rather than run -- which is also what a line that splits to nothing is.
+  bool RunLine(IReplayController *ctrl, ICaptureFile *file, const char *path, const std::string &line)
+  {
+    const size_t first = line.find_first_not_of(" \t");
+    if(first == std::string::npos || line[first] == '#')
+      return false;
+
+    const std::string text = WithoutBom(line.substr(first));
+    std::vector<std::string> args;
+    bool bJson = false, bDisasm = false;
+    std::string saveDir;
+    SplitLine(text, args, bJson, bDisasm, saveDir);
+    if(args.empty())
+      return false;
+
+    const bool bIsProbe = args[0] == "probe";
+    sawProbe = sawProbe || bIsProbe;
+    sawOther = sawOther || !bIsProbe;
+
+    // The marker is what lets a caller split the stream back into one output per command. It is
+    // printed in both formats: JSON has no comment syntax, and guessing where one object ends and
+    // the next begins is not something a consumer should have to do.
+    printf("#=== %s\n", text.c_str());
+    fflush(stdout);
+
+    g_bJson = bJson;
+    const ULONGLONG started = Millis();
+    const int code =
+        DispatchCommand(ctrl, file, path, args, bDisasm, saveDir.empty() ? NULL : saveDir.c_str());
+    ran++;
+    ret = (code != 0) ? code : ret;
+    Log("%s %d: %s -> exit %d in %.1fs", what, ran, text.c_str(), code,
+        (Millis() - started) / 1000.0);
+    return true;
+  }
+
+  //: The warning the sequence owes at the end, and the count that says how much the session carried.
+  void Finish() const
+  {
+    if(sawProbe && sawOther)
+    {
+      Log("warning: this %s mixes `probe` with other commands; probe forces non-events, which "
+          "leaves "
+          "stale state behind, so run it on its own",
+          what);
+    }
+    Log("%s finished: %d command(s)", what, ran);
+  }
+};
+
 //: Runs a file of command lines against one open capture. The point is the cost of a replay
-//: session, not the cost of the commands: standing the engine up and opening the capture is ~4 s on
-//: a small capture and ~11 s on a 1.4 GB one, and this pays it once for the whole file.
+//: session, not the cost of the commands: standing the engine up and opening the capture is ~7 s on
+//: a 1.5 GB capture, and this pays it once for the whole file.
 int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
              const std::filesystem::path &batchPath)
 {
@@ -1201,8 +1275,7 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
   if(f == NULL)
     return Fail(2, "cannot read batch file %s", batchPath.string().c_str());
 
-  int ret = 0, ran = 0;
-  bool bSawProbe = false, sawOther = false;
+  CommandSequence seq;
   std::string line;
   for(;;)
   {
@@ -1214,52 +1287,47 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
       continue;
     }
 
-    // A blank line or a `#` comment is skipped, so a batch file can be annotated.
-    const size_t first = line.find_first_not_of(" \t");
-    if(first != std::string::npos && line[first] != '#')
-    {
-      const std::string text = WithoutBom(line.substr(first));
-      std::vector<std::string> args;
-      bool bJson = false, bDisasm = false;
-      std::string saveDir;
-      SplitLine(text, args, bJson, bDisasm, saveDir);
-
-      // `probe` forces non-events, and a forced non-event leaves the last real event's state in
-      // place; whichever ran second, one of the two answers would be wrong. It belongs in its own
-      // run, and saying so here is cheaper than explaining a mysteriously different answer.
-      const bool bIsProbe = !args.empty() && args[0] == "probe";
-      bSawProbe = bSawProbe || bIsProbe;
-      sawOther = sawOther || !bIsProbe;
-
-      // The marker is what lets a caller split the stream back into one output per command. It is
-      // printed in both formats: JSON has no comment syntax, and guessing where one object ends and
-      // the next begins is not something a consumer should have to do.
-      printf("#=== %s\n", text.c_str());
-      fflush(stdout);
-
-      g_bJson = bJson;
-      const ULONGLONG started = Millis();
-      const int code =
-          DispatchCommand(ctrl, file, path, args, bDisasm, saveDir.empty() ? NULL : saveDir.c_str());
-      ran++;
-      ret = (code != 0) ? code : ret;
-      Log("batch %d: %s -> exit %d in %.1fs", ran, text.c_str(), code, (Millis() - started) / 1000.0);
-    }
+    seq.RunLine(ctrl, file, path, line);
 
     if(ch == EOF)
       break;
     line.clear();
   }
 
-  if(bSawProbe && sawOther)
+  fclose(f);
+  seq.Finish();
+  return seq.ret;
+}
+
+//: Several commands on one command line against one open capture:
+//: `multi <capture> "state 413" "shaders 413" "crosscheck 413"`.
+//:
+//: The fourth spelling of one idea -- `batch` for a file, `--stdin`/`--repl` for a pipe, the
+//: library for a caller with its own handle -- for the caller that has the lines in hand and no
+//: file to put them in. It exists because of what a session costs: measured on the 1.55 GB UE
+//: capture, `info` is 7.07 s and `state` 7.30 s, while six commands through one session are 7.14 s
+//: in total, so a command run on its own is ~7 s of engine around ~6 ms of work.
+//:
+//: One *line* is one argument, so the shell decides where lines end and a line with a quote in it
+//: needs that quote escaped the way the shell asks. Everything else is a batch file's own syntax:
+//: options included, `#` lines skipped, and the same `#=== <line>` markers on the way out.
+int CmdMulti(IReplayController *ctrl, ICaptureFile *file, const char *path,
+             const std::vector<std::string> &args)
+{
+  if(args.size() < 2)
   {
-    Log("warning: this batch mixes `probe` with other commands; probe forces non-events, which "
-        "leaves stale state behind, so run it on its own");
+    return Fail(
+        2,
+        "multi needs at least one command line: `multi <rdc> \"state 413\" \"shaders 413\"` "
+        "(one session, so the ~7 s of standing the engine up is paid once)");
   }
 
-  fclose(f);
-  Log("batch finished: %d command(s)", ran);
-  return ret;
+  CommandSequence seq;
+  seq.what = "multi";
+  for(size_t i = 1; i < args.size(); i++)
+    seq.RunLine(ctrl, file, path, args[i]);
+  seq.Finish();
+  return seq.ret;
 }
 
 //: `--repl` / `--stdin`: commands from the terminal (or a pipe) against one open capture.
@@ -1274,8 +1342,8 @@ int CmdBatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
 //: loop keeps the worst code it saw, so a scripted pipe still gets a useful exit status.
 int CmdRepl(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPrompt)
 {
-  int ret = 0, ran = 0;
-  bool bSawProbe = false, sawOther = false;
+  CommandSequence seq;
+  seq.what = "repl";
   std::string line;
   if(bPrompt)
     printf("%s is open: one command per line, `help` for the list, `quit` to leave.\n", path);
@@ -1294,16 +1362,10 @@ int CmdRepl(IReplayController *ctrl, ICaptureFile *file, const char *path, bool 
       if(ch != '\r')
         line += (char)ch;
     }
-    const size_t first = line.find_first_not_of(" \t");
     const bool bAtEnd = (ch == EOF);
-    if(first == std::string::npos || line[first] == '#')
-    {
-      if(bAtEnd)
-        break;
-      continue;
-    }
-
-    const std::string text = WithoutBom(line.substr(first));
+    const size_t first = line.find_first_not_of(" \t");
+    const std::string text =
+        first == std::string::npos ? std::string() : WithoutBom(line.substr(first));
     if(text == "quit" || text == "exit")
       break;
     if(text == "help" || text == "--help")
@@ -1314,40 +1376,16 @@ int CmdRepl(IReplayController *ctrl, ICaptureFile *file, const char *path, bool 
       continue;
     }
 
-    std::vector<std::string> args;
-    bool bJson = false, bDisasm = false;
-    std::string saveDir;
-    SplitLine(text, args, bJson, bDisasm, saveDir);
-    if(args.empty())
-    {
-      if(bAtEnd)
-        break;
-      continue;
-    }
-
-    // The same warning `batch` prints, for the same reason: probe's answer depends on being first.
-    const bool bIsProbe = args[0] == "probe";
-    bSawProbe = bSawProbe || bIsProbe;
-    sawOther = sawOther || !bIsProbe;
-
-    g_bJson = bJson;
-    const ULONGLONG started = Millis();
-    const int code =
-        DispatchCommand(ctrl, file, path, args, bDisasm, saveDir.empty() ? NULL : saveDir.c_str());
-    ran++;
-    ret = (code != 0) ? code : ret;
-    Log("repl %d: %s -> exit %d in %.1fs", ran, text.c_str(), code, (Millis() - started) / 1000.0);
+    // `RunLine` skips a blank line and a `#` comment itself -- which is what an empty `text` and a
+    // `#` one are -- so there is nothing to test for here.
+    if(!text.empty())
+      seq.RunLine(ctrl, file, path, text);
     if(bAtEnd)
       break;
   }
 
-  if(bSawProbe && sawOther)
-  {
-    Log("warning: this session mixes `probe` with other commands; probe forces non-events, which "
-        "leaves stale state behind, so run it on its own");
-  }
-  Log("repl finished: %d command(s)", ran);
-  return ret;
+  seq.Finish();
+  return seq.ret;
 }
 
 int main(int argc, char **argv)
@@ -1554,6 +1592,20 @@ int main(int argc, char **argv)
   // also rules out a layout disagreement with the DLL: all-zero means "no overrides" either way.
   ReplayOptions opts;
   memset(&opts, 0, sizeof(opts));
+  // Zeroing the whole struct rules out a layout disagreement with the DLL, and for the pointer and
+  // vendor members all-zero *is* "no override". One member is not a bool, though, so it is worth
+  // naming what this asks for rather than what it looks like: `optimisation` is
+  // `ReplayOptimisationLevel` (an enum whose first member, `NoOptimisation`, is 0) where the
+  // struct's own default is `Balanced`.
+  //
+  // That is deliberate, and it was measured rather than assumed. Three `info` runs per level on
+  // the 1.55 GB UE capture, medians: none 7.07 s, balanced 6.90 s, fastest 6.85 s -- 0.2 s apart,
+  // inside this machine's run-to-run spread (one `none` run took 8.86 s). The session is the
+  // *engine opening the capture*, so the level buys nothing worth having, while `Balanced`'s
+  // documented trade -- "resources appearing cleared instead of containing contents from prior
+  // frames where those resources are written to before being read" -- is exactly the kind of answer
+  // a `state` document or a `crosscheck` row must not change quietly. The most faithful level is
+  // therefore the one a diagnostic tool should ask for.
   const rdcpair<ResultDetails, IReplayController *> opened = file->OpenCapture(opts, NULL);
   Trace("OpenCapture returned");
   if(!opened.first.OK())

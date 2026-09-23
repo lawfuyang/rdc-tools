@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess       # the exe path's one session per capture (`multi`)
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -166,15 +167,44 @@ def run_lines(path: str, root: str, bundle_dir: str, lines: Sequence[str], overw
         except rdc_replay.ReplayError as exc:
             return 1, time.perf_counter() - started, str(exc)
 
-    import subprocess
+    # The exe path used to run `dump` and *nothing else*, so `--commands` was silently dropped here while the
+    # library path honoured it -- one question with two answers depending on how the sweep was started.
+    # `multi` (one session, many command lines) is what closes that: the dump line and every extra line go
+    # to one process, whose stdout carries the `#=== <line>` markers the transcripts are split on.
     started = time.perf_counter()
-    proc = subprocess.run([os.path.join(root, rdc_driver.EXE_PATH), 'dump', path, bundle_dir]
-                          + (['--overwrite'] if overwrite else []), capture_output=True)
+    proc = subprocess.run([os.path.join(root, rdc_driver.EXE_PATH), 'multi', path] + all_lines,
+                          capture_output=True)
     seconds = time.perf_counter() - started
     if proc.returncode != 0:
         message = (proc.stderr or b'').decode('utf-8', 'replace').strip().splitlines()
         return proc.returncode, seconds, message[-1][:160] if message else 'exit %d' % proc.returncode
+
+    # The transcripts, split back out of the one stream: the marker line is exactly what a batch file's
+    # output carries, and the library path's per-line files are the same documents without it.
+    text = (proc.stdout or b'').decode('utf-8', 'replace')
+    for position, line in enumerate(all_lines):
+        if position == 0:
+            continue        # the dump line is the sweep's own step, and what it produced is the bundle
+        body = _transcript_body(text, line)
+        if body is None:
+            return 1, seconds, 'the exe session did not print a transcript for `%s`' % line
+        with open(os.path.join(bundle_dir, transcript_name(line)), 'w', encoding='utf-8') as handle:
+            handle.write(body)
     return 0, seconds, ''
+
+def _transcript_body(text: str, line: str) -> Optional[str]:
+    """One command's own output out of a `multi`/`batch` stream: the text between its marker and the next.
+
+    `None` when the marker is not there at all, which is how a caller learns the session did not reach that
+    line rather than writing an empty transcript as if it had.
+    """
+    marker = '#=== %s\n' % line
+    at = text.find(marker)
+    if at < 0:
+        return None
+    start = at + len(marker)
+    end = text.find('\n#=== ', start)
+    return text[start:] if end < 0 else text[start:end + 1]
 
 def cmd_sweep(argv: Sequence[str]) -> int:
     """`sweep <dir> [--out <root>] [--commands <file>] [--overwrite] [--min-bytes N] [--limit N] [--exe]`.

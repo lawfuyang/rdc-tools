@@ -179,7 +179,7 @@ def stream_source(path: str, info: CaptureInfo, section_index: int = 0) -> Optio
 #: `.psos.json` is the PSO/shader index, REFERENCE 4.22). Listed here, with the streams they belong to, so
 #: `cache clear` reclaims them too -- and so `cache list` can say how much of the directory is an answer
 #: rather than a stream.
-DERIVED_SUFFIXES = ('.bindnames.json', '.psos.json')
+DERIVED_SUFFIXES = ('.bindnames.json', '.names.json', '.psos.json', '.strings.json')
 
 def sidecar_path(source: CacheEntry, suffix: str) -> str:
     """Where a derived answer about `source`'s stream lives: the stream's own name, another suffix.

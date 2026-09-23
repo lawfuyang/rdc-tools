@@ -77,7 +77,14 @@ std::vector<ActionNode> ActionTree(IReplayController *ctrl, int &calls, bool &bT
   return rows;
 }
 
-std::map<int, std::string> MarkerPaths(IReplayController *ctrl)
+//: The marker path of every event, built once per process and handed back by reference.
+//:
+//: By *reference* rather than by value, which is what the cache is for: this map holds one entry
+//: per marker-named event (thousands on a big frame), and returning it by value meant every caller
+//: -- and `MarkerPathAt` a second time on top -- paid a deep copy of every path in it. The callers
+//: are per command rather than per event (`bundle.cpp` hoists the whole map itself for that
+//: reason), so the cost was seconds of `dump`, not minutes; a `&` is what it took.
+const std::map<int, std::string> &MarkerPaths(IReplayController *ctrl)
 {
   // The action tree is a property of the *capture*, not of the event: walking it once and keeping
   // the result is what stops a bundle, which asks for the path of every event it writes (`state`,
@@ -112,7 +119,8 @@ std::map<int, std::string> MarkerPaths(IReplayController *ctrl)
 
 std::string MarkerPathAt(IReplayController *ctrl, int eid)
 {
-  const std::map<int, std::string> paths = MarkerPaths(ctrl);
+  const std::map<int, std::string> &paths =
+      MarkerPaths(ctrl);    // the cache itself, not a copy of it
   const std::map<int, std::string>::const_iterator found = paths.find(eid);
   return found == paths.end() ? std::string() : found->second;
 }
@@ -268,7 +276,7 @@ int ResolveMarkerPath(IReplayController *ctrl, const char *text, std::string &ma
     return -1;
   const std::string wantLower = LowerAscii(want);
 
-  std::map<int, std::string> paths = MarkerPaths(ctrl);
+  const std::map<int, std::string> &paths = MarkerPaths(ctrl);
 
   // Three passes over the same table, strongest match first, so a full path can never be beaten by
   // a component that happens to say the same thing, and a component never by a substring.

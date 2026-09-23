@@ -12,6 +12,7 @@ from rdc_payloads import *  # noqa: F401,F403
 import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_cache  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_resources  # noqa: F401  (used qualified: the loader is called from inside functions)
+import rdc_psos  # noqa: F401  (the cached container list, which `dump-shaders` reads)
 import rdc_scan  # noqa: F401  (the whole-stream scans, which it may run in slices)
 import rdc_table  # noqa: F401  (the csv/markdown shapes of the row commands)
 
@@ -178,23 +179,101 @@ def cmd_resources(path: str, limit: int = 200, name_filter: Optional[str] = None
         print('res%-8d %-9s %-34s %s' % (rid, kind, size, name or '-'))
     print(notes[-1])
 
+#: The `strings` sidecar: the ranked head of the scan, cached beside the stream cache. The scan is the
+#: tool's most expensive command (3.25 s on the 1.55 GB UE capture) and 93% of one slice's serial time is
+#: the `finditer` itself (measured: 2.421 s of 2.603 s over a 200 MB slice) -- but that scan is already
+#: split across processes, and what a C kernel could *not* remove is the per-run work in Python plus the
+#: merge of 1.2 M unique strings, which is the half that would be left. So the answer is cached instead of
+#: accelerated: the ranking is deterministic for a `(stream, minlen)`, the head is what a reader asks for,
+#: and a request for more rows than are stored falls back to the scan and *upgrades* the cache.
+STRINGS_SUFFIX = '.strings.json'
+STRINGS_VERSION = 1
+#: How many ranked rows the sidecar keeps unless a caller has asked for more (about 60 KB of JSON).
+STRINGS_CACHED_ROWS = 1000
+
+def _load_string_rows(stream: Buffer, source: CacheEntry, minlen: int,
+                      rows: int) -> Optional[Tuple[int, List[Tuple[int, int, str]]]]:
+    """`(unique count, ranked rows)` from the sidecar, or None when it holds fewer rows than were asked for."""
+    import json
+    try:
+        with open(rdc_cache.sidecar_path(source, STRINGS_SUFFIX), encoding='utf-8') as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict) or document.get('version') != STRINGS_VERSION:
+        return None
+    if document.get('streamLen') != len(stream) or document.get('minlen') != minlen:
+        return None
+    if document.get('digest') != rdc_cache.stream_digest(stream):
+        return None
+    stored, unique = document.get('rows'), document.get('unique')
+    if not isinstance(stored, list) or not isinstance(unique, int):
+        return None
+    # The head answers when it holds at least as many rows as were asked for, or when it holds *everything*
+    # there is (`len(stored) == unique`: a capture with fewer strings than a page). Without the second case a
+    # small capture would re-scan for a request no scan could satisfy.
+    if len(stored) < rows and len(stored) < unique:
+        return None
+    try:
+        return unique, [(int(row[0]), int(row[1]), str(row[2])) for row in stored]
+    except (TypeError, ValueError, IndexError):
+        return None
+
+def _store_string_rows(stream: Buffer, source: CacheEntry, minlen: int, unique: int,
+                       rows: Sequence[Tuple[int, int, str]]) -> None:
+    """Write the ranked head; a cache can only ever save work, so a failure here is not an error."""
+    import json
+    path = rdc_cache.sidecar_path(source, STRINGS_SUFFIX)
+    document = {'version': STRINGS_VERSION, 'streamLen': len(stream),
+                'digest': rdc_cache.stream_digest(stream), 'minlen': minlen, 'unique': unique,
+                'rows': [[count, off, text] for count, off, text in rows]}
+    tmp = path + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(document, fh, separators=(',', ':'), sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+def string_ranking(stream: Buffer, source: Optional[CacheEntry] = None, minlen: int = 6,
+                   rows: int = STRINGS_CACHED_ROWS) -> Tuple[int, List[Tuple[int, int, str]]]:
+    """`(unique count, ranked rows)` for the strings of `stream`, from the sidecar when it has enough.
+
+    `rows` is how many ranked entries the caller wants: the cache holds at least that many or it is
+    rewritten. The ranking is the command's own -- by count, ties by first offset, which needs no key of its
+    own because a dict keeps insertion order, `counts` is filled in ascending first-offset order (the scan
+    walks forward and the parallel merge concatenates slices in offset order), and a stable sort keeps it.
+    Measured before this existed: the tuple tie-break key was 1.46 s of the command's 6.2 s over 1.16 M
+    strings, which is why the order is not re-sorted here.
+    """
+    if source is not None:
+        cached = _load_string_rows(stream, source, minlen, rows)
+        if cached is not None:
+            return cached
+    counts, order = rdc_scan.scan_runs(stream, minlen, source)
+    ranked = sorted(counts, key=counts.__getitem__, reverse=True)[:rows]
+    head = [(counts[s], order[s], s) for s in ranked]
+    if source is not None:
+        _store_string_rows(stream, source, minlen, len(counts), head)
+    return len(counts), head
+
 def cmd_strings(path: str, minlen: int = 6, maxlines: int = 200) -> None:
     """Print the unique ASCII strings >= `minlen`, ranked by occurrence then first offset.
 
     The scan itself is `rdc_scan.scan_runs`, which splits it across processes when it is worth it (see
-    REFERENCE 4.13); the ranking below is unchanged, and so is its output.
+    REFERENCE 4.13), and the ranking is cached beside the stream (`string_ranking`): the output is
+    unchanged and byte-identical either way, which is what the sidecar's own test pins.
     """
     info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
-    counts, order = rdc_scan.scan_runs(stream, minlen, rdc_cache.stream_source(path, info))
-    print('unique ascii strings >= %d: %d' % (minlen, len(counts)))
-    # Ranked by count, ties by first offset -- and the tie-break needs no key of its own: a dict keeps
-    # its insertion order, `counts` is filled in ascending first-offset order (the scan walks the stream
-    # forward, and the parallel merge concatenates slices in offset order), and a stable sort keeps it.
-    # Measured: the tuple key was 1.46 s of this command's 6.2 s over 1.16 M strings.
-    ranked = sorted(counts, key=counts.__getitem__, reverse=True)
-    for s in ranked[:maxlines]:
-        print('%6d  @0x%-9x %s' % (counts[s], order[s], s[:150]))
+    unique, head = string_ranking(stream, rdc_cache.stream_source(path, info), minlen,
+                                  max(maxlines, STRINGS_CACHED_ROWS))
+    print('unique ascii strings >= %d: %d' % (minlen, unique))
+    for count, off, text in head[:maxlines]:
+        print('%6d  @0x%-9x %s' % (count, off, text[:150]))
 
 #: What makes a string look like an object, a shader or a pass name. Compiled once: this is applied to
 #: every unique string the scan found (427,823 of them on `desktop-2`).
@@ -203,16 +282,84 @@ _NAME_LIKE = re.compile(
     r'StaticMesh|Sphere|Mobile|CachedPoint|NoLightMap|Policy|Permutation|FScreenPass|SceneColor|'
     r'Primitive|View|FShader|VertexFactory)')
 
+#: The `names` sidecar: the *filtered* list, cached beside the stream cache (`rdc_cache.sidecar_path`)
+#: because the scan it saves is a whole pass over the capture -- measured, `names` is 1.77 s on the 1.55 GB
+#: UE capture and everything but the interpreter's own 0.13 s is that scan. Only the name-like strings are
+#: stored (a few thousand), not the scan's own answer, which is 1.2 M unique strings: a sidecar that size
+#: would cost more to read than the scan costs to run. The version covers the filter as well as the shape,
+#: for the reason `rdc_psos`' constant records -- the *rules* are part of what is cached.
+NAMES_SUFFIX = '.names.json'
+NAMES_VERSION = 1
+
+def _load_name_rows(stream: Buffer, source: CacheEntry,
+                    minlen: int) -> Optional[List[Tuple[int, str]]]:
+    """The cached (offset, name) rows for this stream and length, or None if there are none to trust."""
+    import json
+    try:
+        with open(rdc_cache.sidecar_path(source, NAMES_SUFFIX), encoding='utf-8') as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict) or document.get('version') != NAMES_VERSION:
+        return None
+    if document.get('streamLen') != len(stream) or document.get('minlen') != minlen:
+        return None
+    if document.get('digest') != rdc_cache.stream_digest(stream):
+        return None
+    rows = document.get('names')
+    if not isinstance(rows, list):
+        return None
+    try:
+        return [(int(row[0]), str(row[1])) for row in rows]
+    except (TypeError, ValueError, IndexError):
+        return None
+
+def _store_name_rows(stream: Buffer, source: CacheEntry, minlen: int,
+                     rows: Sequence[Tuple[int, str]]) -> None:
+    """Write the rows, or leave the cache as it was: a cache can only ever save work."""
+    import json
+    path = rdc_cache.sidecar_path(source, NAMES_SUFFIX)
+    document = {'version': NAMES_VERSION, 'streamLen': len(stream),
+                'digest': rdc_cache.stream_digest(stream), 'minlen': minlen,
+                'names': [[off, text] for off, text in rows]}
+    tmp = path + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(document, fh, separators=(',', ':'), sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+def name_like_strings(stream: Buffer, source: Optional[CacheEntry] = None,
+                      minlen: int = 10) -> List[Tuple[int, str]]:
+    """The name-like strings of `stream` in first-offset order: what `names` prints, from the sidecar.
+
+    The order is the command's own -- ascending by first offset, so the 400 it shows are the earliest
+    name-like strings in the capture -- and the filter is `_NAME_LIKE`, unchanged. Only the
+    question's parameters are part of the key: a different `minlen` is a different question, so its
+    sidecar is written separately rather than served from this one.
+    """
+    if source is not None:
+        cached = _load_name_rows(stream, source, minlen)
+        if cached is not None:
+            return cached
+    _counts, seen = rdc_scan.scan_runs(stream, minlen, source, counts=False)
+    rows = sorted(((off, text) for text, off in seen.items() if _NAME_LIKE.search(text)))
+    if source is not None:
+        _store_name_rows(stream, source, minlen, rows)
+    return rows
+
 def cmd_names(path: str, minlen: int = 10) -> None:
     """Strings that look like UE/RenderDoc object or shader names."""
     info, stream, how = load_stream(path)
     print('stream %d bytes [%s]' % (len(stream), how))
-    _counts, seen = rdc_scan.scan_runs(stream, minlen, rdc_cache.stream_source(path, info),
-                                       counts=False)
-    interesting = [s for s in seen if _NAME_LIKE.search(s)]
+    interesting = name_like_strings(stream, rdc_cache.stream_source(path, info), minlen)
     print('interesting name-like strings: %d' % len(interesting))
-    for s in sorted(interesting, key=lambda x: seen[x])[:400]:
-        print('  @0x%-9x %s' % (seen[s], s[:160]))
+    for off, s in interesting[:400]:
+        print('  @0x%-9x %s' % (off, s[:160]))
 
 def cmd_grep(path: str, pattern: str, context: int = 200, cap: int = 30) -> None:
     """Print every byte-occurrence of the ASCII `pattern`, each with +/-`context` bytes of text."""
@@ -508,27 +655,37 @@ def cmd_dump_shaders(path: str, outdir: str) -> None:
     This is the offline way to hand a shader to a tool of your own, and the way to hand one to
     `dxc` or `dxil-spirv` yourself. What is *in* the shader is not summarised here: that is the
     reflection's job, and the reflection is the replay driver's (REFERENCE §9).
+
+    Like `dxbc` (REFERENCE §4.5), the containers come from `rdc_psos.container_list` -- the cached index
+    when there is one -- because the whole-stream `find` is the same answer at the cost of a scan that
+    grows with the capture.
     """
     info, stream, _how = load_stream(path)
     os.makedirs(outdir, exist_ok=True)
     lines: List[str] = []
     n = 0
-    for off, size, h, parts in parse_dxil_containers(stream, rdc_cache.stream_source(path, info)):
-        names = [p[0] for p in parts]
+    for row in rdc_psos.container_list(stream, rdc_cache.stream_source(path, info)):
+        names = [p[0] for p in row['parts']]
         if 'RTS0' in names:
             continue
         n += 1
-        blob = stream[off:off + size]
-        fn = os.path.join(outdir, 'shader_%02d_%s.dxil' % (n, h[:12]))
+        blob = stream[row['offset']:row['offset'] + row['size']]
+        fn = os.path.join(outdir, 'shader_%02d_%s.dxil' % (n, row['hash'][:12]))
         with open(fn, 'wb') as f:
             f.write(blob)
-        lines.append('shader_%02d  hash=%s  size=%d  parts=%s' % (n, h, size, ','.join(names)))
+        lines.append('shader_%02d  hash=%s  size=%d  parts=%s'
+                     % (n, row['hash'], row['size'], ','.join(names)))
         lines.append('    file    : %s' % fn)
     with open(os.path.join(outdir, 'shaders.txt'), 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
     print('wrote %d shader blobs + shaders.txt to %s' % (n, outdir))
 
 __all__ = [
+    'NAMES_SUFFIX',
+    'NAMES_VERSION',
+    'STRINGS_CACHED_ROWS',
+    'STRINGS_SUFFIX',
+    'STRINGS_VERSION',
     'cmd_blocks',
     'cmd_cache',
     'cmd_chunk_detail',
@@ -547,4 +704,6 @@ __all__ = [
     'cmd_strings',
     'cmd_summary',
     'cmd_verify',
+    'name_like_strings',
+    'string_ranking',
 ]

@@ -939,12 +939,15 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // below look resources up per event and per row: the linear scans this replaces built an `IdText`
   // string per comparison, which on `desktop-2`'s 11082 resources is 11k x (5.6k buffers + 96
   // textures) of string churn -- measured, that alone was 10.6 s of a 312 s run.
-  std::map<std::string, const TextureDescription *> textures;
+  // Keyed by the `ResourceId` itself rather than by its text: `ResourceId` has the ordering a map needs
+  // (`resourceid.h`), and the string form is a fresh `snprintf`ed `std::string` per lookup -- one per
+  // target slot per event, and one per row of `resources.json`.
+  std::map<ResourceId, const TextureDescription *> textures;
   for(size_t i = 0; i < ctrl->GetTextures().size(); i++)
-    textures[IdText(ctrl->GetTextures()[i].resourceId)] = &ctrl->GetTextures()[i];
-  std::map<std::string, const BufferDescription *> buffers;
+    textures[ctrl->GetTextures()[i].resourceId] = &ctrl->GetTextures()[i];
+  std::map<ResourceId, const BufferDescription *> buffers;
   for(size_t i = 0; i < ctrl->GetBuffers().size(); i++)
-    buffers[IdText(ctrl->GetBuffers()[i].resourceId)] = &ctrl->GetBuffers()[i];
+    buffers[ctrl->GetBuffers()[i].resourceId] = &ctrl->GetBuffers()[i];
 
   // ------------------------------------------------------------------ capture.json
   {
@@ -999,7 +1002,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   // The marker path of every event, from the same action list: one walk for the whole bundle rather
   // than one per event, because the tree is walked once per `MarkerPathAt` call.
   const ULONGLONG tMarkers = Millis();
-  const std::map<int, std::string> markerPaths = MarkerPaths(ctrl);
+  const std::map<int, std::string> &markerPaths = MarkerPaths(ctrl);
   ProfileAdd(kProfileActions, tMarkers);
   Log("bundle: %d event(s) sit inside a marker", (int)markerPaths.size());
 
@@ -1058,8 +1061,8 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       {
         const ResourceId rt = st->outputMerger.renderTargets[slot].resource;
         std::string detail = IdText(rt);
-        const std::map<std::string, const TextureDescription *>::const_iterator found =
-            textures.find(detail);
+        const std::map<ResourceId, const TextureDescription *>::const_iterator found =
+            textures.find(rt);
         if(found != textures.end())
         {
           const TextureDescription &td = *found->second;
@@ -1240,10 +1243,11 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       const ResourceDescription &r = resources[i];
       const std::string id = IdText(r.resourceId);
 
-      const std::map<std::string, const TextureDescription *>::const_iterator texIt =
-          textures.find(id);
+      const std::map<ResourceId, const TextureDescription *>::const_iterator texIt =
+          textures.find(r.resourceId);
       const TextureDescription *tex = (texIt == textures.end()) ? NULL : texIt->second;
-      const std::map<std::string, const BufferDescription *>::const_iterator bufIt = buffers.find(id);
+      const std::map<ResourceId, const BufferDescription *>::const_iterator bufIt =
+          buffers.find(r.resourceId);
       const BufferDescription *buf = (bufIt == buffers.end()) ? NULL : bufIt->second;
 
       ObjectOpen();

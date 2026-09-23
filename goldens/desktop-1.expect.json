@@ -6,24 +6,25 @@
     "zero-work": 0
   },
   "report": {
-    "events": 1186,
-    "passes": 47,
-    "resources": 493,
-    "findings": 63,
+    "events": 6994,
+    "passes": 104,
+    "resources": 4843,
+    "findings": 115,
     "detectors": 21
   },
   "findings": {
-    "all-zero-constant-block": 6,
-    "binding-kind-mismatch": 5,
+    "all-zero-constant-block": 22,
+    "binding-kind-mismatch": 25,
     "dead-allocation": 21,
-    "dead-compute": 8,
+    "dead-compute": 13,
     "depth-logic": 1,
-    "read-before-write": 4,
-    "unbound-root-parameter": 12,
+    "load-instead-of-clear": 1,
+    "read-before-write": 7,
+    "unbound-root-parameter": 19,
     "write-never-read": 6
   },
   "selfAb": {
-    "same": 47,
+    "same": 104,
     "removed": 0,
     "added": 0,
     "structureChanges": 0,
@@ -35,9 +36,9 @@
   },
   "document": "selfab.json",
   "why": [
-    "the report counts are the ones AGENTS.md pins (1186 events / 47 passes / 493 resources / 63 findings from 20 detectors), and 1,186 is every id with bound state up to the frame's last event rather than a count of draws",
+    "the report counts are the ones AGENTS.md pins (6994 events / 104 passes / 4843 resources / 115 findings from 21 detectors), and 6,994 is every id with bound state up to the frame's last event rather than a count of draws -- the frame's own 16,857 chunks and 599 draw/dispatch calls are counted elsewhere in its entry",
     "the file-side three fire nowhere: this frame's markers balance, every draw and dispatch sits inside one, and none of them is zero-work -- a label of 0 is the same claim as a label of 21, and it is the one that would have caught a detector that stopped looking",
-    "the findings histogram is what turns \"63 findings\" into \"63 findings of these eight kinds\": a detector that stopped firing while another fired more would keep the total and lose the fact",
-    "the self-A/B compares this bundle with itself, so every one of its nine numbers must be 0 (or `same` = 47 for the pass count): it is the net for the analyser, and the only check here that would catch `replaydiff` itself drifting"
+    "the findings histogram is what turns \"115 findings\" into \"115 findings of these nine kinds\": a detector that stopped firing while another fired more would keep the total and lose the fact, which is why unlabelled firings are mismatches too and why the count that moved most (`binding-kind-mismatch`, 5 -> 25) is a number rather than a surprise",
+    "the self-A/B compares this bundle with itself, so every one of its nine numbers must be 0 (or `same` = 104 for the pass count): it is the net for the analyser, and the only check here that would catch `replaydiff` itself drifting"
   ]
 }

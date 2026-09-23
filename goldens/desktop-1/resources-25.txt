@@ -1,7 +1,7 @@
 # resources <capture> 25
 # exit: 0
 --- stdout ---
-resources: 333 ids (303 with a descriptor, 234 named)
+resources: 4368 ids (4286 with a descriptor, 972 named)
 res13       unknown   -                                  3D Queue (GPU 0)
 res243      buffer    3040 B                             -
 res244      buffer    32768 B                            -
@@ -27,5 +27,5 @@ res299      unknown   -                                  GlobalSamplerHeap
 res300      unknown   -                                  FD3D12OfflineDescriptorManager
 res301      unknown   -                                  FD3D12OfflineDescriptorManager
 res302      unknown   -                                  FD3D12OfflineDescriptorManager
-total resources: 333 (shown 25)
+total resources: 4368 (shown 25)
 --- stderr ---

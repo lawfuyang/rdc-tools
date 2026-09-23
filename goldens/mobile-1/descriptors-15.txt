@@ -1,10 +1,22 @@
 # descriptors <capture> 15
 # exit: 0
 --- stdout ---
-descriptor heaps: 2, 2 written slots
+descriptor heaps: 3, 96 written slots
 heap298 GlobalResourceHeap
-  [138455   ] uav      res2266[NumCulledLightsGrid]
-heap300 FD3D12OfflineDescriptorManager
-  [533      ] uav      res2266[NumCulledLightsGrid]
-total slots: 2 (shown 2)
+  [230121   ] srv      res153558[Resource Allocator Under]
+  [230122   ] srv      res153558[Resource Allocator Under]
+  [230123   ] srv      res153558[Resource Allocator Under]
+  [230139   ] srv      res153558[Resource Allocator Under]
+  [230140   ] srv      res153558[Resource Allocator Under]
+  [230141   ] srv      res153558[Resource Allocator Under]
+  [230295   ] srv      res153558[Resource Allocator Under]
+  [230296   ] srv      res153558[Resource Allocator Under]
+  [230297   ] srv      res153558[Resource Allocator Under]
+  [230308   ] srv      res153558[Resource Allocator Under]
+  [230309   ] srv      res153558[Resource Allocator Under]
+  [230310   ] srv      res153558[Resource Allocator Under]
+  [230323   ] srv      res153558[Resource Allocator Under]
+  [230324   ] srv      res153558[Resource Allocator Under]
+  [230325   ] srv      res153558[Resource Allocator Under]
+total slots: 96 (shown 15)
 --- stderr ---

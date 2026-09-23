@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "The corpus the regression net is run over (REFERENCE §4.17). Two things are deliberately not in it. The captures themselves: hundreds of megabytes each, one command away, and not this repository's to keep. And the paths they live at: a capture is named here by a generic key (`desktop-1`, `desktop-2`, `mobile-1` -- platform, then size ascending) and identified by its SHA-256, while `captures.local.json`, which is not in git, says where this machine's copies are, and every transcript records the key rather than the path. What is checked in is what must hold about them: the transcripts under goldens/<key>/ and the labels in goldens/<key>.expect.json. `python src\\py\\rdc_analysis.py goldens --check` compares what is on this machine and reports the rest as not compared; `--write` refreshes the transcripts, and the diff of that is the point.",
+  "note": "The corpus the regression net is run over (REFERENCE §4.17). Two things are deliberately not in it. The captures themselves: hundreds of megabytes each, one command away, and not this repository's to keep. And the paths they live at: a capture is named here by a generic key (`desktop-1`, `desktop-2`, `mobile-1` -- platform, then size ascending) and identified by its SHA-256, while `captures.local.json`, which is not in git, says where this machine's copies are, and every transcript records the key rather than the path. What is checked in is what must hold about them: the transcripts under goldens/<key>/ and the labels in goldens/<key>.expect.json. `python src\\py\\rdc_analysis.py goldens --check` compares what is on this machine and reports the rest as not compared; `--write` refreshes the transcripts, and the diff of that is the point. A **key is stable**: a capture re-pinned against a different file keeps its key, and so does its place in the pair, so the ascending order above is the rule for a *new* key rather than a promise about the list -- which is why `desktop-1` is now larger than `desktop-2`.",
   "driver": {
     "what": "the driver's own text, pinned per capture: one `batch` session per capture over that capture's `driverCommands`, its output in goldens/<key>/driver.txt. The command line in each golden names the batch file it ran, and the driver's own `#=== <line>` markers say what that file held, so the batch file itself lives under build/ and is not committed",
     "invocation": "`argv` is how the driver is invoked, and it defaults to bin/replay_dump.exe relative to the root -- the built driver. A corpus of one's own may set it to another invocation (a second build, a script), which is also how the harness itself is tested with no GPU",
@@ -18,40 +18,42 @@
     "precondition": "both bundles dumped with `--with-images` (the check runs replaydiff --with-images, so a bundle written without images fails the image counts -- which is a true statement about that bundle rather than a bug in the check)",
     "expect": {
       "same": 10,
-      "removed": 2,
-      "added": 37,
+      "removed": 18,
+      "added": 94,
       "structureChanges": 10,
       "stateChanges": 10,
-      "constantsChanged": 55,
-      "shadersDifferent": 16,
-      "imagesCompared": 2,
-      "imagesNotCompared": 0
+      "constantsChanged": 51,
+      "shadersDifferent": 26,
+      "imagesCompared": 3,
+      "imagesNotCompared": 2
     },
     "why": [
-      "10 passes align by marker path or by the innermost name, and 16 shaders differ by hash: the two frames share the mobile base pass and the sky-atmosphere LUT chain, and nothing else (the desktop frame's ray-tracing, HZB, SSR, TAA and eye-adaptation passes exist on one side only).",
-      "55 constant blocks have a member whose value moved, which is the number to watch: it moves when the alignment moves, so a change in the alignment rule shows up here rather than only in a per-pass row.",
-      "2 image pairs are compared and neither is left to identity: the SceneColorRendering readback both bundles hold (49.077% of its pixels differ), and one pair that is identical byte for byte."
+      "10 passes align by marker path or by the innermost name, and 18 mobile-only and 94 desktop-only passes are the work each renderer does on its own. The aligned ones are the mobile post chain -- `SceneColorRendering`, `SLW::CopySceneWithoutWater > View0`, `SingleLayerWater > SingleLayerWaterRendering > WaterRenderActorOcea`, `LensFlareBlur 126x79`, `LensFlareCopyBloom 251x157`, `Tonemap 2003x1254 (PS GammaOnly=0)` and `FXAA(Quality=0) 2003x1254 PS` -- plus three that carry no name on the mobile side. The 94 are mostly the desktop renderer's own prepass chain (its markers name a Nanite-forced depth prepass the mobile renderer does not run).",
+      "51 constant blocks have a member whose value moved, and 26 shader hashes differ -- counted over every row the comparison has, added and removed passes included. Those are the numbers to watch: they move when the alignment moves, so a change in the alignment rule shows up here rather than only in a per-pass row.",
+      "the images are three numbers pretending to be two: 3 pairs are compared and 2 are counted as not compared, and the same two pairs are in both because one count is over *verdicts* (`identical`/`different`) and the other over *notes* (`not compared pixel by pixel: --image-detail is used up`). One pair was decoded and it differs: 99.900% of its 2,511,762 pixels, mean delta 13.695, worst 239, hash distance 2 -- the first aligned pass's readback, 2003x1254 on both sides. 7 further slots hold a readback on both sides at *different sizes* (2004x1256 against 1368x856, smaller still for the lens-flare blurs), which is counted in neither number because a pixel difference is not defined across sizes, and 3 slots hold one on the desktop side only."
     ]
   },
   "captures": [
     {
       "name": "desktop-1",
-      "bytes": 63975987,
-      "sha256": "6874db3c6981a6aac94ac07ae10432fe03ea7630a82f0b2bbb8ca5a78649b2ff",
+      "bytes": 759784792,
+      "sha256": "a9906c184dd9a599198ea3d9b1cc5dd222655a48d3c84e8187d93d7cc69a735a",
       "api": "D3D12",
-      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 2,122 chunks, 52 draw/dispatch calls, 131 markers): the desktop half of the pair, and the capture the report's pinned numbers come from (1186 events / 47 passes / 493 resources / 63 findings from 21 detectors, AGENTS.md)",
+      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 16,564 chunks, 599 draw/dispatch calls, 704 markers, a 1.54 GB stream): the desktop half of the pair, the capture the report's pinned numbers come from (6994 events / 104 passes / 4843 resources / 115 findings from 21 detectors, AGENTS.md), and the first in this corpus whose shaders carry their own debug data",
       "known": [
         "its markers balance, every draw and dispatch sits inside one, and no call is zero-work: the three file-side detectors fire nowhere in this frame",
-        "the report over its bundle finds 63 things; one of them has had its cause followed to the frame and written down here, which is what turns that one from an observation into a verdict -- the other 62 stay unproven (REFERENCE §4.17)",
+        "every shader it binds carries its own debug data -- 258 of 258 shader bindings have the `ILDB` part, where the two captures this key and `mobile-1` held before had none -- so `trace` **steps** here instead of refusing: `trace 2731 --vertex 0` runs 200 steps and names the source it is in (`BasePassVertexShader.dxil:3437`, `[Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]`)",
+        "a *pixel* step at the same event is refused, and the refusal is the engine's own reason: `no trace for pixel 640,360 at eid 2731 (ps, res166972): sourceDebugInfo is 1 / its shader loading log says: Found debug data in the shader` -- the debug data is there and it is the *invocation* the engine cannot run, because no fragment at that coordinate passed the depth test. The batch's exit code is **1** with a working trace inside it (the code is the worst line's, not the last one's), and both texts are pinned",
+        "the report over its bundle finds 115 things; one of them has had its cause followed to the frame and written down here, which is what turns that one from an observation into a verdict -- the other 114 stay unproven (REFERENCE §4.17)",
         {
           "detector": "dead-allocation",
           "what": "created and never used by any call",
           "evidence": "Nanite.VisibleClustersSWHW",
-          "cause": "allocated for a path this frame does not run: the engine's own usage list for it is empty (usageCount 0, no first or last event), and the stream names the id only in its creation, its SetName and the capture's InitialContents section -- no call binds, copies or clears it. Two independent paths agree that nothing in the frame touches it, so the 48 MB it holds is allocated and unused",
+          "cause": "allocated for a path this frame does not run: the engine's own usage list for it is empty (usageCount 0, no first or last event), and what the stream names the id in is five chunks of which not one is a call -- its creation (Device_CreatePlacedResource), its SetName, two InitialContents blocks and the capture's CaptureBegin. Two independent paths agree that nothing in the frame touches it, so the 48 MB it holds is allocated and unused",
           "verdict": "confirmed"
         },
-        "1186 ids carry bound state, which is every id up to the frame's last event (1305) -- not a claim about how many are draws",
-        "the driver batch exits **1** on purpose: its last command is `trace --pixel`, and on this capture the answer is a *refusal* (the shaders carry no debug data) -- the refusal's exit code and its wording are part of what the golden pins, so a run that suddenly succeeds is a change worth reading"
+        "6994 ids carry bound state, which is every id up to the frame's last event -- not a claim about how many are draws (the frame's own 16,857 chunks and 599 calls are the numbers in its entry)",
+        "its targets are the larger side of the pair (2004x1256 against the mobile frame's 1368x856), which is why the pair counts 7 image slots as compared across sizes rather than by pixels"
       ],
       "driverCommands": [
         ["info"],
@@ -60,9 +62,10 @@
         ["debug"],
         ["formats"],
         ["crosscheck"],
-        ["state", "304"],
-        ["shaders", "304"],
-        ["trace", "304", "--pixel", "640,360"]
+        ["state", "2731"],
+        ["shaders", "2731"],
+        ["trace", "2731", "--pixel", "640,360"],
+        ["trace", "2731", "--vertex", "0"]
       ],
       "bundle": "build/goldens/desktop-1",
       "commands": [
@@ -81,22 +84,17 @@
     },
     {
       "name": "mobile-1",
-      "bytes": 35865513,
-      "sha256": "3e536c02e0c94d4ad1f9be83eb3414ce3af56cadbe577c54dbf6981fdd907ff0",
+      "bytes": 809383588,
+      "sha256": "f127bc20474834b09546126049c2d4aa309b7a657cee79047770216f249418ec",
       "api": "D3D12",
-      "what": "an Unreal Engine mobile (Android) frame: the smallest capture here (35.9 MB, 723 chunks, 24 draw/dispatch calls, 57 markers), which is why it is the one to try a new command on first, and the mobile half of the pair",
+      "what": "an Unreal Engine mobile frame (RenderDoc 1.46, 11,923 chunks, 238 draw/dispatch calls, 287 markers, a 1.55 GB stream): the mobile half of the pair, and the frame whose markers name the mobile renderer's own passes (MobileSceneRender, SceneColorRendering, MobileBasePass, the lens-flare chain and Tonemap)",
       "known": [
-        "its markers balance, every draw and dispatch sits inside one, and no call is zero-work",
+        "its markers balance, every draw and dispatch sits inside one, and no call is zero-work: the three file-side detectors fire nowhere in this frame either",
         "its marker tree nests six deep and its pass names are the mobile renderer's own (MobileSceneRender, MobileBasePass, the sky-atmosphere LUT chain)",
-        "of its bundle's 35 findings the 14 unbound root parameters have their cause followed and written down here, which turns those from observations into verdicts; the other 21 stay unproven (REFERENCE §4.17)",
-        {
-          "detector": "unbound-root-parameter",
-          "what": "the shader reads a constant block at",
-          "evidence": "",
-          "cause": "the reflection and the state's root parameters come from different namespaces at these events. This frame records graphics and compute on one command list (24563) and the state document reports a single `rootSignature`; at the events the finding names that is the compute signature (res2240), whose parameters are unset until the compute list sets them (chunks 261..268, before its first dispatch at 270) and which the engine reports set from its first compute event (119). So a cs shader's block is unset only in a state between dispatches; a ps or vs shader's block is declared by the *graphics* signature instead (res2286..res2293, root CBVs at b0..b5 s0) and set with SetGraphicsRootConstantBufferView before each draw (rp4..rp13; e.g. chunks 443..451 then the draw at 452). No call runs with any of these blocks unbound",
-          "verdict": "not a defect"
-        },
-        "the driver batch exits **1** on purpose: its last command is `trace --pixel`, and on this capture the answer is a *refusal* (the shaders carry no debug data) -- the refusal's exit code and its wording are part of what the golden pins, so a run that suddenly succeeds is a change worth reading"
+        "every shader it binds carries its own debug data (196 of 196 shader bindings, the `ILDB` part), so a step succeeds here too; the pixel step is refused for the reason given in `desktop-1`'s third note, with this frame's own ids in it (`no trace for pixel 640,360 at eid 692 (ps, res1149844)`, `Found debug data in the shader`)",
+        "the report over its bundle finds 87 things, and **none of them has had its cause followed on these bytes yet**: the cause this key used to carry (`unbound-root-parameter`, the reflection-and-root-parameters namespace question) was established on the file it held before, and identity here is the SHA-256, so it does not carry over -- `desktop-1`'s `dead-allocation` verdict is the one verdict in this corpus re-established on the current bytes (REFERENCE §4.17)",
+        "2972 ids carry bound state, which is every id up to the frame's last event -- not a claim about how many are draws",
+        "it is the *larger* file of the pair (809.4 MB against 759.8 MB) while doing the smaller amount of work (238 calls against 599), and its stream is the longest in this corpus"
       ],
       "driverCommands": [
         ["info"],
@@ -105,9 +103,10 @@
         ["debug"],
         ["formats"],
         ["crosscheck"],
-        ["state", "289"],
-        ["shaders", "289"],
-        ["trace", "289", "--pixel", "640,360"]
+        ["state", "692"],
+        ["shaders", "692"],
+        ["trace", "692", "--pixel", "640,360"],
+        ["trace", "692", "--vertex", "0"]
       ],
       "bundle": "build/goldens/mobile-1",
       "commands": [

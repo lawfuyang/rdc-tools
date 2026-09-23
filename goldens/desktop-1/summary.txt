@@ -1,170 +1,170 @@
 # summary <capture>
 # exit: 0
 --- stdout ---
-chunk count        : 2122
-draw/dispatch calls: 52
-markers            : 131
+chunk count        : 16564
+draw/dispatch calls: 599
+markers            : 704
 --- chunk type histogram ---
-  SetName                                      234
-  InitialContents                              197
-  Device_CreatePlacedResource                  153
-  List_EndQuery                                150
-  PushMarker                                   131
-  PopMarker                                    131
-  CreateAS                                     92
-  List_ResourceBarrier                         63
-  List_SetGraphicsRootConstantBufferView       61
-  Device_CreateCommittedResource               58
-  Device_CopyDescriptors                       57
-  List_DiscardResource                         48
-  List_Reset                                   45
-  List_Close                                   45
-  List_ResolveQueryData                        42
-  Queue_Signal                                 42
-  List_SetComputeRootDescriptorTable           41
-  Device_CreatePipelineState                   37
-  List_SetPipelineState                        37
-  List_SetGraphicsRootDescriptorTable          33
-  List_SetComputeRootConstantBufferView        27
-  Queue_Wait                                   24
-  List_CopyBufferRegion                        24
-  Device_CreateRootSignature                   21
-  List_SetDescriptorHeaps                      21
-  Queue_ExecuteCommandLists                    21
-  List_Dispatch                                21
-  List_IASetVertexBuffers                      21
-  List_DrawIndexedInstanced                    18
-  List_SetComputeRootSignature                 16
-  List_OMSetRenderTargets                      16
-  List_BeginQuery                              15
-  List_RSSetViewports                          15
-  List_RSSetScissorRects                       14
-  List_SetGraphicsRootSignature                12
-  List_IASetIndexBuffer                        10
-  List_ExecuteIndirect                         10
-  List_ClearRenderTargetView                   9
-  CoherentMapWrite                             8
-  Device_CreateCommandAllocator                7
+  InitialContents                              3892
+  CreateAS                                     3389
+  List_SetGraphicsRootConstantBufferView       1265
+  SetName                                      972
+  Device_CreatePlacedResource                  776
+  PushMarker                                   704
+  PopMarker                                    704
+  List_SetGraphicsRootDescriptorTable          630
+  Device_CopyDescriptors                       578
+  List_IASetVertexBuffers                      519
+  List_IASetIndexBuffer                        473
+  List_ExecuteIndirect                         293
+  List_DrawIndexedInstanced                    262
+  List_SetPipelineState                        213
+  List_EndQuery                                198
+  Device_CreatePipelineState                   144
+  Device_CreateCommittedResource               121
+  List_ResourceBarrier                         115
+  List_SetGraphicsRootSignature                98
+  List_DiscardResource                         84
+  Device_CreateShaderResourceView              67
+  List_ResolveQueryData                        65
+  List_Reset                                   64
+  List_Close                                   64
+  List_OMSetRenderTargets                      59
+  List_SetComputeRootDescriptorTable           59
+  Queue_Signal                                 54
+  List_SetComputeRootConstantBufferView        52
+  Device_CreateRootSignature                   43
+  List_RSSetViewports                          43
+  List_CopyBufferRegion                        41
+  List_RSSetScissorRects                       41
+  List_OMSetStencilRef                         38
+  List_Dispatch                                32
+  Device_CreateHeap                            30
+  Device_CreateRenderTargetView                30
+  List_SetDescriptorHeaps                      29
+  Queue_Wait                                   29
+  Queue_ExecuteCommandLists                    27
+  List_BeginQuery                              25
 --- markers in order ---
-  #852    PushMarker       FRDGBuilder::Execute
-  #925    PushMarker       ClearGPUMessageBuffer
-  #950    PushMarker       VirtualTextureClear
-  #956    PushMarker       ShaderPrint::UploadParameters
-  #962    PushMarker       Scene
-  #963    PushMarker       Niagara::GPUProfiler_BeginFrame
-  #967    PushMarker       AccessModePass[Graphics] (Textures: 0, Buffers: 1)
-  #973    PushMarker       Scene
-  #974    PushMarker       AccessModePass[AsyncCompute] (Textures: 0, Buffers: 1)
-  #1019   PushMarker       FFXSystem::PreRender
-  #1021   PushMarker       GPUParticles_PreRender
-  #1024   PushMarker       FGPUSortManager::OnPreRender
-  #1027   PushMarker       BuildRenderingCommandsDeferred(Culling=On)
-  #1028   PushMarker       ClearBuffer(InstanceCulling.Compaction.BlockInstanceCounts Size=4bytes)
-  #1035   PushMarker       ClearIndirectArgInstanceCount
-  #1043   PushMarker       CullInstances(Generic)
-  #1054   PushMarker       CullInstances(UnCulled)
-  #1064   PushMarker       Instance Compaction Phase 1
-  #1066   PushMarker       Instance Compaction Phase 2
-  #1069   PushMarker       ClearDepthStencil (SceneDepthZ)
-  #1074   PushMarker       PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite)
-  #1075   PushMarker       DepthPassParallel
-  #1077   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
-  #1100   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
-  #1105   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
-  #1110   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
-  #1115   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere
-  #1120   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere 5 instances
-  #1131   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Cube 4 instances
-  #1137   PushMarker       EditorPrimitives
-  #1140   PushMarker       ComputeLightGrid
-  #1141   PushMarker       CullLights 22x14x8 NumLights 0 NumCaptures 0
-  #1142   PushMarker       ClearBuffer(StartOffsetGrid Size=40960bytes)
-  #1149   PushMarker       ClearBuffer(NextCulledLightLink Size=4bytes)
-  #1154   PushMarker       ClearBuffer(NextCulledLightData Size=4bytes)
-  #1159   PushMarker       ClearBuffer(NumCulledLightsGrid Size=81920bytes)
-  #1164   PushMarker       LightGridInject:LinkedList
-  #1177   PushMarker       CompactLinks
-  #1192   PushMarker       LightFunctionAtlas Generation
-  #1208   PushMarker       BuildHZB(ViewId=0)
-  #1209   PushMarker       BuildHZB
-  #1210   PushMarker       ReduceHZB(mips=[0;3] Furthest) 1024x512
-  #1224   PushMarker       ReduceHZB(mips=[4;7] Furthest) 64x32
-  #1233   PushMarker       ReduceHZB(mips=[8;9] Furthest) 4x2
-  #1245   PushMarker       SkyAtmosphereLUTs
-  #1246   PushMarker       TransmittanceLut
-  #1257   PushMarker       MultiScatteringLut
-  #1270   PushMarker       DistantSkyLightLut
-  #1284   PushMarker       SkyViewLut
-  #1292   PushMarker       CameraVolumeLut
-  #1316   PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
-  #1322   PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
-  #1329   PushMarker       CommitRayTracingSkinnedGeometryUpdates
-  #1331   PushMarker       BuildTLASInstanceBuffer
-  #1349   PushMarker       RayTracingDynamicUpdate
-  #1354   PushMarker       RayTracingUpdate
-  #1361   PushMarker       RayTracingEndUpdate
-  #1412   PushMarker       GBufferClear
-  #1420   PushMarker       BasePass
-  #1421   PushMarker       BasePassParallel
-  #1425   PushMarker       /Game/Developers/rogerfylaw/M_Red.M_Red Cube
-  #1451   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #1464   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #1469   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #1474   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #1479   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #1484   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere 5 instances
-  #1494   PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube 2 instances
-  #1503   PushMarker       /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
-  #1511   PushMarker       EditorPrimitives
-  #1512   PushMarker       SDPG_World
-  #1515   PushMarker       SkyPassParallel
-  #1541   PushMarker       ShadowDepths
-  #1542   PushMarker       BuildRenderingCommandsDeferred(Culling=On)
-  #1543   PushMarker       ClearBuffer(InstanceCulling.Compaction.BlockInstanceCounts Size=4bytes)
-  #1551   PushMarker       ClearIndirectArgInstanceCount
-  #1553   PushMarker       CullInstances(Generic)
-  #1560   PushMarker       CullInstances(UnCulled)
-  #1562   PushMarker       Instance Compaction Phase 1
-  #1564   PushMarker       Instance Compaction Phase 2
-  #1568   PushMarker       DispatchToRHI
-  #1594   PushMarker       ClearStencil (SceneDepthZ)
-  #1597   PushMarker       WaitForRayTracingScene
-  #1599   PushMarker       ClearRenderTarget(DeferredShadowMaskTexture, slice 0, mip 0) 2004x1256 ClearAction
-  #1602   PushMarker       ClearTranslucencyLightingVolumeCompute 64
-  #1611   PushMarker       DitheredLODFadingOutMask
-  #1614   PushMarker       FilterTranslucentVolume 64x64x64 Cascades:2
-  #1615   PushMarker       Cascade0
-  #1635   PushMarker       Cascade1
-  #1649   PushMarker       ReflectionIndirect
-  #1650   PushMarker       ScreenSpaceReflections(Quality=2)
-  #1651   PushMarker       SSR RayMarch(Quality=2 RayPerPixel=1) 1368x856
-  #1672   PushMarker       ReflectionEnvironmentAndSky(1368x856,SubstrateMat=Off)
-  #1692   PushMarker       SkyAtmosphere
-  #1712   PushMarker       SetSceneTexturesUniformBuffer
-  #1716   PushMarker       FFXSystem::PostRenderOpaque
-  #1718   PushMarker       GPUParticles_PostRenderOpaque
-  #1721   PushMarker       AsyncGpuTraceHelper::PostRenderOpaque
-  #1723   PushMarker       NiagaraUpdateCollisionGroupsMap
-  #1726   PushMarker       Niagara::PostRenderFinish
-  #1728   PushMarker       UnsetSceneTexturesUniformBuffer
-  #1730   PushMarker       FGPUSortManager::OnPostRenderOpaque
-  #1754   PushMarker       Translucency
-  #1755   PushMarker       Translucency(BeforeDistortion Parallel) 1368x856
-  #1759   PushMarker       ClearRenderTarget(Translucency.AfterDOF.Color, slice 0, mip 0) 2004x1256 ClearAction
-  #1764   PushMarker       Translucency(AfterDOF Parallel) 1368x856
-  #1772   PushMarker       VirtualTextureFeedbackCopy
-  #1779   PushMarker       PostProcessing
-  #1780   PushMarker       ComposeTranslucencyToNewSceneColor(AfterDOF) 1368x856 -> 1368x856
-  #1806   PushMarker       TAA(MainUpsampling Quality=High) 1368x856 -> 2003x1254
-  #1821   PushMarker       Downsample(PostProcessing.SceneColor.HalfRes Quality=Bilinear PS) 2003x1254 -> 1002x627
-  #1834   PushMarker       SceneDownsample
-  #1835   PushMarker       Downsample(Scene(1/4) Quality=High PS) 1002x627 -> 501x314
-  #1846   PushMarker       BasicEyeAdaptationSetup (PS) 501x314
-  #1862   PushMarker       Downsample(Scene(1/8) Quality=High PS) 501x314 -> 251x157
-  #1875   PushMarker       Downsample(Scene(1/16) Quality=High PS) 251x157 -> 126x79
-  #1887   PushMarker       Downsample(Scene(1/32) Quality=High PS) 126x79 -> 63x40
-  #1897   PushMarker       Downsample(Scene(1/64) Quality=High PS) 63x40 -> 32x20
-  #1910   PushMarker       BasicEyeAdaptation (CS)
-  #1922   PushMarker       CopyEyeAdaptationToTexture (CS)
-  ... 11 more
+  #9467   PushMarker       FRDGBuilder::Execute
+  #9652   PushMarker       MI_fx_Bubble NS_fx_Bubble 20 instances
+  #9655   PushMarker       MI_HappyLand_Prop_Balloon_C_01 SM_HappyLand_MusicBalloon_PropMerge
+  #9657   PushMarker       ClearGPUMessageBuffer
+  #9745   PushMarker       MI_HappyLand_Island_Tree_Banana_02 SM_HappyLand_Island_Tree_Banana_02
+  #9750   PushMarker       VirtualTextureClear
+  #9751   PushMarker       /Game/Arts_Mobile/FX/Material/M_fx_Petal_ygw_05.M_fx_Petal_ygw_05 NS_fx_Scene_Petal 22 instances
+  #9761   PushMarker       MI_HappyLand_Island_Common_Grass_01_vista SM_HappyLand_Island_Common_Grass_01
+  #9772   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_03
+  #9783   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_10
+  #9798   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_03
+  #9808   PushMarker       ShaderPrint::UploadParameters
+  #9811   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_10
+  #9821   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_06
+  #9823   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SK_IslandNPC_004a
+  #9838   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_05
+  #9843   PushMarker       Scene
+  #9848   PushMarker       Niagara::GPUProfiler_BeginFrame
+  #9849   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_05
+  #9860   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_03
+  #9870   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_10
+  #9872   PushMarker       AccessModePass[Graphics] (Textures: 0, Buffers: 1)
+  #9888   PushMarker       MI_HappyLand_Island_Tree_Banana_02 SM_HappyLand_Island_Tree_Banana_03
+  #9899   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_06
+  #9909   PushMarker       MI_HappyLand_Island_Tree_Banana_02 SM_HappyLand_Island_Tree_Banana_02
+  #9921   PushMarker       MI_HappyLand_Island_Tree_NewBanian_04 SM_HappyLand_Island_Tree_NewBanian_04
+  #9933   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_StreetRoad_test_07
+  #9949   PushMarker       Scene
+  #9951   PushMarker       AccessModePass[AsyncCompute] (Textures: 0, Buffers: 1)
+  #9956   PushMarker       MI_HappyLand_Island_Tree_Cordyline_01_Opaque SM_HappyLand_Island_Tree_Cordyline_01
+  #9961   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_RockA_S_01
+  #9972   PushMarker       MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01
+  #9973   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Rock_Sea_08 2 instances
+  #9982   PushMarker       MI_HappyLand_Island_Tree_Cordyline_01 SM_HappyLand_Island_Tree_Cordyline_01
+  #9985   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_guardrail_01
+  #10002  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_RockC_S_01
+  #10003  PushMarker       MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01
+  #10016  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_RockA_S_01
+  #10018  PushMarker       FFXSystem::PreRender
+  #10036  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Rock_Sea_05
+  #10039  PushMarker       GPUParticles_PreRender
+  #10044  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Wharf_01
+  #10046  PushMarker       MI_HappyLand_Island_Tree_Root_06 SM_HappyLand_Island_Tree_Root_06
+  #10057  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_guardrail_01
+  #10067  PushMarker       FGPUSortManager::OnPreRender
+  #10070  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_RockC_S_01
+  #10075  PushMarker       GPUScene.UploadDynamicPrimitiveShaderDataForView
+  #10081  PushMarker       GPUScene::SetInstancePrimitiveIdCS
+  #10086  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Rock_Sea_02
+  #10096  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_RockB_M_01
+  #10108  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_guardrail_01 2 instances
+  #10117  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Rock_Sea_08
+  #10126  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Rock_Sea_05
+  #10139  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Wharf_01
+  #10152  PushMarker       MI_HappyLand_Island_Tree_Cordyline_01_Opaque SM_HappyLand_Island_Tree_Cordyline_01
+  #10172  PushMarker       MI_HappyLand_Rock_Sea_08 SM_HappyLand_Rock_Sea_08
+  #10188  PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02
+  #10205  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Wharf_01
+  #10206  PushMarker       MID_MI_fx_FountainWater_Column_bp_0 SM_fx_Water_ygw_04
+  #10210  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02 2 instances
+  #10228  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02
+  #10243  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_L_02 2 instances
+  #10252  PushMarker       UpdateGPUScene NumPrimitiveDataUploads 1
+  #10254  PushMarker       ScatterUpload[0] (Resource: GPUScene.PrimitiveData, Offset: 0)
+  #10255  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_CommentBoard
+  #10264  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Sailboats_A_02
+  #10272  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_CommentBoard
+  #10282  PushMarker       MI_HappyLand_Rock_Sea_05 SM_HappyLand_Rock_Sea_05
+  #10297  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Rock_Sea_04 2 instances
+  #10302  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_Ocean_Low_Far
+  #10307  PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 2 instances
+  #10315  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Cruise_B_01
+  #10319  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_spittoon_02
+  #10334  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02 2 instances
+  #10352  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02 2 instances
+  #10355  PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02
+  #10362  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_spittoon_01
+  #10363  PushMarker       MI_HappyLand_Rock_Sea_02 SM_HappyLand_Rock_Sea_02
+  #10369  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02
+  #10373  PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 2 instances
+  #10388  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02
+  #10394  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Furniturestoreglass_01
+  #10399  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_02
+  #10411  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Logo_01
+  #10427  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_L_02 2 instances
+  #10434  PushMarker       MI_HappyLand_Rock_Sea_08 SM_HappyLand_Rock_Sea_08 2 instances
+  #10439  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Store_Televisions_02
+  #10441  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_L_02 2 instances
+  #10449  PushMarker       MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_01
+  #10452  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_L_01 3 instances
+  #10470  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_L_01 2 instances
+  #10484  PushMarker       GPU Writer Delegates
+  #10485  PushMarker       MI_HappyLand_Rock_Sea_05 SM_HappyLand_Rock_Sea_05
+  #10486  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_CommentBoard
+  #10491  PushMarker       Niagara.UpdateMeshParticleInstances (22 Instances)
+  #10493  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_M_02 2 instances
+  #10500  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_Ocean_Low_Far
+  #10502  PushMarker       MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_02 2 instances
+  #10503  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_CommentBoard
+  #10515  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_CommentBoard
+  #10517  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Mountain_04
+  #10521  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Furniturestore_01
+  #10530  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Totem_A_01
+  #10533  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_Ocean_Low_Far
+  #10540  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Floortile_01
+  #10546  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Totem_A_01 2 instances
+  #10551  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Bonsai_01
+  #10560  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Arch_C_01
+  #10561  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Floortile_01
+  #10563  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Floortile_04
+  #10571  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Arch_C_01
+  #10577  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_spittoon_02
+  #10581  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_FishGuide
+  #10582  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Floortile_04
+  #10592  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_spittoon_01
+  #10595  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_Slogan_01
+  #10598  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_spittoon_02
+  #10607  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_Vertical_01
+  #10610  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_Vertical_01
+  #10614  PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Prop_spittoon_01
+  ... 584 more
 --- stderr ---

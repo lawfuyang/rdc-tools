@@ -1,75 +1,89 @@
 # memory <capture> 8
 # exit: 0
 --- stdout ---
-memory: 304 resource(s) referenced, 303 created by this capture, 2122 chunk(s) walked
+memory: 4287 resource(s) referenced, 4286 created by this capture, 16564 chunk(s) walked
 by placement
-  committed    58  ~216.3 MB   
-  placed      153  ~260.6 MB    in 8 heap(s) the capture creates (232.0 MB)
+  committed   121  ~887.3 MB   
+  placed      776  ~807.2 MB    in 33 heap(s) the capture creates (956.0 MB)
   reserved      0  0.0 MB      
   external      1  (referenced, not created here: a capture records the frame, and UE allocates at startup)
   (a `~` figure counts a texture at 4 bytes a pixel -- a capture records no texture bytes -- so it need not agree with the heap sizes beside it)
 by kind
-  buffer      149  311.3 MB   
-  texture2d    43  ~157.4 MB    (~ = pixels x 4: a capture records no texture bytes)
-  blas         86  9.0 MB     
-  texture3d    19  ~8.2 MB      (~ = pixels x 4: a capture records no texture bytes)
-  tlas          6  0.0 MB     
+  buffer      489  1015.5 MB  
+  texture2d   396  ~670.8 MB    (~ = pixels x 4: a capture records no texture bytes)
+  blas       3383  212.7 MB   
+  texture3d    12  ~8.1 MB      (~ = pixels x 4: a capture records no texture bytes)
+  tlas          6  5.8 MB     
 never read
-  52 resource(s), ~137.9 MB: written with nothing afterwards reading them, and 118 table binding(s) here resolve to nothing (the capture never wrote that heap slot): a resource read only through one of those looks unread
-    res60857[SceneColor]: last write #1818 (barrier)
-    res60858[GBufferA]: last write #1991 (barrier)
-    res60859[GBufferB]: last write #1991 (barrier)
-    res60860[GBufferC]: last write #1991 (barrier)
-    res60861[GBufferD]: last write #1991 (barrier)
-    res60862[GBufferE]: last write #1508 (rtv)
-    res61312[DeferredShadowMaskTexture]: last write #1600 (clear)
-    res61321[ScreenSpaceReflections]: last write #1991 (barrier)
-  216 resource(s), ~274.3 MB: created here and touched by no decoded chunk
-    res80125[Nanite.VisibleClustersSWHW]: created #610, placed
-    res80096[Nanite.MainAndPostNodesAndClusterBatches]: created #606, placed
-    res409[Resource Allocator Underlying Buffer]: created #111, committed
-    res80234[Resource Allocator Underlying Buffer]: created #622, committed
-    res275[m_ReadbackBuffer]: created #11, committed
-    res2255[FSlateFontTextureRHIResource]: created #156, placed
-    res60838[NaniteRayTracing.AuxiliaryDataBuffer]: created #270, placed
-    res2206[HitProxyCPUTexture]: created #133, committed
+  85 resource(s), ~121.8 MB: written with nothing afterwards reading them, and 1113 table binding(s) here resolve to nothing (the capture never wrote that heap slot): a resource read only through one of those looks unread
+    res2195[BufferedRT]: last write #16448 (barrier)
+    res2263[SceneDepthZ]: last write #15601 (dsv)
+    res131004[SceneVelocity]: last write #14467 (clear)
+    res131012[GBufferB]: last write #16432 (barrier)
+    res244046[SceneColor]: last write #15951 (barrier)
+    res244047[GBufferA]: last write #16432 (barrier)
+    res244048[GBufferC]: last write #16432 (barrier)
+    res244050[GBufferE]: last write #15709 (rtv)
+  4132 resource(s), ~1285.6 MB: created here and touched by no decoded chunk
+    res92260[/Game/Arts_Mobile/Environment/HappyLand/]: created #814, placed
+    res1096331[Nanite.VisibleClustersSWHW]: created #5227, placed
+    res1096291[Nanite.MainAndPostNodesAndClusterBatches]: created #5225, placed
+    res409[Resource Allocator Underlying Buffer]: created #110, committed
+    res2239[Resource Allocator Underlying Buffer]: created #196, committed
+    res92222[T_FFTNormalTexArray1]: created #808, placed
+    res143727[Resource Allocator Underlying Buffer]: created #905, committed
+    res155781[Resource Allocator Underlying Buffer]: created #913, committed
 aliasing
-  31 aliasing barrier(s) hand one piece of memory over, in order:
-    #926 res61044 -> res60843[SceneDepthZ]
-    #1178 res60848[NextCulledLightLink] -> res60864[Substrate.DummyWritableTexture]
-    #1195 res60853[CulledLightLinks] -> res61308[LightFunction.Atlas]
-    #1195 res60853[CulledLightLinks] -> res61309[HZBFurthest]
-    #1195 res60846[StartOffsetGrid] -> res61311[FRayTracingScene::ScratchBuffer]
-    #1195 res60853[CulledLightLinks] -> res61310[FRayTracingScene::InstanceBuffer]
-    #1423 res61311[FRayTracingScene::ScratchBuffer] -> res60863[Substrate.DummyWritableTexture]
-    #1554 res60864[Substrate.DummyWritableTexture] -> res61328[OIT.SampleData]
-  heap2263: 63 resource(s), ~215.3 MB in it, ~185.9 MB live at once (peak at #1187), so up to ~29.4 MB of it could be shared
+  82 aliasing barrier(s) hand one piece of memory over, in order:
+    #9665 res208898 -> res2263[SceneDepthZ]
+    #9665 res712886[SLW.DepthPrepassOutput] -> res713078[SLW.DepthPrepassOutput]
+    #14532 res6916[NextCulledLightLink] -> res131017[Substrate.DummyWritableTexture]
+    #14549 res6920[CulledLightLinks] -> res131007[LightFunction.Atlas]
+    #14549 res6918[NextCulledLightData] -> res634458[Dummy-OutDepthBuffer]
+    #14549 res6920[CulledLightLinks] -> res610878[FRayTracingScene::InstanceBuffer]
+    #14549 res6914[StartOffsetGrid] -> res1084714[DynamicGeometry.BLASSharedScratchBuffer]
+    #14731 res1111089[FRayTracingScene::ScratchBuffer] -> res244046[SceneColor]
+  heap2259: 157 resource(s), ~222.8 MB in it, ~180.0 MB live at once (peak at #14441), so up to ~42.8 MB of it could be shared
     disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
-      res60862[GBufferE] #934..#1508 and res61324[Translucency.AfterDOF.Color] #1761..#1818: ~9.6 MB
-      res60862[GBufferE] #934..#1508 and res61329[PostDOFTranslucency.SceneColor] #1785..#1831: ~9.6 MB
-      res61312[DeferredShadowMaskTexture] #935..#1600 and res61324[Translucency.AfterDOF.Color] #1761..#1818: ~9.6 MB
-      res61312[DeferredShadowMaskTexture] #935..#1600 and res61329[PostDOFTranslucency.SceneColor] #1785..#1831: ~9.6 MB
-      res60853[CulledLightLinks] #1187..#1195 and res61324[Translucency.AfterDOF.Color] #1761..#1818: ~2.5 MB
-      res60853[CulledLightLinks] #1187..#1195 and res61329[PostDOFTranslucency.SceneColor] #1785..#1831: ~2.5 MB
-      res60853[CulledLightLinks] #1187..#1195 and res61330[PostProcessing.SceneColor.HalfRes] #1786..#1847: ~2.4 MB
-      res60862[GBufferE] #934..#1508 and res61330[PostProcessing.SceneColor.HalfRes] #1786..#1847: ~2.4 MB
-  heap304: 78 resource(s), 23.3 MB in it, 22.6 MB live at once (peak at #1096), so up to 0.7 MB of it could be shared
+      res2263[SceneDepthZ] #9668..#15601 and res712886[SLW.DepthPrepassOutput] #9482..#9482: ~4.5 MB
+      res2263[SceneDepthZ] #9668..#15601 and res712901[SLW.SceneDepthWithout] #15614..#16432: ~4.5 MB
+      res2263[SceneDepthZ] #9668..#15601 and res712904[Translucency.AfterDOF.Color] #15804..#15951: ~4.5 MB
+      res2263[SceneDepthZ] #9668..#15601 and res1122814[PostDOFTranslucency.SceneColor] #15922..#16393: ~4.5 MB
+      res2263[SceneDepthZ] #9668..#15601 and res1122845[Tonemap] #16299..#16416: ~4.5 MB
+      res2263[SceneDepthZ] #9668..#15601 and res1122846[FXAA] #16394..#16533: ~4.5 MB
+      res131004[SceneVelocity] #9677..#14467 and res712886[SLW.DepthPrepassOutput] #9482..#9482: ~4.5 MB
+      res131004[SceneVelocity] #9677..#14467 and res712901[SLW.SceneDepthWithout] #15614..#16432: ~4.5 MB
+  heap160509: 147 resource(s), 25.8 MB in it, 25.4 MB live at once (peak at #11144), so up to 0.5 MB of it could be shared
     disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60795[GPUScene.PrimitiveData] #1096..#1523: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60796[GPUScene.InstanceSceneData] #1096..#1523: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60797[GPUScene.InstancePayloadData] #1096..#1523: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60804[InstanceCulling.Compaction.BlockInstance] #1033..#1033: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60805[InstanceCullingLoadBalancer.Items] #884..#1371: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60844[InstanceCulling.DrawCommandDescs] #877..#1371: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60845[InstanceCulling.ViewIds] #878..#1371: 0.1 MB
-      res2253[EyeAdaptationBuffer] #1929..#2006 and res60850[InstanceCulling.BatchInds] #882..#1371: 0.1 MB
-  heap325: 3 resource(s), ~0.0 MB in it, ~0.0 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
-  heap2150: 5 resource(s), ~0.0 MB in it, ~0.0 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
-  4 heap(s) hold one resource each (~22.0 MB): nothing in them to share
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res295698[DUMMYLocalFogVolumeGPUInstanceDataBuffer] #9602..#9602: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res295699[LightFunctionAtlasLightInfoData] #9601..#9601: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res295725[InstanceCulling.Compaction.BlockInstance] #14942..#14942: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res295733[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9605..#9605: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res295734[DUMMYLocalFogVolumeGPUInstanceDataBuffer] #9604..#9604: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res295741[InstanceCulling.Compaction.BlockInstance] #11144..#11144: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res359860[InstanceCulling.InstanceIdOffsetBuffer] #9611..#16417: 0.1 MB
+      res295697[DUMMYLocalFogVolumeGPUInstanceCullingDat] #9603..#9603 and res359865[InstanceCulling.BatchInds] #9612..#14991: 0.1 MB
+  heap304: 145 resource(s), 25.9 MB in it, 25.6 MB live at once (peak at #14413), so up to 0.3 MB of it could be shared
+    disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res245140[InstanceCullingLoadBalancer.Items] #9597..#14413: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res261098[InstanceCullingLoadBalancer.Batches] #9596..#14413: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res276275[InstanceCullingLoadBalancer.Items] #9585..#14413: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res276276[InstanceCulling.Compaction.TempInstanceI] #14413..#14413: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res284988[InstanceCullingLoadBalancer.Items] #9614..#14991: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res296612[InstanceCulling.BatchInds] #9592..#14413: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res349762[InstanceCullingLoadBalancer.Batches] #9616..#14991: 0.1 MB
+      res3222[EyeAdaptationBuffer] #16052..#16448 and res351063[InstanceCulling.BatchInds] #9615..#14991: 0.1 MB
+  heap325: 16 resource(s), ~0.1 MB in it, ~0.1 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  heap805: 2 resource(s), ~1.4 MB in it, ~1.4 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  heap1201: 4 resource(s), ~0.4 MB in it, ~0.4 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  heap2108: 16 resource(s), ~0.3 MB in it, ~0.3 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  heap2139: 3 resource(s), ~36.0 MB in it, ~36.0 MB live at once (peak at #1), so up to ~0.0 MB of it could be shared
+  ... 19 more heap(s) with a smaller gap between their total and their peak (maxRows=0 shows all)
+  6 heap(s) hold one resource each (~6.8 MB): nothing in them to share
 what this cannot prove
   destruction: D3D12 writes no release to the stream, so every lifetime ends at the
     frame's last use, and a resource created before the capture starts has no creation
   a texture's bytes are not recorded: `~` marks every figure counted at 4 bytes a pixel
   a buffer sub-allocated out of a UE page is named after the page (REFERENCE 4.9)
-  reads and writes this does not attribute: List_BuildRaytracingAccelerationStructure x2, List_ExecuteIndirect x10, List_ResolveQueryData x42, List_SetDescriptorHeaps x21
+  reads and writes this does not attribute: List_BuildRaytracingAccelerationStructure x9, List_ExecuteIndirect x293, List_ResolveQueryData x65, List_SetDescriptorHeaps x29
 --- stderr ---

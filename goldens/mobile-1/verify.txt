@@ -1,8 +1,8 @@
 # verify <capture>
 # exit: 0
 --- stdout ---
-stream 373754752 bytes [lz4(357 blocks)]
+stream 1552014144 bytes [lz4(1481 blocks)]
 problems: 0
 notes: 1
-  padding: 17483 bytes checked in 723 chunks, all zero
+  padding: 406623 bytes checked in 11923 chunks, all zero
 --- stderr ---

@@ -3,24 +3,24 @@
     "api": "D3D12",
     "bundle": "build/goldens/mobile-1",
     "capture": "<capture>",
-    "captureSha256": "3e536c02e0c94d4ad1f9be83eb3414ce3af56cadbe577c54dbf6981fdd907ff0",
-    "events": 445,
+    "captureSha256": "f127bc20474834b09546126049c2d4aa309b7a657cee79047770216f249418ec",
+    "events": 2972,
     "messages": 0,
-    "passes": 12,
+    "passes": 28,
     "renderdoc": "1.46",
-    "resources": 133,
+    "resources": 4304,
     "withImages": 1
   },
   "b": {
     "api": "D3D12",
     "bundle": "build/goldens/mobile-1",
     "capture": "<capture>",
-    "captureSha256": "3e536c02e0c94d4ad1f9be83eb3414ce3af56cadbe577c54dbf6981fdd907ff0",
-    "events": 445,
+    "captureSha256": "f127bc20474834b09546126049c2d4aa309b7a657cee79047770216f249418ec",
+    "events": 2972,
     "messages": 0,
-    "passes": 12,
+    "passes": 28,
     "renderdoc": "1.46",
-    "resources": 133,
+    "resources": 4304,
     "withImages": 1
   },
   "caveats": [
@@ -35,12 +35,12 @@
   "imagesFound": false,
   "passes": [
     {
-      "aFirstEid": 96,
-      "bFirstEid": 96,
+      "aFirstEid": 365,
+      "bFirstEid": 365,
       "cbuffers": [
         {
-          "aFile": "96_cs_0.json",
-          "bFile": "96_cs_0.json",
+          "aFile": "365_cs_0.json",
+          "bFile": "365_cs_0.json",
           "block": "cs_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -50,8 +50,8 @@
           "values": []
         },
         {
-          "aFile": "96_cs_1.json",
-          "bFile": "96_cs_1.json",
+          "aFile": "365_cs_1.json",
+          "bFile": "365_cs_1.json",
           "block": "cs_1",
           "notes": [
             "every member the two documents share has the same value"
@@ -61,8 +61,8 @@
           "values": []
         },
         {
-          "aFile": "96_cs_2.json",
-          "bFile": "96_cs_2.json",
+          "aFile": "365_cs_2.json",
+          "bFile": "365_cs_2.json",
           "block": "cs_2",
           "notes": [
             "every member the two documents share has the same value"
@@ -72,25 +72,14 @@
           "values": []
         },
         {
-          "aFile": "96_ps_0.json",
-          "bFile": "96_ps_0.json",
+          "aFile": "365_ps_0.json",
+          "bFile": "365_ps_0.json",
           "block": "ps_0",
           "notes": [
             "every member the two documents share has the same value"
           ],
           "slot": 0,
           "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "96_vs_0.json",
-          "bFile": "96_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
           "values": []
         }
       ],
@@ -100,28 +89,28 @@
       "path": "pass 1 of A",
       "shaders": [
         {
-          "aBytes": 34144,
-          "aHash": "3fcf273cd305c3f49e427d9971882c8bd657a166691ee857d0f284612e6324fb",
-          "bBytes": 34144,
-          "bHash": "3fcf273cd305c3f49e427d9971882c8bd657a166691ee857d0f284612e6324fb",
+          "aBytes": 193020,
+          "aHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "bBytes": 193020,
+          "bHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
           "changes": [],
           "stage": "cs",
           "verdict": "same"
         },
         {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
+          "aBytes": 22396,
+          "aHash": "3f889dc2a4dbbae66426cf0cb4336b5bad0e888c89ececbf3373ea93bf60aab0",
+          "bBytes": 22396,
+          "bHash": "3f889dc2a4dbbae66426cf0cb4336b5bad0e888c89ececbf3373ea93bf60aab0",
           "changes": [],
           "stage": "ps",
           "verdict": "same"
         },
         {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
+          "aBytes": 6272,
+          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "bBytes": 6272,
+          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
           "changes": [],
           "stage": "vs",
           "verdict": "same"
@@ -130,11 +119,11 @@
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "graphics, colour only (no depth target), 8 event(s), eids 96..103  |  graphics, colour only (no depth target), 8 event(s), eids 96..103"
+      "structure": "graphics, colour only (no depth target), 8 event(s), eids 365..372  |  graphics, colour only (no depth target), 8 event(s), eids 365..372"
     },
     {
-      "aFirstEid": 104,
-      "bFirstEid": 104,
+      "aFirstEid": 373,
+      "bFirstEid": 373,
       "cbuffers": [],
       "changes": [],
       "images": [],
@@ -144,15 +133,15 @@
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "compute, compute, 15 event(s), eids 104..118  |  compute, compute, 15 event(s), eids 104..118"
+      "structure": "compute, compute, 23 event(s), eids 373..395  |  compute, compute, 23 event(s), eids 373..395"
     },
     {
-      "aFirstEid": 119,
-      "bFirstEid": 119,
+      "aFirstEid": 396,
+      "bFirstEid": 396,
       "cbuffers": [
         {
-          "aFile": "119_cs_0.json",
-          "bFile": "119_cs_0.json",
+          "aFile": "396_cs_0.json",
+          "bFile": "396_cs_0.json",
           "block": "cs_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -162,8 +151,8 @@
           "values": []
         },
         {
-          "aFile": "119_cs_1.json",
-          "bFile": "119_cs_1.json",
+          "aFile": "396_cs_1.json",
+          "bFile": "396_cs_1.json",
           "block": "cs_1",
           "notes": [
             "every member the two documents share has the same value"
@@ -173,182 +162,8 @@
           "values": []
         },
         {
-          "aFile": "119_ps_0.json",
-          "bFile": "119_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "119_vs_0.json",
-          "bFile": "119_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
-          "values": []
-        }
-      ],
-      "changes": [],
-      "images": [],
-      "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > TransmittanceLut",
-      "shaders": [
-        {
-          "aBytes": 7048,
-          "aHash": "17c878af3f41f072160a56bbb0fe1f54a4110001a0188650c76e67b149452413",
-          "bBytes": 7048,
-          "bHash": "17c878af3f41f072160a56bbb0fe1f54a4110001a0188650c76e67b149452413",
-          "changes": [],
-          "stage": "cs",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
-        }
-      ],
-      "stateAdded": [],
-      "stateRemoved": [],
-      "status": "same",
-      "structure": "compute, compute, 8 event(s), eids 119..126  |  compute, compute, 8 event(s), eids 119..126"
-    },
-    {
-      "aFirstEid": 127,
-      "bFirstEid": 127,
-      "cbuffers": [
-        {
-          "aFile": "127_cs_0.json",
-          "bFile": "127_cs_0.json",
-          "block": "cs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "127_cs_1.json",
-          "bFile": "127_cs_1.json",
-          "block": "cs_1",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 1,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "127_ps_0.json",
-          "bFile": "127_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "127_vs_0.json",
-          "bFile": "127_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
-          "values": []
-        }
-      ],
-      "changes": [],
-      "images": [],
-      "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > MultiScatteringLut",
-      "shaders": [
-        {
-          "aBytes": 11096,
-          "aHash": "5e2f307b89e853f9c2649324278466e46584934246242b7ce240c39591a69587",
-          "bBytes": 11096,
-          "bHash": "5e2f307b89e853f9c2649324278466e46584934246242b7ce240c39591a69587",
-          "changes": [],
-          "stage": "cs",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
-        }
-      ],
-      "stateAdded": [],
-      "stateRemoved": [],
-      "status": "same",
-      "structure": "compute, compute, 11 event(s), eids 127..137  |  compute, compute, 11 event(s), eids 127..137"
-    },
-    {
-      "aFirstEid": 138,
-      "bFirstEid": 138,
-      "cbuffers": [
-        {
-          "aFile": "138_cs_0.json",
-          "bFile": "138_cs_0.json",
-          "block": "cs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "138_cs_1.json",
-          "bFile": "138_cs_1.json",
-          "block": "cs_1",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 1,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "138_cs_2.json",
-          "bFile": "138_cs_2.json",
+          "aFile": "396_cs_2.json",
+          "bFile": "396_cs_2.json",
           "block": "cs_2",
           "notes": [
             "every member the two documents share has the same value"
@@ -358,8 +173,8 @@
           "values": []
         },
         {
-          "aFile": "138_ps_0.json",
-          "bFile": "138_ps_0.json",
+          "aFile": "396_ps_0.json",
+          "bFile": "396_ps_0.json",
           "block": "ps_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -369,8 +184,8 @@
           "values": []
         },
         {
-          "aFile": "138_vs_0.json",
-          "bFile": "138_vs_0.json",
+          "aFile": "396_vs_0.json",
+          "bFile": "396_vs_0.json",
           "block": "vs_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -382,32 +197,32 @@
       ],
       "changes": [],
       "images": [],
-      "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > DistantSkyLightLut",
+      "note": "aligned by call order (pass 3 of each) and the call kind: neither pass sits in a marker",
+      "path": "pass 3 of A",
       "shaders": [
         {
-          "aBytes": 10640,
-          "aHash": "ed80a916ed3ef1d581745f88e5d8d5f5df8ebf19b809cf1bf816e2ef46c55750",
-          "bBytes": 10640,
-          "bHash": "ed80a916ed3ef1d581745f88e5d8d5f5df8ebf19b809cf1bf816e2ef46c55750",
+          "aBytes": 193020,
+          "aHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "bBytes": 193020,
+          "bHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
           "changes": [],
           "stage": "cs",
           "verdict": "same"
         },
         {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
+          "aBytes": 10144,
+          "aHash": "c3c2def6aacc31a45ec9400ebbe0e4ecc243e2276d4cbe893c30f3669d89f3b8",
+          "bBytes": 10144,
+          "bHash": "c3c2def6aacc31a45ec9400ebbe0e4ecc243e2276d4cbe893c30f3669d89f3b8",
           "changes": [],
           "stage": "ps",
           "verdict": "same"
         },
         {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
+          "aBytes": 12208,
+          "aHash": "3e0d24f6b64fc3e01402656589c7eace9911cea653c1455219e636cb424afd57",
+          "bBytes": 12208,
+          "bHash": "3e0d24f6b64fc3e01402656589c7eace9911cea653c1455219e636cb424afd57",
           "changes": [],
           "stage": "vs",
           "verdict": "same"
@@ -416,454 +231,29 @@
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "compute, compute, 12 event(s), eids 138..149  |  compute, compute, 12 event(s), eids 138..149"
+      "structure": "compute, compute, 17 event(s), eids 396..412  |  compute, compute, 17 event(s), eids 396..412"
     },
     {
-      "aFirstEid": 150,
-      "bFirstEid": 150,
-      "cbuffers": [
-        {
-          "aFile": "150_cs_0.json",
-          "bFile": "150_cs_0.json",
-          "block": "cs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "150_cs_1.json",
-          "bFile": "150_cs_1.json",
-          "block": "cs_1",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 1,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "150_cs_2.json",
-          "bFile": "150_cs_2.json",
-          "block": "cs_2",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 2,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "150_ps_0.json",
-          "bFile": "150_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "150_vs_0.json",
-          "bFile": "150_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
-          "values": []
-        }
-      ],
-      "changes": [],
-      "images": [],
-      "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > SkyViewLut",
-      "shaders": [
-        {
-          "aBytes": 35064,
-          "aHash": "724035dd60a734f6042168ebb9d30cfc99355bb38e2012edc7439b590369aa02",
-          "bBytes": 35064,
-          "bHash": "724035dd60a734f6042168ebb9d30cfc99355bb38e2012edc7439b590369aa02",
-          "changes": [],
-          "stage": "cs",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
-        }
-      ],
-      "stateAdded": [],
-      "stateRemoved": [],
-      "status": "same",
-      "structure": "compute, compute, 7 event(s), eids 150..156  |  compute, compute, 7 event(s), eids 150..156"
-    },
-    {
-      "aFirstEid": 157,
-      "bFirstEid": 157,
-      "cbuffers": [
-        {
-          "aFile": "157_cs_0.json",
-          "bFile": "157_cs_0.json",
-          "block": "cs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "157_cs_1.json",
-          "bFile": "157_cs_1.json",
-          "block": "cs_1",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 1,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "157_cs_2.json",
-          "bFile": "157_cs_2.json",
-          "block": "cs_2",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 2,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "157_cs_3.json",
-          "bFile": "157_cs_3.json",
-          "block": "cs_3",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 3,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "157_ps_0.json",
-          "bFile": "157_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "157_vs_0.json",
-          "bFile": "157_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
-          "values": []
-        }
-      ],
-      "changes": [],
-      "images": [],
-      "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > CameraVolumeLut",
-      "shaders": [
-        {
-          "aBytes": 36764,
-          "aHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "bBytes": 36764,
-          "bHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "changes": [],
-          "stage": "cs",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
-        }
-      ],
-      "stateAdded": [],
-      "stateRemoved": [],
-      "status": "same",
-      "structure": "compute, compute, 15 event(s), eids 157..171  |  compute, compute, 15 event(s), eids 157..171"
-    },
-    {
-      "aFirstEid": 172,
-      "bFirstEid": 172,
-      "cbuffers": [
-        {
-          "aFile": "172_cs_0.json",
-          "bFile": "172_cs_0.json",
-          "block": "cs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "172_cs_1.json",
-          "bFile": "172_cs_1.json",
-          "block": "cs_1",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 1,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "172_cs_2.json",
-          "bFile": "172_cs_2.json",
-          "block": "cs_2",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 2,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "172_cs_3.json",
-          "bFile": "172_cs_3.json",
-          "block": "cs_3",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 3,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "172_ps_0.json",
-          "bFile": "172_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "172_vs_0.json",
-          "bFile": "172_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
-          "values": []
-        }
-      ],
-      "changes": [],
-      "images": [],
-      "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > SkyAtmosphereLUTs > CameraVolumeLut",
-      "shaders": [
-        {
-          "aBytes": 36764,
-          "aHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "bBytes": 36764,
-          "bHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "changes": [],
-          "stage": "cs",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5492,
-          "aHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "bBytes": 5492,
-          "bHash": "6f3ffa6367466f02dd47fa8f0d456731521804a011512d98002e5717f30c9967",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 5648,
-          "aHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "bBytes": 5648,
-          "bHash": "db8692f9ede078c08be0ef1c5cd33afbec94ef11d179afbcdbe775df6ae7390c",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
-        }
-      ],
-      "stateAdded": [],
-      "stateRemoved": [],
-      "status": "same",
-      "structure": "compute, compute, 71 event(s), eids 172..242  |  compute, compute, 71 event(s), eids 172..242"
-    },
-    {
-      "aFirstEid": 243,
-      "bFirstEid": 243,
-      "cbuffers": [
-        {
-          "aFile": "243_cs_0.json",
-          "bFile": "243_cs_0.json",
-          "block": "cs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "243_cs_1.json",
-          "bFile": "243_cs_1.json",
-          "block": "cs_1",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 1,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "243_cs_2.json",
-          "bFile": "243_cs_2.json",
-          "block": "cs_2",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 2,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "243_cs_3.json",
-          "bFile": "243_cs_3.json",
-          "block": "cs_3",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 3,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "243_ps_0.json",
-          "bFile": "243_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
-        },
-        {
-          "aFile": "243_vs_0.json",
-          "bFile": "243_vs_0.json",
-          "block": "vs_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "vs",
-          "values": []
-        }
-      ],
-      "changes": [],
-      "images": [],
-      "note": "aligned by call order (pass 9 of each) and the call kind: neither pass sits in a marker",
-      "path": "pass 9 of A",
-      "shaders": [
-        {
-          "aBytes": 36764,
-          "aHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "bBytes": 36764,
-          "bHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "changes": [],
-          "stage": "cs",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 3364,
-          "aHash": "8a6e7b09767b3cfaaaa93781537839d1b2f5b4ac4bf7bce035ec18ce7504997f",
-          "bBytes": 3364,
-          "bHash": "8a6e7b09767b3cfaaaa93781537839d1b2f5b4ac4bf7bce035ec18ce7504997f",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 3604,
-          "aHash": "27bcedd1e464e80451b981f1c70e2e1c27fed3b8db00af3cadc42592467642dc",
-          "bBytes": 3604,
-          "bHash": "27bcedd1e464e80451b981f1c70e2e1c27fed3b8db00af3cadc42592467642dc",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
-        }
-      ],
-      "stateAdded": [],
-      "stateRemoved": [],
-      "status": "same",
-      "structure": "compute, compute, 14 event(s), eids 243..256  |  compute, compute, 14 event(s), eids 243..256"
-    },
-    {
-      "aFirstEid": 257,
-      "bFirstEid": 257,
+      "aFirstEid": 413,
+      "bFirstEid": 413,
       "cbuffers": [],
       "changes": [],
       "images": [],
       "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > SceneColorRendering",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > ShadowDepths > Atlas0 5124x2048 > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split0 2040x2040 > CopyCachedShadowMap",
       "shaders": [],
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "graphics, single colour target, 169 event(s), eids 257..425  |  graphics, single colour target, 169 event(s), eids 257..425"
+      "structure": "graphics, depth only (no colour target), 61 event(s), eids 413..473  |  graphics, depth only (no colour target), 61 event(s), eids 413..473"
     },
     {
-      "aFirstEid": 426,
-      "bFirstEid": 426,
+      "aFirstEid": 474,
+      "bFirstEid": 474,
       "cbuffers": [
         {
-          "aFile": "426_cs_0.json",
-          "bFile": "426_cs_0.json",
+          "aFile": "474_cs_0.json",
+          "bFile": "474_cs_0.json",
           "block": "cs_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -873,8 +263,8 @@
           "values": []
         },
         {
-          "aFile": "426_cs_1.json",
-          "bFile": "426_cs_1.json",
+          "aFile": "474_cs_1.json",
+          "bFile": "474_cs_1.json",
           "block": "cs_1",
           "notes": [
             "every member the two documents share has the same value"
@@ -884,8 +274,8 @@
           "values": []
         },
         {
-          "aFile": "426_cs_2.json",
-          "bFile": "426_cs_2.json",
+          "aFile": "474_cs_2.json",
+          "bFile": "474_cs_2.json",
           "block": "cs_2",
           "notes": [
             "every member the two documents share has the same value"
@@ -895,19 +285,8 @@
           "values": []
         },
         {
-          "aFile": "426_cs_3.json",
-          "bFile": "426_cs_3.json",
-          "block": "cs_3",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 3,
-          "stage": "cs",
-          "values": []
-        },
-        {
-          "aFile": "426_ps_0.json",
-          "bFile": "426_ps_0.json",
+          "aFile": "474_ps_0.json",
+          "bFile": "474_ps_0.json",
           "block": "ps_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -917,8 +296,193 @@
           "values": []
         },
         {
-          "aFile": "426_ps_1.json",
-          "bFile": "426_ps_1.json",
+          "aFile": "474_vs_0.json",
+          "bFile": "474_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > SceneColorRendering",
+      "shaders": [
+        {
+          "aBytes": 193020,
+          "aHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "bBytes": 193020,
+          "bHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 6596,
+          "aHash": "60956ddecf712954335ea4309496ea7b5fd5d20cf88bee451e95497c15ca8045",
+          "bBytes": 6596,
+          "bHash": "60956ddecf712954335ea4309496ea7b5fd5d20cf88bee451e95497c15ca8045",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 7000,
+          "aHash": "94c13589cbcd42bef8583afaaf8fe700d6308ce9372f17b214e05a39f6c396ba",
+          "bBytes": 7000,
+          "bHash": "94c13589cbcd42bef8583afaaf8fe700d6308ce9372f17b214e05a39f6c396ba",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, single colour target, 2060 event(s), eids 474..2533  |  graphics, single colour target, 2060 event(s), eids 474..2533"
+    },
+    {
+      "aFirstEid": 2534,
+      "bFirstEid": 2534,
+      "cbuffers": [
+        {
+          "aFile": "2534_cs_0.json",
+          "bFile": "2534_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2534_cs_1.json",
+          "bFile": "2534_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2534_cs_2.json",
+          "bFile": "2534_cs_2.json",
+          "block": "cs_2",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 2,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2534_ps_0.json",
+          "bFile": "2534_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > SLW::CopySceneWithoutWater > View0",
+      "shaders": [
+        {
+          "aBytes": 193020,
+          "aHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "bBytes": 193020,
+          "bHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 11344,
+          "aHash": "a5b973841ec17c96d273d2f62c015e15961682daf7121e7daa38d9f9fe7a763a",
+          "bBytes": 11344,
+          "bHash": "a5b973841ec17c96d273d2f62c015e15961682daf7121e7daa38d9f9fe7a763a",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 6272,
+          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "bBytes": 6272,
+          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 18 event(s), eids 2534..2551  |  graphics, colour only (no depth target), 18 event(s), eids 2534..2551"
+    },
+    {
+      "aFirstEid": 2552,
+      "bFirstEid": 2552,
+      "cbuffers": [
+        {
+          "aFile": "2552_cs_0.json",
+          "bFile": "2552_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2552_cs_1.json",
+          "bFile": "2552_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2552_cs_2.json",
+          "bFile": "2552_cs_2.json",
+          "block": "cs_2",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 2,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_0.json",
+          "bFile": "2552_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_1.json",
+          "bFile": "2552_ps_1.json",
           "block": "ps_1",
           "notes": [
             "every member the two documents share has the same value"
@@ -928,8 +492,74 @@
           "values": []
         },
         {
-          "aFile": "426_vs_0.json",
-          "bFile": "426_vs_0.json",
+          "aFile": "2552_ps_2.json",
+          "bFile": "2552_ps_2.json",
+          "block": "ps_2",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 2,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_3.json",
+          "bFile": "2552_ps_3.json",
+          "block": "ps_3",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 3,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_4.json",
+          "bFile": "2552_ps_4.json",
+          "block": "ps_4",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 4,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_5.json",
+          "bFile": "2552_ps_5.json",
+          "block": "ps_5",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 5,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_6.json",
+          "bFile": "2552_ps_6.json",
+          "block": "ps_6",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 6,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_ps_7.json",
+          "bFile": "2552_ps_7.json",
+          "block": "ps_7",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 7,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2552_vs_0.json",
+          "bFile": "2552_vs_0.json",
           "block": "vs_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -939,8 +569,396 @@
           "values": []
         },
         {
-          "aFile": "426_vs_1.json",
-          "bFile": "426_vs_1.json",
+          "aFile": "2552_vs_1.json",
+          "bFile": "2552_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2552_vs_2.json",
+          "bFile": "2552_vs_2.json",
+          "block": "vs_2",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 2,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2552_vs_3.json",
+          "bFile": "2552_vs_3.json",
+          "block": "vs_3",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 3,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > SingleLayerWater > SingleLayerWaterRendering > WaterRenderActorOceanMID_3 None 6 instances",
+      "shaders": [
+        {
+          "aBytes": 193020,
+          "aHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "bBytes": 193020,
+          "bHash": "566c917fb30a3759ecef59e14f9e38734279771d575322499f65a889a3c2c418",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 870588,
+          "aHash": "32aaaa66254a0e90b067c46c0631ef788a4afed85507e59c6425e8b0459d8ac2",
+          "bBytes": 870588,
+          "bHash": "32aaaa66254a0e90b067c46c0631ef788a4afed85507e59c6425e8b0459d8ac2",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 493560,
+          "aHash": "6dda0a4fbf6c5c2c80e9f2326bd8895a9d3ef9cb0831183dd8cd6014f16101c6",
+          "bBytes": 493560,
+          "bHash": "6dda0a4fbf6c5c2c80e9f2326bd8895a9d3ef9cb0831183dd8cd6014f16101c6",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, single colour target, 157 event(s), eids 2552..2708  |  graphics, single colour target, 157 event(s), eids 2552..2708"
+    },
+    {
+      "aFirstEid": 2709,
+      "bFirstEid": 2709,
+      "cbuffers": [],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > ClearTextureUint(ProjectionTexture R32_UINT 1002x628 Mip=0)",
+      "shaders": [],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "compute, compute, 3 event(s), eids 2709..2711  |  compute, compute, 3 event(s), eids 2709..2711"
+    },
+    {
+      "aFirstEid": 2712,
+      "bFirstEid": 2712,
+      "cbuffers": [
+        {
+          "aFile": "2712_cs_0.json",
+          "bFile": "2712_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2712_cs_1.json",
+          "bFile": "2712_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2712_ps_0.json",
+          "bFile": "2712_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2712_ps_1.json",
+          "bFile": "2712_ps_1.json",
+          "block": "ps_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2712_vs_0.json",
+          "bFile": "2712_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2712_vs_1.json",
+          "bFile": "2712_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2712_vs_2.json",
+          "bFile": "2712_vs_2.json",
+          "block": "vs_2",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 2,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2712_vs_3.json",
+          "bFile": "2712_vs_3.json",
+          "block": "vs_3",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 3,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PixelProjectedReflection_Projection 1002x627 (CS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 349112,
+          "aHash": "17abd47525712ee230104ca4837736e8f43cbb84e075685649da9b4056dff9f5",
+          "bBytes": 349112,
+          "bHash": "17abd47525712ee230104ca4837736e8f43cbb84e075685649da9b4056dff9f5",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 330808,
+          "aHash": "970d7e71d498a8787faf043cc765eadcc57496da79a19d6b4cd746083193e22d",
+          "bBytes": 330808,
+          "bHash": "970d7e71d498a8787faf043cc765eadcc57496da79a19d6b4cd746083193e22d",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "compute, compute, 20 event(s), eids 2712..2731  |  compute, compute, 20 event(s), eids 2712..2731"
+    },
+    {
+      "aFirstEid": 2732,
+      "bFirstEid": 2732,
+      "cbuffers": [
+        {
+          "aFile": "2732_cs_0.json",
+          "bFile": "2732_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2732_cs_1.json",
+          "bFile": "2732_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2732_ps_0.json",
+          "bFile": "2732_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2732_ps_1.json",
+          "bFile": "2732_ps_1.json",
+          "block": "ps_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2732_vs_0.json",
+          "bFile": "2732_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2732_vs_1.json",
+          "bFile": "2732_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "aligned by call order (pass 10 of each) and the call kind: neither pass sits in a marker",
+      "path": "pass 10 of A",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 199000,
+          "aHash": "3abc97f9a567af970f3c48051a02e39f45dc839f0f1363b9f185115cb704237e",
+          "bBytes": 199000,
+          "bHash": "3abc97f9a567af970f3c48051a02e39f45dc839f0f1363b9f185115cb704237e",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 190992,
+          "aHash": "e79115c7cbe0e999366dc8b7282e363e324feaebddf442fcbb4f6087b7841866",
+          "bBytes": 190992,
+          "bHash": "e79115c7cbe0e999366dc8b7282e363e324feaebddf442fcbb4f6087b7841866",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "compute, compute, 16 event(s), eids 2732..2747  |  compute, compute, 16 event(s), eids 2732..2747"
+    },
+    {
+      "aFirstEid": 2748,
+      "bFirstEid": 2748,
+      "cbuffers": [],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PixelProjectedReflection_Reflection 1002x627 (PS)",
+      "shaders": [],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 14 event(s), eids 2748..2761  |  graphics, colour only (no depth target), 14 event(s), eids 2748..2761"
+    },
+    {
+      "aFirstEid": 2762,
+      "bFirstEid": 2762,
+      "cbuffers": [
+        {
+          "aFile": "2762_cs_0.json",
+          "bFile": "2762_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2762_cs_1.json",
+          "bFile": "2762_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2762_ps_0.json",
+          "bFile": "2762_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2762_vs_0.json",
+          "bFile": "2762_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2762_vs_1.json",
+          "bFile": "2762_vs_1.json",
           "block": "vs_1",
           "notes": [
             "every member the two documents share has the same value"
@@ -953,31 +971,31 @@
       "changes": [],
       "images": [],
       "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > PostProcessing > Tonemap 2003x1254 (PS GammaOnly=0)",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomSetup 501x314 (PS)",
       "shaders": [
         {
-          "aBytes": 36764,
-          "aHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "bBytes": 36764,
-          "bHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
           "changes": [],
           "stage": "cs",
           "verdict": "same"
         },
         {
-          "aBytes": 32040,
-          "aHash": "9d34dbfe022943a8d79ddc41446dae6419e903cc22cba82a36c355f250de8f38",
-          "bBytes": 32040,
-          "bHash": "9d34dbfe022943a8d79ddc41446dae6419e903cc22cba82a36c355f250de8f38",
+          "aBytes": 17736,
+          "aHash": "9d980638fd260f6a5dcf616f6680fc7324d4948c61c6294cbd45ea3da525f125",
+          "bBytes": 17736,
+          "bHash": "9d980638fd260f6a5dcf616f6680fc7324d4948c61c6294cbd45ea3da525f125",
           "changes": [],
           "stage": "ps",
           "verdict": "same"
         },
         {
-          "aBytes": 5912,
-          "aHash": "b21d31441b2ef5c60e9c5644067872144e4b6b5143f408417169e5db5f8c6251",
-          "bBytes": 5912,
-          "bHash": "b21d31441b2ef5c60e9c5644067872144e4b6b5143f408417169e5db5f8c6251",
+          "aBytes": 13480,
+          "aHash": "8e86a963b8b62f81f4a5e056a257181138aa95156bc67e2123a12f0813f67cec",
+          "bBytes": 13480,
+          "bHash": "8e86a963b8b62f81f4a5e056a257181138aa95156bc67e2123a12f0813f67cec",
           "changes": [],
           "stage": "vs",
           "verdict": "same"
@@ -986,15 +1004,15 @@
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "graphics, colour only (no depth target), 13 event(s), eids 426..438  |  graphics, colour only (no depth target), 13 event(s), eids 426..438"
+      "structure": "graphics, colour only (no depth target), 14 event(s), eids 2762..2775  |  graphics, colour only (no depth target), 14 event(s), eids 2762..2775"
     },
     {
-      "aFirstEid": 439,
-      "bFirstEid": 439,
+      "aFirstEid": 2776,
+      "bFirstEid": 2776,
       "cbuffers": [
         {
-          "aFile": "439_cs_0.json",
-          "bFile": "439_cs_0.json",
+          "aFile": "2776_cs_0.json",
+          "bFile": "2776_cs_0.json",
           "block": "cs_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -1004,8 +1022,8 @@
           "values": []
         },
         {
-          "aFile": "439_cs_1.json",
-          "bFile": "439_cs_1.json",
+          "aFile": "2776_cs_1.json",
+          "bFile": "2776_cs_1.json",
           "block": "cs_1",
           "notes": [
             "every member the two documents share has the same value"
@@ -1015,30 +1033,1042 @@
           "values": []
         },
         {
-          "aFile": "439_cs_2.json",
-          "bFile": "439_cs_2.json",
-          "block": "cs_2",
+          "aFile": "2776_ps_0.json",
+          "bFile": "2776_ps_0.json",
+          "block": "ps_0",
           "notes": [
             "every member the two documents share has the same value"
           ],
-          "slot": 2,
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2776_vs_0.json",
+          "bFile": "2776_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2776_vs_1.json",
+          "bFile": "2776_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 251x157 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 21092,
+          "aHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "bBytes": 21092,
+          "bHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19080,
+          "aHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "bBytes": 19080,
+          "bHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 12 event(s), eids 2776..2787  |  graphics, colour only (no depth target), 12 event(s), eids 2776..2787"
+    },
+    {
+      "aFirstEid": 2788,
+      "bFirstEid": 2788,
+      "cbuffers": [
+        {
+          "aFile": "2788_cs_0.json",
+          "bFile": "2788_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
           "stage": "cs",
           "values": []
         },
         {
-          "aFile": "439_cs_3.json",
-          "bFile": "439_cs_3.json",
-          "block": "cs_3",
+          "aFile": "2788_cs_1.json",
+          "bFile": "2788_cs_1.json",
+          "block": "cs_1",
           "notes": [
             "every member the two documents share has the same value"
           ],
-          "slot": 3,
+          "slot": 1,
           "stage": "cs",
           "values": []
         },
         {
-          "aFile": "439_ps_0.json",
-          "bFile": "439_ps_0.json",
+          "aFile": "2788_ps_0.json",
+          "bFile": "2788_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2788_vs_0.json",
+          "bFile": "2788_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2788_vs_1.json",
+          "bFile": "2788_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 126x79 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 21092,
+          "aHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "bBytes": 21092,
+          "bHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19080,
+          "aHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "bBytes": 19080,
+          "bHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 12 event(s), eids 2788..2799  |  graphics, colour only (no depth target), 12 event(s), eids 2788..2799"
+    },
+    {
+      "aFirstEid": 2800,
+      "bFirstEid": 2800,
+      "cbuffers": [
+        {
+          "aFile": "2800_cs_0.json",
+          "bFile": "2800_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2800_cs_1.json",
+          "bFile": "2800_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2800_ps_0.json",
+          "bFile": "2800_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2800_vs_0.json",
+          "bFile": "2800_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2800_vs_1.json",
+          "bFile": "2800_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 63x40 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 21092,
+          "aHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "bBytes": 21092,
+          "bHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19080,
+          "aHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "bBytes": 19080,
+          "bHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 12 event(s), eids 2800..2811  |  graphics, colour only (no depth target), 12 event(s), eids 2800..2811"
+    },
+    {
+      "aFirstEid": 2812,
+      "bFirstEid": 2812,
+      "cbuffers": [
+        {
+          "aFile": "2812_cs_0.json",
+          "bFile": "2812_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2812_cs_1.json",
+          "bFile": "2812_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2812_ps_0.json",
+          "bFile": "2812_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2812_vs_0.json",
+          "bFile": "2812_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2812_vs_1.json",
+          "bFile": "2812_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 32x20 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 21092,
+          "aHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "bBytes": 21092,
+          "bHash": "9eeecd1e3d910927453d4223d2a83cf6f38e7b4274a2f45d4bf30d3f0708c6c7",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19080,
+          "aHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "bBytes": 19080,
+          "bHash": "52dbcd29e4ae029b2f5aa3ef22842b87f36225a4eef94a298ab7ceaf38df92fd",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 13 event(s), eids 2812..2824  |  graphics, colour only (no depth target), 13 event(s), eids 2812..2824"
+    },
+    {
+      "aFirstEid": 2825,
+      "bFirstEid": 2825,
+      "cbuffers": [
+        {
+          "aFile": "2825_cs_0.json",
+          "bFile": "2825_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2825_cs_1.json",
+          "bFile": "2825_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2825_ps_0.json",
+          "bFile": "2825_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2825_vs_0.json",
+          "bFile": "2825_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2825_vs_1.json",
+          "bFile": "2825_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomUp 63x40 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 23228,
+          "aHash": "a80117b5f109b0a433d3d36a940e99a99cf1803ae00eca4e4a988f5694384147",
+          "bBytes": 23228,
+          "bHash": "a80117b5f109b0a433d3d36a940e99a99cf1803ae00eca4e4a988f5694384147",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19228,
+          "aHash": "0e50dba424e7734be1d97657c12191768727420f25c0324f9875943a479f7d1a",
+          "bBytes": 19228,
+          "bHash": "0e50dba424e7734be1d97657c12191768727420f25c0324f9875943a479f7d1a",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 15 event(s), eids 2825..2839  |  graphics, colour only (no depth target), 15 event(s), eids 2825..2839"
+    },
+    {
+      "aFirstEid": 2840,
+      "bFirstEid": 2840,
+      "cbuffers": [
+        {
+          "aFile": "2840_cs_0.json",
+          "bFile": "2840_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2840_cs_1.json",
+          "bFile": "2840_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2840_ps_0.json",
+          "bFile": "2840_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2840_vs_0.json",
+          "bFile": "2840_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2840_vs_1.json",
+          "bFile": "2840_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomUp 126x79 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 23228,
+          "aHash": "a80117b5f109b0a433d3d36a940e99a99cf1803ae00eca4e4a988f5694384147",
+          "bBytes": 23228,
+          "bHash": "a80117b5f109b0a433d3d36a940e99a99cf1803ae00eca4e4a988f5694384147",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19228,
+          "aHash": "0e50dba424e7734be1d97657c12191768727420f25c0324f9875943a479f7d1a",
+          "bBytes": 19228,
+          "bHash": "0e50dba424e7734be1d97657c12191768727420f25c0324f9875943a479f7d1a",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 14 event(s), eids 2840..2853  |  graphics, colour only (no depth target), 14 event(s), eids 2840..2853"
+    },
+    {
+      "aFirstEid": 2854,
+      "bFirstEid": 2854,
+      "cbuffers": [
+        {
+          "aFile": "2854_cs_0.json",
+          "bFile": "2854_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2854_cs_1.json",
+          "bFile": "2854_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2854_ps_0.json",
+          "bFile": "2854_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2854_vs_0.json",
+          "bFile": "2854_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2854_vs_1.json",
+          "bFile": "2854_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomUp 251x157 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 23228,
+          "aHash": "a80117b5f109b0a433d3d36a940e99a99cf1803ae00eca4e4a988f5694384147",
+          "bBytes": 23228,
+          "bHash": "a80117b5f109b0a433d3d36a940e99a99cf1803ae00eca4e4a988f5694384147",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19228,
+          "aHash": "0e50dba424e7734be1d97657c12191768727420f25c0324f9875943a479f7d1a",
+          "bBytes": 19228,
+          "bHash": "0e50dba424e7734be1d97657c12191768727420f25c0324f9875943a479f7d1a",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 19 event(s), eids 2854..2872  |  graphics, colour only (no depth target), 19 event(s), eids 2854..2872"
+    },
+    {
+      "aFirstEid": 2873,
+      "bFirstEid": 2873,
+      "cbuffers": [
+        {
+          "aFile": "2873_cs_0.json",
+          "bFile": "2873_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2873_cs_1.json",
+          "bFile": "2873_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2873_vs_0.json",
+          "bFile": "2873_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > LensFlares > LensFlareBlur 126x79",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 9168,
+          "aHash": "5e94c5496cef2a8cbbeb75c4d2f514713fa6736dfa138ddf9870ca62d35d6489",
+          "bBytes": 9168,
+          "bHash": "5e94c5496cef2a8cbbeb75c4d2f514713fa6736dfa138ddf9870ca62d35d6489",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 17496,
+          "aHash": "e4c66d74aa86912529190c36b131d095172d192617b4cecc868c6bd6b6bb753f",
+          "bBytes": 17496,
+          "bHash": "e4c66d74aa86912529190c36b131d095172d192617b4cecc868c6bd6b6bb753f",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 14 event(s), eids 2873..2886  |  graphics, colour only (no depth target), 14 event(s), eids 2873..2886"
+    },
+    {
+      "aFirstEid": 2887,
+      "bFirstEid": 2887,
+      "cbuffers": [
+        {
+          "aFile": "2887_cs_0.json",
+          "bFile": "2887_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2887_cs_1.json",
+          "bFile": "2887_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > LensFlares > LensFlareCopyBloom 251x157",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 7340,
+          "aHash": "02d8b1459fdea1caa6b133364e8ed5c143ff7184027817e72c3bef34b4122cbb",
+          "bBytes": 7340,
+          "bHash": "02d8b1459fdea1caa6b133364e8ed5c143ff7184027817e72c3bef34b4122cbb",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 6272,
+          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "bBytes": 6272,
+          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 59 event(s), eids 2887..2945  |  graphics, colour only (no depth target), 59 event(s), eids 2887..2945"
+    },
+    {
+      "aFirstEid": 2946,
+      "bFirstEid": 2946,
+      "cbuffers": [
+        {
+          "aFile": "2946_cs_0.json",
+          "bFile": "2946_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2946_cs_1.json",
+          "bFile": "2946_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2946_ps_0.json",
+          "bFile": "2946_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2946_vs_0.json",
+          "bFile": "2946_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2946_vs_1.json",
+          "bFile": "2946_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > SunMerge 501x314 (PS)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 14796,
+          "aHash": "e6dc7ba17f52b7cf050016d959a485b43c0f3eb6694ebb3b132b0db7ba53d501",
+          "bBytes": 14796,
+          "bHash": "e6dc7ba17f52b7cf050016d959a485b43c0f3eb6694ebb3b132b0db7ba53d501",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 22180,
+          "aHash": "372252a3d656392dc2da55d4ec9550e2bf6695a8b875d35d64000ef14975ea83",
+          "bBytes": 22180,
+          "bHash": "372252a3d656392dc2da55d4ec9550e2bf6695a8b875d35d64000ef14975ea83",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 19 event(s), eids 2946..2964  |  graphics, colour only (no depth target), 19 event(s), eids 2946..2964"
+    },
+    {
+      "aFirstEid": 2965,
+      "bFirstEid": 2965,
+      "cbuffers": [
+        {
+          "aFile": "2965_cs_0.json",
+          "bFile": "2965_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2965_cs_1.json",
+          "bFile": "2965_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2965_ps_0.json",
+          "bFile": "2965_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2965_ps_1.json",
+          "bFile": "2965_ps_1.json",
+          "block": "ps_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "2965_vs_0.json",
+          "bFile": "2965_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "2965_vs_1.json",
+          "bFile": "2965_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > Tonemap 2003x1254 (PS GammaOnly=0)",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 114128,
+          "aHash": "74830efe3aef6a42ad0b115c5de229af656f4534734b4a874b4672da1e0c9e7d",
+          "bBytes": 114128,
+          "bHash": "74830efe3aef6a42ad0b115c5de229af656f4534734b4a874b4672da1e0c9e7d",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 19768,
+          "aHash": "545ea2f657831c0cb08154ee70eb2d2faf1e3ce59836311f73bf5e7fdd229349",
+          "bBytes": 19768,
+          "bHash": "545ea2f657831c0cb08154ee70eb2d2faf1e3ce59836311f73bf5e7fdd229349",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 15 event(s), eids 2965..2979  |  graphics, colour only (no depth target), 15 event(s), eids 2965..2979"
+    },
+    {
+      "aFirstEid": 2980,
+      "bFirstEid": 2980,
+      "cbuffers": [
+        {
+          "aFile": "2980_cs_0.json",
+          "bFile": "2980_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2980_cs_1.json",
+          "bFile": "2980_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "2980_ps_0.json",
+          "bFile": "2980_ps_0.json",
           "block": "ps_0",
           "notes": [
             "every member the two documents share has the same value"
@@ -1051,31 +2081,31 @@
       "changes": [],
       "images": [],
       "note": "",
-      "path": "FRDGBuilder::Execute > MobileSceneRender > MobileSceneRender > PostProcessing > FXAA(Quality=0) 2003x1254 PS",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > FXAA(Quality=0) 2003x1254 PS",
       "shaders": [
         {
-          "aBytes": 36764,
-          "aHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
-          "bBytes": 36764,
-          "bHash": "d6bd8d77251067ee53143aae50c900f06673b62fae80925d7b516288a73023be",
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
           "changes": [],
           "stage": "cs",
           "verdict": "same"
         },
         {
-          "aBytes": 6616,
-          "aHash": "d085445223232cb2c6d5599870893907942c1324e915e59bf64d20193f4f9af2",
-          "bBytes": 6616,
-          "bHash": "d085445223232cb2c6d5599870893907942c1324e915e59bf64d20193f4f9af2",
+          "aBytes": 25768,
+          "aHash": "ff2db4b07d70a50e492b16c056022df815c44b1d27074db9794caa013e66eb0d",
+          "bBytes": 25768,
+          "bHash": "ff2db4b07d70a50e492b16c056022df815c44b1d27074db9794caa013e66eb0d",
           "changes": [],
           "stage": "ps",
           "verdict": "same"
         },
         {
-          "aBytes": 3036,
-          "aHash": "b37efd50ca53794180762bdd49368d54706023ddc307846f9778f59c66016e12",
-          "bBytes": 3036,
-          "bHash": "b37efd50ca53794180762bdd49368d54706023ddc307846f9778f59c66016e12",
+          "aBytes": 6272,
+          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "bBytes": 6272,
+          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
           "changes": [],
           "stage": "vs",
           "verdict": "same"
@@ -1084,7 +2114,377 @@
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "graphics, colour only (no depth target), 102 event(s), eids 439..540  |  graphics, colour only (no depth target), 102 event(s), eids 439..540"
+      "structure": "graphics, colour only (no depth target), 20 event(s), eids 2980..2999  |  graphics, colour only (no depth target), 20 event(s), eids 2980..2999"
+    },
+    {
+      "aFirstEid": 3000,
+      "bFirstEid": 3000,
+      "cbuffers": [
+        {
+          "aFile": "3000_cs_0.json",
+          "bFile": "3000_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3000_cs_1.json",
+          "bFile": "3000_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3000_ps_0.json",
+          "bFile": "3000_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "3000_vs_0.json",
+          "bFile": "3000_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "3000_vs_1.json",
+          "bFile": "3000_vs_1.json",
+          "block": "vs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "vs",
+          "values": []
+        },
+        {
+          "aFile": "3000_vs_2.json",
+          "bFile": "3000_vs_2.json",
+          "block": "vs_2",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 2,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > EditorSelectionOutlines > OutlineDepth 2003x1254 > EditorSelectionDepth > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Sky",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 220312,
+          "aHash": "b9bd0a06f6d9a92a02e27040efaa08f741c3ad43a2315df199a4de06a7dba3c5",
+          "bBytes": 220312,
+          "bHash": "b9bd0a06f6d9a92a02e27040efaa08f741c3ad43a2315df199a4de06a7dba3c5",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 290808,
+          "aHash": "e9fbb36ad0eaa6451197600a9a5c04bfb100618eb6094f3b33a77566e841f050",
+          "bBytes": 290808,
+          "bHash": "e9fbb36ad0eaa6451197600a9a5c04bfb100618eb6094f3b33a77566e841f050",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, depth only (no colour target), 43 event(s), eids 3000..3042  |  graphics, depth only (no colour target), 43 event(s), eids 3000..3042"
+    },
+    {
+      "aFirstEid": 3043,
+      "bFirstEid": 3043,
+      "cbuffers": [
+        {
+          "aFile": "3043_cs_0.json",
+          "bFile": "3043_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3043_cs_1.json",
+          "bFile": "3043_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3043_ps_0.json",
+          "bFile": "3043_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "3043_ps_1.json",
+          "bFile": "3043_ps_1.json",
+          "block": "ps_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "3043_vs_0.json",
+          "bFile": "3043_vs_0.json",
+          "block": "vs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "vs",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > EditorSelectionOutlines > OutlineColor 2003x1254",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 135688,
+          "aHash": "b0730749fde25309b90ffc9b51770aedab53117ca3f4651c240bbdd21c9f59ae",
+          "bBytes": 135688,
+          "bHash": "b0730749fde25309b90ffc9b51770aedab53117ca3f4651c240bbdd21c9f59ae",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 12104,
+          "aHash": "5d47bc9ab9740d3640dc337dc1ee39a29a8d78dd4953e57a53383c4dd3bea7c0",
+          "bBytes": 12104,
+          "bHash": "5d47bc9ab9740d3640dc337dc1ee39a29a8d78dd4953e57a53383c4dd3bea7c0",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 22 event(s), eids 3043..3064  |  graphics, colour only (no depth target), 22 event(s), eids 3043..3064"
+    },
+    {
+      "aFirstEid": 3065,
+      "bFirstEid": 3065,
+      "cbuffers": [
+        {
+          "aFile": "3065_cs_0.json",
+          "bFile": "3065_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3065_cs_1.json",
+          "bFile": "3065_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3065_ps_0.json",
+          "bFile": "3065_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        },
+        {
+          "aFile": "3065_ps_1.json",
+          "bFile": "3065_ps_1.json",
+          "block": "ps_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "ps",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > CompositeEditorPrimitives 2003x1254 MSAA=1 > PopulateDepth 2003x1254",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 97760,
+          "aHash": "791fd991f44f242f903b9162cc2f2b1ec28072e111247f88139d083082898c71",
+          "bBytes": 97760,
+          "bHash": "791fd991f44f242f903b9162cc2f2b1ec28072e111247f88139d083082898c71",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 6272,
+          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "bBytes": 6272,
+          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, single colour target, 232 event(s), eids 3065..3296  |  graphics, single colour target, 232 event(s), eids 3065..3296"
+    },
+    {
+      "aFirstEid": 3297,
+      "bFirstEid": 3297,
+      "cbuffers": [
+        {
+          "aFile": "3297_cs_0.json",
+          "bFile": "3297_cs_0.json",
+          "block": "cs_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3297_cs_1.json",
+          "bFile": "3297_cs_1.json",
+          "block": "cs_1",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 1,
+          "stage": "cs",
+          "values": []
+        },
+        {
+          "aFile": "3297_ps_0.json",
+          "bFile": "3297_ps_0.json",
+          "block": "ps_0",
+          "notes": [
+            "every member the two documents share has the same value"
+          ],
+          "slot": 0,
+          "stage": "ps",
+          "values": []
+        }
+      ],
+      "changes": [],
+      "images": [],
+      "note": "",
+      "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > CompositeEditorPrimitives 2003x1254 MSAA=1 > Composite 2003x1254 MSAA=1",
+      "shaders": [
+        {
+          "aBytes": 212572,
+          "aHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "bBytes": 212572,
+          "bHash": "00fece89db9e0f67761f9061b2b576961d4eca4f673b863e10c32cd786b3a9b4",
+          "changes": [],
+          "stage": "cs",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 22396,
+          "aHash": "3f889dc2a4dbbae66426cf0cb4336b5bad0e888c89ececbf3373ea93bf60aab0",
+          "bBytes": 22396,
+          "bHash": "3f889dc2a4dbbae66426cf0cb4336b5bad0e888c89ececbf3373ea93bf60aab0",
+          "changes": [],
+          "stage": "ps",
+          "verdict": "same"
+        },
+        {
+          "aBytes": 6272,
+          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "bBytes": 6272,
+          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
+          "changes": [],
+          "stage": "vs",
+          "verdict": "same"
+        }
+      ],
+      "stateAdded": [],
+      "stateRemoved": [],
+      "status": "same",
+      "structure": "graphics, colour only (no depth target), 40 event(s), eids 3297..3336  |  graphics, colour only (no depth target), 40 event(s), eids 3297..3336"
     }
   ],
   "sameCapture": true,
@@ -1095,7 +2495,7 @@
     "imagesCompared": 0,
     "imagesNotCompared": 0,
     "removed": 0,
-    "same": 12,
+    "same": 28,
     "shadersDifferent": 0,
     "stateChanges": 0,
     "structureChanges": 0

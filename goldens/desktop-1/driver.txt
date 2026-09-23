@@ -14,10 +14,10 @@ remoteReplay       0
 vendor             6
 shaderDebugging    1
 pixelHistory       1
-chunks             2132
-resources          493
-textures           62
-buffers            149
+chunks             16857
+resources          4843
+textures           408
+buffers            489
 debugMessages      0
 #=== draws 12
 schemaVersion      1
@@ -26,20 +26,20 @@ renderdoc          <engine>
 driver             D3D12
 localReplay        1
 machine            Windows x86 64-bit 
-23      0     FRDGBuilder::Execute
-28      1       ID3D12GraphicsCommandList::ResolveQueryData()
-29      1       ID3D12GraphicsCommandList::ResolveQueryData()
-30      1       ID3D12GraphicsCommandList::ResolveQueryData()
-46      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-47      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-48      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-49      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-50      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-51      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-52      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-53      1       ID3D12GraphicsCommandList::CopyBufferRegion()
-totalActions       559
-totalCalls         187
+121     0     FRDGBuilder::Execute
+123     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+124     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+130     1       ID3D12GraphicsCommandList::ResolveQueryData()
+131     1       ID3D12GraphicsCommandList::ResolveQueryData()
+132     1       ID3D12GraphicsCommandList::ResolveQueryData()
+147     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+148     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+149     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+150     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+151     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+152     1       ID3D12GraphicsCommandList::CopyBufferRegion()
+totalActions       2943
+totalCalls         821
 shown              12
 #=== textures
 schemaVersion      1
@@ -50,68 +50,414 @@ localReplay        1
 machine            Windows x86 64-bit 
 res326     dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.00 MB
 res327     dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.00 MB
+res332     dim=3 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res333     dim=3 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res334     dim=3 1x1x1 mips=1 arr=1 smp=1 fmt=R8G8B8A8_UINT 0.00 MB
+res337     dim=2 1x1x1 mips=1 arr=6 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
 res340     dim=2 1x1x1 mips=1 arr=6 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
-res2207    dim=2 2003x1254x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
-res2209    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
-res2213    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
-res2215    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
-res2219    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.00 MB
-res2246    dim=2 128x32x1 mips=1 arr=1 smp=1 fmt=R16G16_UNORM 0.02 MB
-res2255    dim=2 2048x2048x1 mips=1 arr=1 smp=1 fmt=A8_UNORM 4.00 MB
-res60749   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
-res60750   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
-res60751   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
-res60752   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
-res60753   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
-res60754   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
-res60755   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8G8B8A8_TYPELESS 0.06 MB
-res60757   dim=3 30x5x5 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.06 MB
-res60758   dim=3 16x16x16 mips=1 arr=1 smp=1 fmt=R8G8B8A8_UINT 0.06 MB
-res60826   dim=2 256x64x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
-res60827   dim=2 32x32x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
-res60828   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
-res60829   dim=2 192x104x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.12 MB
-res60830   dim=3 32x32x16 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.12 MB
-res60843   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=D32S8_TYPELESS 12.38 MB
-res60857   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
-res60858   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
-res60859   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
-res60860   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
-res60861   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
-res60862   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
-res60863   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
-res60864   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.06 MB
-res61303   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32G32B32A32_FLOAT 0.06 MB
-res61304   dim=3 32x32x32 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 0.12 MB
-res61308   dim=2 512x512x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.25 MB
-res61309   dim=2 1024x512x1 mips=10 arr=1 smp=1 fmt=R16_FLOAT 1.38 MB
-res61312   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 9.88 MB
-res61313   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61314   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61315   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61316   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61317   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61318   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61319   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61320   dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
-res61321   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
-res61322   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
-res61323   dim=2 1x1x1 mips=1 arr=3 smp=1 fmt=R32_UINT 0.06 MB
-res61324   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
-res61325   dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
-res61328   dim=2 1x1x1 mips=1 arr=3 smp=1 fmt=R32_UINT 0.06 MB
-res61329   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 9.88 MB
-res61330   dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
-res61331   dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.62 MB
-res61332   dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 1.25 MB
-res61333   dim=2 251x157x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.31 MB
-res61334   dim=2 126x79x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.12 MB
-res61335   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
-res61336   dim=2 63x40x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
-res61337   dim=2 32x20x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
-res61454   dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
-total              62
-shown              62
+res450     dim=2 32x32x1 mips=6 arr=1 smp=1 fmt=BC1_TYPELESS 0.00 MB
+res471     dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.04 MB
+res472     dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.00 MB
+res473     dim=2 1x1x1 mips=1 arr=2 smp=1 fmt=R16G16B16A16_FLOAT 0.00 MB
+res474     dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=BC1_TYPELESS 0.01 MB
+res1868    dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res1871    dim=2 256x256x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.25 MB
+res2195    dim=2 2003x1254x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 9.88 MB
+res2202    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2203    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2206    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2208    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res2212    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.00 MB
+res2215    dim=2 768x8x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.01 MB
+res2216    dim=2 128x32x1 mips=1 arr=1 smp=1 fmt=R16G16_UNORM 0.02 MB
+res2221    dim=2 64x64x1 mips=1 arr=1 smp=1 fmt=R8G8_UNORM 0.01 MB
+res2223    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.00 MB
+res2226    dim=2 66x64x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_UNORM 0.04 MB
+res2243    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32G32B32A32_FLOAT 0.06 MB
+res2244    dim=3 32x32x32 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 0.12 MB
+res2263    dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=D32S8_TYPELESS 6.00 MB
+res2568    dim=2 2048x2048x1 mips=1 arr=1 smp=1 fmt=A8_UNORM 4.00 MB
+res2645    dim=2 2048x2048x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 16.00 MB
+res2665    dim=2 1024x1024x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.00 MB
+res3167    dim=2 4x4x1 mips=3 arr=1 smp=1 fmt=BC5_UNORM 0.00 MB
+res3175    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res3182    dim=2 4x4x1 mips=3 arr=1 smp=1 fmt=BC1_TYPELESS 0.00 MB
+res3223    dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32G32B32A32_FLOAT 0.06 MB
+res3816    dim=2 32x32x1 mips=6 arr=1 smp=1 fmt=BC1_TYPELESS 0.00 MB
+res3890    dim=2 32x32x1 mips=6 arr=1 smp=1 fmt=BC5_UNORM 0.00 MB
+res3891    dim=2 4x4x1 mips=3 arr=1 smp=1 fmt=BC1_TYPELESS 0.00 MB
+res4577    dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC5_UNORM 0.09 MB
+res4578    dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res7959    dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC5_UNORM 0.02 MB
+res90855   dim=2 128x128x1 mips=8 arr=6 smp=1 fmt=R16G16B16A16_FLOAT 1.06 MB
+res91035   dim=2 6144x2048x1 mips=1 arr=1 smp=1 fmt=R16_TYPELESS 24.00 MB
+res91582   dim=2 64x64x1 mips=1 arr=6 smp=1 fmt=BC3_TYPELESS 0.02 MB
+res92222   dim=2 512x512x1 mips=10 arr=32 smp=1 fmt=BC5_UNORM 10.75 MB
+res92246   dim=2 32x32x1 mips=6 arr=6 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res92255   dim=2 64x64x1 mips=1 arr=6 smp=1 fmt=BC3_TYPELESS 0.02 MB
+res92260   dim=2 2048x2048x1 mips=12 arr=6 smp=1 fmt=BC6_UFLOAT 32.06 MB
+res92518   dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res92854   dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res92873   dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res92912   dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res93019   dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res93417   dim=2 64x128x1 mips=8 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.05 MB
+res93418   dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res93422   dim=2 256x256x1 mips=9 arr=32 smp=1 fmt=BC1_TYPELESS 1.50 MB
+res103161  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 1.38 MB
+res111756  dim=2 1024x1024x1 mips=11 arr=2 smp=1 fmt=BC1_TYPELESS 1.38 MB
+res111760  dim=2 1024x1024x1 mips=11 arr=7 smp=1 fmt=BC3_TYPELESS 9.38 MB
+res131004  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_UNORM 9.38 MB
+res131007  dim=2 512x512x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.25 MB
+res131012  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.75 MB
+res131016  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res131017  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.06 MB
+res131040  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res131041  dim=2 1x1x1 mips=1 arr=3 smp=1 fmt=R32_UINT 0.06 MB
+res131043  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res131044  dim=2 1x1x1 mips=1 arr=3 smp=1 fmt=R32_UINT 0.06 MB
+res160904  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160906  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160944  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160946  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160948  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160952  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160954  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160956  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160960  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160964  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160966  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160968  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res160972  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161049  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161057  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161061  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161065  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161067  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161069  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161071  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161155  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161165  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161167  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161171  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161194  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161196  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161198  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161200  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161202  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161204  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161206  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161208  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161216  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161220  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161224  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161228  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161264  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161274  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161280  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161282  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res161284  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res162336  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=BC3_TYPELESS 0.01 MB
+res165539  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res165541  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res166482  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=BC5_UNORM 0.01 MB
+res166483  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=BC1_TYPELESS 0.01 MB
+res166635  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res167146  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res167153  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res167154  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res167428  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res167429  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res167530  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res168575  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res168800  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res168804  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res168805  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res168812  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res168813  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res168817  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res169233  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res170123  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170139  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170146  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170331  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.00 MB
+res170338  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170339  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170342  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170343  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170346  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170348  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170356  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170357  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170360  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170361  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170364  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170365  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170368  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170369  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170467  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res170561  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170562  dim=2 64x64x1 mips=7 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 0.02 MB
+res170606  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res170607  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res170608  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res170609  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res170610  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res170611  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res176320  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res176324  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res176330  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res176331  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res179380  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179381  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179382  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res179383  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res179384  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res179389  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res179435  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res179438  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179439  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res179440  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179443  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res179446  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179447  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res179448  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179452  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res179453  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res179468  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179472  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179474  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res179703  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res179704  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC3_TYPELESS 1.38 MB
+res179706  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res213922  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res213923  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res213924  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res213926  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res213933  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res214192  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res214235  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res214236  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res244045  dim=2 1024x512x1 mips=10 arr=1 smp=1 fmt=R16_FLOAT 1.38 MB
+res244046  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 9.38 MB
+res244047  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 4.75 MB
+res244048  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.75 MB
+res244049  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.75 MB
+res244050  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.75 MB
+res244051  dim=2 4x4x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res244052  dim=2 4x4x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res244063  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res244065  dim=2 1x1x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 0.06 MB
+res245364  dim=2 2004x1256x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 19.62 MB
+res255009  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res255011  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res256473  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res256480  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res256481  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res256483  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res256484  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res256486  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res256489  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res256600  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC3_TYPELESS 0.09 MB
+res260990  dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
+res260997  dim=2 63x40x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res260998  dim=2 32x20x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res260999  dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
+res261000  dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.62 MB
+res261001  dim=2 251x157x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.19 MB
+res261002  dim=2 126x79x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261003  dim=2 63x40x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261004  dim=2 32x20x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261005  dim=2 32x20x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261006  dim=2 32x20x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261007  dim=2 63x40x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261008  dim=2 63x40x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261009  dim=2 126x79x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261010  dim=2 126x79x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res261011  dim=2 251x157x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.19 MB
+res261012  dim=2 251x157x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.19 MB
+res261013  dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.62 MB
+res261014  dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.62 MB
+res261015  dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
+res261016  dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
+res261017  dim=2 501x314x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 1.25 MB
+res261018  dim=2 1002x628x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 2.50 MB
+res269065  dim=2 256x128x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res269261  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res269266  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res269273  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res269279  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res269280  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res269281  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res269490  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res269496  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res269500  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res270708  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res270710  dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res270713  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res270722  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res271695  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res271696  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res271707  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res272071  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res272072  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res272075  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res272246  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res272248  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res272249  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res272250  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res287947  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res287948  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res290651  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC3_TYPELESS 0.09 MB
+res293201  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res293202  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res293203  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res293220  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res293225  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res293235  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res298152  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res298157  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res298158  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res298159  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res303039  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res305509  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res305511  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res305896  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res305897  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res305898  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res305899  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res306091  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res307179  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res307180  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res307181  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res308059  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC3_TYPELESS 1.38 MB
+res309117  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC3_TYPELESS 1.38 MB
+res311834  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC3_TYPELESS 0.09 MB
+res311839  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC3_TYPELESS 1.38 MB
+res312015  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res312017  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res312018  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res312019  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res315152  dim=2 512x256x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.09 MB
+res315322  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res315323  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res327247  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res327248  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res327249  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res327250  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res328486  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res328487  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res328488  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res352480  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res352481  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res352482  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res356037  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res367666  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res367667  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res367668  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res490444  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res490445  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res490446  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res505875  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res505876  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res505877  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res630707  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res633356  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res633358  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res634458  dim=2 4x4x1 mips=1 arr=1 smp=1 fmt=R32_UINT 0.06 MB
+res661729  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res661730  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res661731  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res661732  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC3_TYPELESS 0.38 MB
+res712886  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=D32S8_TYPELESS 6.00 MB
+res712888  dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.38 MB
+res712889  dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 1.19 MB
+res712890  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R8_UNORM 1.25 MB
+res712891  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.75 MB
+res712892  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712893  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712894  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712895  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712896  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=B8G8R8A8_TYPELESS 4.75 MB
+res712897  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712898  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712899  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712900  dim=3 64x64x64 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 2.00 MB
+res712901  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R32_FLOAT 4.75 MB
+res712902  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 9.38 MB
+res712903  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 4.75 MB
+res712904  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 9.38 MB
+res713078  dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=D32S8_TYPELESS 6.00 MB
+res740688  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res742080  dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res742081  dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC5_UNORM 0.02 MB
+res742082  dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res742083  dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res742778  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res742779  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC1_TYPELESS 0.05 MB
+res742780  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC5_UNORM 0.09 MB
+res743128  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res745161  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res745498  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res745499  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res745500  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res746717  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res746736  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res746738  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res748726  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res748727  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC1_TYPELESS 0.69 MB
+res748728  dim=2 1024x1024x1 mips=11 arr=1 smp=1 fmt=BC5_UNORM 1.38 MB
+res751206  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res751207  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res751208  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res819414  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res819415  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res819416  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res819417  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res824954  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res858979  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res858980  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res858981  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res891881  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res891882  dim=2 128x128x1 mips=8 arr=1 smp=1 fmt=BC1_TYPELESS 0.02 MB
+res891883  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res891884  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res891888  dim=2 256x256x1 mips=9 arr=1 smp=1 fmt=BC3_TYPELESS 0.09 MB
+res930277  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res930278  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC1_TYPELESS 0.19 MB
+res930279  dim=2 512x512x1 mips=10 arr=1 smp=1 fmt=BC5_UNORM 0.38 MB
+res1122814 dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 4.75 MB
+res1122816 dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 1.19 MB
+res1122818 dim=2 342x214x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.31 MB
+res1122819 dim=2 342x214x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.62 MB
+res1122820 dim=2 171x107x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.19 MB
+res1122821 dim=2 86x54x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res1122822 dim=2 43x27x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res1122823 dim=2 22x14x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.06 MB
+res1122824 dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 1.19 MB
+res1122825 dim=2 342x214x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.31 MB
+res1122826 dim=2 171x107x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.12 MB
+res1122827 dim=2 86x54x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122828 dim=2 43x27x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122829 dim=2 22x14x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122830 dim=2 22x14x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122832 dim=2 22x14x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122833 dim=2 43x27x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122834 dim=2 43x27x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122835 dim=2 86x54x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122836 dim=2 86x54x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.06 MB
+res1122837 dim=2 171x107x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.12 MB
+res1122838 dim=2 171x107x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.12 MB
+res1122839 dim=2 342x214x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.31 MB
+res1122840 dim=2 342x214x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 0.31 MB
+res1122841 dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 1.19 MB
+res1122842 dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 1.19 MB
+res1122843 dim=2 342x214x1 mips=1 arr=1 smp=1 fmt=R16G16B16A16_FLOAT 0.62 MB
+res1122844 dim=2 684x428x1 mips=1 arr=1 smp=1 fmt=R11G11B10_FLOAT 1.19 MB
+res1122845 dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 4.75 MB
+res1122846 dim=2 1368x856x1 mips=1 arr=1 smp=1 fmt=R10G10B10A2_UNORM 4.75 MB
+total              408
+shown              408
 #=== debug
 schemaVersion      1
 capture            <capture>
@@ -128,24 +474,32 @@ driver             D3D12
 localReplay        1
 machine            Windows x86 64-bit 
 format                       count         bytes  shape                      picture      why
-R8G8B8A8_TYPELESS                8       0.38 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
-B8G8R8A8_TYPELESS                9      49.39 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
-R10G10B10A2_UNORM                3      19.88 MB  4 x 0-bit unorm            no           the engine's format table has no layout for it (no components)
-R16G16B16A16_FLOAT              20     116.07 MB  4 x 16-bit float           yes          
+R8G8B8A8_TYPELESS                2       0.01 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
+B8G8R8A8_TYPELESS               90      52.99 MB  4 x 8-bit typeless         with a cast  typeless: `--cast <type>` says how to read the bits
+R8G8B8A8_UINT                    1       0.00 MB  4 x 8-bit uint             yes          
+BC1_TYPELESS                   128      31.13 MB  4 x 0-bit typeless block   no           the engine's format table has no layout for it (no components)
+R16G16B16A16_FLOAT              27      70.24 MB  4 x 16-bit float           yes          
+R10G10B10A2_UNORM                5      24.25 MB  4 x 0-bit unorm            no           the engine's format table has no layout for it (no components)
+R8_UNORM                         5       1.63 MB  1 x 8-bit unorm            yes          
 R16G16_UNORM                     1       0.02 MB  2 x 16-bit unorm           yes          
+R8G8_UNORM                       1       0.01 MB  2 x 8-bit unorm            yes          
+R32_UINT                        10       0.57 MB  1 x 32-bit uint            yes          
+R16G16B16A16_UNORM               2       9.41 MB  4 x 16-bit unorm           yes          
+R32G32B32A32_FLOAT               2       0.12 MB  4 x 32-bit float           yes          
+D32S8_TYPELESS                   3      18.00 MB  2 x 0-bit typeless         no           the engine's format table has no layout for it (no components)
 A8_UNORM                         1       4.00 MB  1 x 8-bit unorm            no           a special layout (multi-plane or packed): the display path does not take it
-R11G11B10_FLOAT                  8      13.38 MB  3 x 0-bit float            no           the engine's format table has no layout for it (no components)
-R8_UNORM                         3       0.38 MB  1 x 8-bit unorm            yes          
-R8G8B8A8_UINT                    1       0.06 MB  4 x 8-bit uint             yes          
-D32S8_TYPELESS                   1      12.38 MB  2 x 0-bit typeless         no           the engine's format table has no layout for it (no components)
-R32_UINT                         5       0.31 MB  1 x 32-bit uint            yes          
-R32G32B32A32_FLOAT               1       0.06 MB  4 x 32-bit float           yes          
+BC5_UNORM                       59      43.11 MB  2 x 0-bit unorm block      no           the engine's format table has no layout for it (no components)
+BC3_TYPELESS                    24      19.77 MB  4 x 0-bit typeless block   no           the engine's format table has no layout for it (no components)
+R16_TYPELESS                     1      24.00 MB  1 x 16-bit typeless        with a cast  typeless: `--cast <type>` says how to read the bits
+BC6_UFLOAT                       1      32.06 MB  3 x 0-bit unorm block      no           the engine's format table has no layout for it (no components)
 R16_FLOAT                        1       1.38 MB  1 x 16-bit float           yes          
-textures           62
-bytes              228241408
-formatCount        13
-needCast           17
-noLayout           13
+R11G11B10_FLOAT                 43      33.12 MB  3 x 0-bit float            no           the engine's format table has no layout for it (no components)
+R32_FLOAT                        1       4.75 MB  1 x 32-bit float           yes          
+textures           408
+bytes              388579328
+formatCount        21
+needCast           93
+noLayout           264
 #=== crosscheck
 schemaVersion      1
 capture            <capture>
@@ -155,136 +509,288 @@ localReplay        1
 machine            Windows x86 64-bit 
 eid                0
 from               1
-to                 1305
-scanned            144
-linksChecked       155
-bindingsChecked    1142
-bindingsUnmapped   625
-targetsChecked     177
-noRootParameters   66
-total              16
-eid 1186    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish > CanvasFlush > CanvasBatchedElements]
-eid 1195    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish]
-eid 1196    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish]
-eid 1197    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > Scene > RenderFinish]
-eid 1219    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
-eid 1224    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
-eid 1225    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
-eid 1226    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute > Scene > EnqueueCopy(GPUMessageManager.MessageBuffer)]
-eid 1281    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
-eid 1282    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
-eid 1283    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
-eid 1284    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
-eid 1285    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound  [FRDGBuilder::Execute]
-eid 1300    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound
-eid 1301    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound
-eid 1305    rt-format   ps writes 2 colour target(s) (SV_Target0..1) but 1 render target(s) are bound
-shown              16
+to                 7708
+scanned            747
+linksChecked       3273
+bindingsChecked    16549
+bindingsUnmapped   11614
+targetsChecked     959
+noRootParameters   88
+total              60
+eid 1407    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Cordyline_01_Opaque SM_HappyLand_Island_Tree_Cordyline_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1417    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Cordyline_01_Opaque SM_HappyLand_Island_Tree_Cordyline_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1429    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Palm_02_Opaque SM_HappyLand_Island_Tree_Palm_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1439    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Palm_02_Opaque SM_HappyLand_Island_Tree_Palm_02 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1451    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Banana_03_Opaque SM_HappyLand_Island_Tree_Banana_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1461    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Banana_03_Opaque SM_HappyLand_Island_Tree_Banana_02 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1479    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Flower_Vine_01 SM_HappyLand_Island_Flower_Vine_07 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1489    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Flower_Vine_01 SM_HappyLand_Island_Flower_Vine_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1502    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01 2 instances > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1512    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01 4 instances > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1519    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1553    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista SM_HappyLand_Island_Common_Grass_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1564    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1574    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista1 SM_HappyLand_Island_Common_Grass_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1588    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Root_06 SM_HappyLand_Island_Tree_Root_06]
+eid 1602    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1612    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 2 instances > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1622    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 2 instances > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1635    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1648    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_3 SM_HappyLand_Island_Tree_NewBanian_06 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1661    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_02 2 instances > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1679    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_fx_Telephone_ygw_01 SM_CommentBoard]
+eid 1696    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Building_StreetRoad_test_05 SM_HappyLand_Building_StreetRoad_test_06 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1706    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Building_StreetRoad_test_05 SM_HappyLand_Building_StreetRoad_test_06 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1725    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Banana_03 SM_HappyLand_Island_Tree_Banana_02 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1745    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MID_MI_fx_FountainWater_Column_bp_0 SM_fx_Water_ygw_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1764    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_lsland_Tree_Coconuttree_01 SM_HappyLand_lsland_Tree_Coconuttree_10 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1774    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_lsland_Tree_Coconuttree_01 SM_HappyLand_lsland_Tree_Coconuttree_10 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1784    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_lsland_Tree_Coconuttree_01 SM_HappyLand_lsland_Tree_Coconuttree_10 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1794    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_lsland_Tree_Coconuttree_01 SM_HappyLand_lsland_Tree_Coconuttree_05 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1804    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_lsland_Tree_Coconuttree_01 SM_HappyLand_lsland_Tree_Coconuttree_06 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1814    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_lsland_Tree_Coconuttree_01 SM_HappyLand_lsland_Tree_Coconuttree_05 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1828    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_Cordyline_01 SM_HappyLand_Island_Tree_Cordyline_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1846    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_04_BB SM_HappyLand_Island_Tree_NewBanian_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1858    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_03_BB SM_HappyLand_Island_Tree_NewBanian_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1870    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_05_BB SM_HappyLand_Island_Tree_NewBanian_05 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1882    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_03_BB SM_HappyLand_Island_Tree_NewBanian_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1894    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_07_BB SM_HappyLand_Island_Tree_NewBanian_07 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1906    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_03_BB SM_HappyLand_Island_Tree_NewBanian_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1918    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_05_BB SM_HappyLand_Island_Tree_NewBanian_05 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1930    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_04_BB SM_HappyLand_Island_Tree_NewBanian_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1937    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_04_BB SM_HappyLand_Island_Tree_NewBanian_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1949    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_07_BB SM_HappyLand_Island_Tree_NewBanian_07 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1967    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1977    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1987    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 1994    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 2001    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 2011    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_03 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 2021    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_04 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 2031    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 2050    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Grass_SeaGrass_09 SM_Plant_Sea_SeaweedC_01 > ExecuteIndirect(maxCount 1, count <1>)]
+eid 2057    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene]
+eid 2058    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene]
+eid 2059    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene]
+eid 2060    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene]
+eid 2061    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene]
+eid 2078    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ClearRenderTarget(SceneVelocity, slice 0, mip 0) 1368x856 ClearAction]
+eid 2085    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > VelocityParallel]
+eid 2086    rt-format   ps writes 1 colour target(s) (SV_Target0..0) but 0 render target(s) are bound  [FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > VelocityParallel]
+shown              60
 stoppedEarly       off
-#=== state 304
+#=== state 2731
 schemaVersion      1
 capture            <capture>
 renderdoc          <engine>
 driver             D3D12
 localReplay        1
 machine            Windows x86 64-bit 
-eid                304
-marker             FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere > ExecuteIndirect(maxCount 1, count <1>)
+eid                2731
+marker             FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BasePass > BasePassParallel > MI_fx_Telephone_ygw_01 SM_CommentBoard
 api                1
-vs  res60965  
-cs  res61363  
-depthTarget        60843
-rootSignature      60951
-rp0   reg=0 space=0 vis=vs heap298+0x4434d
-rp0   t0  s0   cat(3) type(5) res61306
-rp0   t1  s0   cat(3) type(5) res60796
-rp0   t2  s0   cat(3) type(5) res60797
-rp0   t3  s0   cat(3) type(5) res60795
-rp0   t4  s0   cat(3) type(5) res61306
-rp0   t5  s0   cat(3) type(5) res60796
-rp0   t6  s0   cat(3) type(5) res60795
-rp0   t7  s0   cat(3) type(8) res60846
-rp0   t8  s0   cat(3) type(8) res60848
-rp0   t9  s0   cat(3) type(8) res60849
-rp0   t10 s0   cat(3) type(8) res60851
-rp0   t11 s0   cat(3) type(9) res60848
-rp0   t12 s0   cat(3) type(9) res60846
-rp0   t13 s0   cat(3) type(9) res60853
-rp0   t14 s0   cat(3) type(5) res60877
-rp0   t15 s0   cat(3) type(5) res60878
-rp0   t16 s0   cat(3) type(9) res60851
-rp0   t17 s0   cat(3) type(8) res60854
-rp0   t18 s0   cat(3) type(9) res60849
-rp0   t19 s0   cat(3) type(5) res60846
-rp0   t20 s0   cat(3) type(5) res60853
-rp0   t21 s0   cat(3) type(7) res61309
-rp0   t22 s0   cat(3) type(7) res61309
-rp0   t23 s0   cat(3) type(7) res61309
-rp0   t24 s0   cat(3) type(7) res61309
-rp0   t25 s0   cat(3) type(4) res60843
-rp0   t26 s0   cat(3) type(7) res61309
-rp0   t27 s0   cat(3) type(7) res61309
-rp0   t28 s0   cat(3) type(7) res61309
-rp0   t29 s0   cat(3) type(7) res61309
-rp0   t30 s0   cat(3) type(4) res61309
-rp0   t31 s0   cat(3) type(7) res61309
-rp0   t32 s0   cat(3) type(7) res61309
-rp0   t33 s0   cat(3) type(4) res61309
-rp0   t34 s0   cat(3) type(7) res60826
-rp0   t35 s0   cat(3) type(7) res60827
-rp0   t36 s0   cat(3) type(4) res60826
-rp0   t37 s0   cat(3) type(7) res60828
-rp0   t38 s0   cat(3) type(4) res60826
-rp0   t39 s0   cat(3) type(4) res60827
-rp0   t40 s0   cat(3) type(6) res315
-rp0   t41 s0   cat(3) type(7) res60829
-rp0   t42 s0   cat(3) type(7) res60830
-rp0   t43 s0   cat(3) type(4) res60826
-rp0   t44 s0   cat(3) type(4) res60827
-rp0   t45 s0   cat(3) type(9) res61310
-rp0   t46 s0   cat(3) type(5) res60795
-rp0   t47 s0   cat(3) type(5) res60796
-rp0   t48 s0   cat(3) type(5) res60797
-rp0   t49 s0   cat(3) type(5) res384
-rp0   t50 s0   cat(3) type(6) res342
-rp0   t51 s0   cat(3) type(9) res61310
-rp0   t52 s0   cat(3) type(5) res384
-rp0   t53 s0   cat(3) type(6) res342
-rp0   t54 s0   cat(3) type(5) res384
-rp0   t55 s0   cat(3) type(5) res61306
-rp0   t56 s0   cat(3) type(5) res60796
-rp0   t57 s0   cat(3) type(5) res60795
-rp0   t58 s0   cat(3) type(6) res315
-rp0   t59 s0   cat(3) type(4) res60758
-rp0   t60 s0   cat(3) type(4) res60749
-rp0   t61 s0   cat(3) type(4) res60750
-rp0   t62 s0   cat(3) type(4) res60751
-rp0   t63 s0   cat(3) type(4) res60752
-rp1   reg=0 space=0 vis=vs res1907
-rp2   reg=1 space=0 vis=vs res1907
-rp3   reg=2 space=0 vis=vs res1907
+vs  res166971 
+ps  res166972 
+cs  res2580   
+slot 0  res244046
+slot 1  res244047
+slot 2  res131012
+slot 3  res244048
+slot 4  res244049
+slot 5  res244050
+depthTarget        2263
+rootSignature      7314
+rp0   reg=0 space=0 vis=ps heap298+0x6d54c
+rp0   t0  s0   cat(3) type(5) res160506
+rp0   t1  s0   cat(3) type(5) res2242
+rp0   t2  s0   cat(3) type(4) res891882
+rp0   t3  s0   cat(3) type(4) res891888
+rp0   t4  s0   cat(3) type(5) res1115856
+rp0   t5  s0   cat(3) type(5) res160507
+rp0   t6  s0   cat(3) type(5) res160508
+rp0   t7  s0   cat(3) type(5) res160506
+rp0   t8  s0   cat(3) type(6) res139591
+rp0   t9  s0   cat(3) type(6) res139591
+rp0   t10 s0   cat(3) type(4) res334
+rp0   t11 s0   cat(3) type(4) res332
+rp0   t12 s0   cat(3) type(5) res160506
+rp0   t13 s0   cat(3) type(5) res2242
+rp0   t14 s0   cat(3) type(4) res307179
+rp0   t15 s0   cat(3) type(5) res1115856
+rp0   t16 s0   cat(3) type(5) res160507
+rp0   t17 s0   cat(3) type(5) res160508
+rp0   t18 s0   cat(3) type(5) res160506
+rp0   t19 s0   cat(3) type(6) res139591
+rp0   t20 s0   cat(3) type(6) res139591
+rp0   t21 s0   cat(3) type(5) res1115856
+rp0   t22 s0   cat(3) type(5) res160507
+rp0   t23 s0   cat(3) type(5) res160508
+rp0   t24 s0   cat(3) type(5) res160506
+rp0   t25 s0   cat(3) type(6) res2177
+rp0   t26 s0   cat(3) type(6) res2177
+rp0   t27 s0   cat(3) type(4) res334
+rp0   t28 s0   cat(3) type(4) res332
+rp0   t29 s0   cat(3) type(5) res160506
+rp0   t30 s0   cat(3) type(5) res2242
+rp0   t31 s0   cat(3) type(4) res162336
+rp0   t32 s0   cat(3) type(4) res162336
+rp0   t33 s0   cat(3) type(5) res1115856
+rp0   t34 s0   cat(3) type(5) res160507
+rp0   t35 s0   cat(3) type(5) res160508
+rp0   t36 s0   cat(3) type(5) res160506
+rp0   t37 s0   cat(3) type(6) res2177
+rp0   t38 s0   cat(3) type(6) res2177
+rp0   t39 s0   cat(3) type(4) res334
+rp0   t40 s0   cat(3) type(4) res332
+rp0   t41 s0   cat(3) type(5) res160506
+rp0   t42 s0   cat(3) type(4) res3816
+rp0   t43 s0   cat(3) type(4) res270710
+rp0   t44 s0   cat(3) type(4) res270710
+rp0   t45 s0   cat(3) type(4) res315152
+rp0   t46 s0   cat(3) type(5) res1115856
+rp0   t47 s0   cat(3) type(5) res160507
+rp0   t48 s0   cat(3) type(5) res160508
+rp0   t49 s0   cat(3) type(5) res160506
+rp0   t50 s0   cat(3) type(6) res2177
+rp0   t51 s0   cat(3) type(6) res2177
+rp0   t52 s0   cat(3) type(5) res1115856
+rp0   t53 s0   cat(3) type(5) res160507
+rp0   t54 s0   cat(3) type(5) res160508
+rp0   t55 s0   cat(3) type(5) res160506
+rp0   t56 s0   cat(3) type(6) res2177
+rp0   t57 s0   cat(3) type(6) res2177
+rp0   t58 s0   cat(3) type(4) res334
+rp0   t59 s0   cat(3) type(4) res332
+rp0   t60 s0   cat(3) type(5) res160506
+rp0   t61 s0   cat(3) type(4) res3816
+rp0   t62 s0   cat(3) type(4) res315323
+rp0   t63 s0   cat(3) type(4) res315322
+rp1   reg=0 space=0 vis=ps heap299+0xce
+rp1   s0  s0   cat(2) type(2) none
+rp1   s1  s0   cat(2) type(2) none
+rp1   s2  s0   cat(2) type(2) none
+rp1   s3  s0   cat(2) type(2) none
+rp1   s4  s0   cat(2) type(2) none
+rp1   s5  s0   cat(2) type(2) none
+rp1   s6  s0   cat(2) type(2) none
+rp1   s7  s0   cat(2) type(2) none
+rp1   s8  s0   cat(2) type(2) none
+rp1   s9  s0   cat(2) type(2) none
+rp1   s10 s0   cat(2) type(2) none
+rp1   s11 s0   cat(2) type(2) none
+rp1   s12 s0   cat(2) type(2) none
+rp1   s13 s0   cat(2) type(2) none
+rp1   s14 s0   cat(2) type(2) none
+rp1   s15 s0   cat(2) type(2) none
+rp1   s16 s0   cat(2) type(2) none
+rp1   s17 s0   cat(2) type(2) none
+rp1   s18 s0   cat(2) type(2) none
+rp1   s19 s0   cat(2) type(2) none
+rp1   s20 s0   cat(2) type(2) none
+rp1   s21 s0   cat(2) type(2) none
+rp1   s22 s0   cat(2) type(2) none
+rp1   s23 s0   cat(2) type(2) none
+rp1   s24 s0   cat(2) type(2) none
+rp1   s25 s0   cat(2) type(2) none
+rp1   s26 s0   cat(2) type(2) none
+rp1   s27 s0   cat(2) type(2) none
+rp1   s28 s0   cat(2) type(2) none
+rp1   s29 s0   cat(2) type(2) none
+rp1   s30 s0   cat(2) type(2) none
+rp1   s31 s0   cat(2) type(2) none
+rp2   reg=0 space=0 vis=vs heap298+0x6d547
+rp2   t0  s0   cat(3) type(5) res1115856
+rp2   t1  s0   cat(3) type(5) res160507
+rp2   t2  s0   cat(3) type(5) res160506
+rp2   t3  s0   cat(3) type(6) res2177
+rp2   t4  s0   cat(3) type(6) res2177
+rp2   t5  s0   cat(3) type(5) res160506
+rp2   t6  s0   cat(3) type(5) res2242
+rp2   t7  s0   cat(3) type(4) res891882
+rp2   t8  s0   cat(3) type(4) res891888
+rp2   t9  s0   cat(3) type(5) res1115856
+rp2   t10 s0   cat(3) type(5) res160507
+rp2   t11 s0   cat(3) type(5) res160508
+rp2   t12 s0   cat(3) type(5) res160506
+rp2   t13 s0   cat(3) type(6) res139591
+rp2   t14 s0   cat(3) type(6) res139591
+rp2   t15 s0   cat(3) type(4) res334
+rp2   t16 s0   cat(3) type(4) res332
+rp2   t17 s0   cat(3) type(5) res160506
+rp2   t18 s0   cat(3) type(5) res2242
+rp2   t19 s0   cat(3) type(4) res307179
+rp2   t20 s0   cat(3) type(5) res1115856
+rp2   t21 s0   cat(3) type(5) res160507
+rp2   t22 s0   cat(3) type(5) res160508
+rp2   t23 s0   cat(3) type(5) res160506
+rp2   t24 s0   cat(3) type(6) res139591
+rp2   t25 s0   cat(3) type(6) res139591
+rp2   t26 s0   cat(3) type(5) res1115856
+rp2   t27 s0   cat(3) type(5) res160507
+rp2   t28 s0   cat(3) type(5) res160508
+rp2   t29 s0   cat(3) type(5) res160506
+rp2   t30 s0   cat(3) type(6) res2177
+rp2   t31 s0   cat(3) type(6) res2177
+rp2   t32 s0   cat(3) type(4) res334
+rp2   t33 s0   cat(3) type(4) res332
+rp2   t34 s0   cat(3) type(5) res160506
+rp2   t35 s0   cat(3) type(5) res2242
+rp2   t36 s0   cat(3) type(4) res162336
+rp2   t37 s0   cat(3) type(4) res162336
+rp2   t38 s0   cat(3) type(5) res1115856
+rp2   t39 s0   cat(3) type(5) res160507
+rp2   t40 s0   cat(3) type(5) res160508
+rp2   t41 s0   cat(3) type(5) res160506
+rp2   t42 s0   cat(3) type(6) res2177
+rp2   t43 s0   cat(3) type(6) res2177
+rp2   t44 s0   cat(3) type(4) res334
+rp2   t45 s0   cat(3) type(4) res332
+rp2   t46 s0   cat(3) type(5) res160506
+rp2   t47 s0   cat(3) type(4) res3816
+rp2   t48 s0   cat(3) type(4) res270710
+rp2   t49 s0   cat(3) type(4) res270710
+rp2   t50 s0   cat(3) type(4) res315152
+rp2   t51 s0   cat(3) type(5) res1115856
+rp2   t52 s0   cat(3) type(5) res160507
+rp2   t53 s0   cat(3) type(5) res160508
+rp2   t54 s0   cat(3) type(5) res160506
+rp2   t55 s0   cat(3) type(6) res2177
+rp2   t56 s0   cat(3) type(6) res2177
+rp2   t57 s0   cat(3) type(5) res1115856
+rp2   t58 s0   cat(3) type(5) res160507
+rp2   t59 s0   cat(3) type(5) res160508
+rp2   t60 s0   cat(3) type(5) res160506
+rp2   t61 s0   cat(3) type(6) res2177
+rp2   t62 s0   cat(3) type(6) res2177
+rp2   t63 s0   cat(3) type(4) res334
+rp3   reg=0 space=0 vis=ps res1896
+rp4   reg=1 space=0 vis=ps res159600
+rp5   reg=0 space=0 vis=vs res109070
+rp6   reg=1 space=0 vis=vs res1896
+rp7   reg=2 space=0 vis=vs res109070
+rp8   reg=3 space=0 vis=vs res342
+rp9   reg=4 space=0 vis=vs res159600
 {"x": 0.00, "y": 0.00, "width": 1368.00, "height": 856.00, "minDepth": 0.000, "maxDepth": 1.000, "enabled": true}
 {"x": 0, "y": 0, "width": 1368, "height": 856, "enabled": true}
 depthEnable        on
-depthWrites        on
+depthWrites        off
 depthFunction      GreaterEqual
-stencilEnable      off
+stencilEnable      on
 stencilReadOnly    off
 alphaToCoverage    off
 independentBlend   on
 fail               Keep
 depthFail          Keep
-pass               Keep
+pass               Replace
 function           AlwaysTrue
 compareMask        255
-writeMask          255
+writeMask          244
 fail               Keep
 depthFail          Keep
-pass               Keep
+pass               Replace
 function           AlwaysTrue
 compareMask        255
-writeMask          255
-{"enabled": false, "writeMask": 0, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+writeMask          244
 {"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
 {"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
 {"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
@@ -292,42 +798,876 @@ writeMask          255
 {"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
 {"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
 {"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
-#=== shaders 304
+{"enabled": false, "writeMask": 15, "colorOperation": "Add", "alphaOperation": "Add", "srcColor": "One", "dstColor": "Zero", "srcAlpha": "One", "dstAlpha": "Zero"}
+#=== shaders 2731
 schemaVersion      1
 capture            <capture>
 renderdoc          <engine>
 driver             D3D12
 localReplay        1
 machine            Windows x86 64-bit 
-eid                304
-marker             FRDGBuilder::Execute > Scene > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial Sphere > ExecuteIndirect(maxCount 1, count <1>)
+eid                2731
+marker             FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BasePass > BasePassParallel > MI_fx_Telephone_ygw_01 SM_CommentBoard
 stage              vs
-resource           60965
-entry              Main__OPTIMIZED
+resource           166971
+entry              Main
 encoding           6
-bytes              35808
-hash               14c484071c8d5bf99e93587de0b7ff0f3ac627a95896f2b7f26f1b3d4a2ed43e
-cbuffer[0] View                         b0 s0 5996 bytes, 1 variables
-cbuffer[1] Scene                        b1 s0 188 bytes, 1 variables
-cbuffer[2] InstancedVFLooseParameters   b2 s0 96 bytes, 1 variables
+bytes              368704
+hash               d1d3ab575e37e2e08c2567c21cf327ea13599daa7ca793db4f2fb42458ae94a8
+cbuffer[0] $Globals                     b0 s0 4 bytes, 1 variables
+cbuffer[1] View                         b1 s0 5996 bytes, 1 variables
+cbuffer[2] Scene                        b2 s0 188 bytes, 1 variables
+cbuffer[3] LocalVF                      b3 s0 60 bytes, 1 variables
+cbuffer[4] Material                     b4 s0 156 bytes, 1 variables
 InstanceCulling_InstanceIdsBuffer t0 s0 n1
 Scene_GPUScene_GPUSceneInstanceSceneData t1 s0 n1
-Scene_GPUScene_GPUSceneInstancePayloadData t2 s0 n1
-Scene_GPUScene_GPUScenePrimitiveSceneData t3 s0 n1
+Scene_GPUScene_GPUScenePrimitiveSceneData t2 s0 n1
+LocalVF_VertexFetch_TexCoordBuffer t3 s0 n1
+LocalVF_VertexFetch_PackedTangentsBuffer t4 s0 n1
 ATTRIBUTE0 reg0 c4 float
 ATTRIBUTE13 reg1 c1 uint
 SV_InstanceID0 reg2 c1 uint
 SV_VertexID0 reg3 c1 uint
-SV_Position0 reg0 c4 float
+TEXCOORD10_centroid0 reg0 c4 float
+TEXCOORD11_centroid0 reg1 c4 float
+TEXCOORD0 reg2 c4 float
+PRIMITIVE_ID0 reg3 c1 uint
+TEXCOORD9 reg4 c3 float
+SV_Position0 reg5 c4 float
+stage              ps
+resource           166972
+entry              MainPS
+encoding           6
+bytes              347456
+hash               a7dd3c7c19d58e7b604e297059a0b2441f2ba30f1244e00fe7c0ea8db8c76e68
+cbuffer[0] View                         b0 s0 5996 bytes, 1 variables
+cbuffer[1] Material                     b1 s0 156 bytes, 1 variables
+Scene_GPUScene_GPUScenePrimitiveSceneData t0 s0 n1
+OpaqueBasePass_EyeAdaptationBuffer t1 s0 n1
+Material_Texture2D_0 t2 s0 n1
+Material_Texture2D_1 t3 s0 n1
+TEXCOORD10_centroid0 reg0 c4 float
+TEXCOORD11_centroid0 reg1 c4 float
+TEXCOORD0 reg2 c4 float
+PRIMITIVE_ID0 reg3 c1 uint
+SV_IsFrontFace0 reg3 c1 uint
+TEXCOORD9 reg4 c3 float
+SV_Position0 reg5 c4 float
+SV_Target0 reg0 c4 float
+SV_Target1 reg1 c4 float
+SV_Target2 reg2 c4 float
+SV_Target3 reg3 c4 float
 stage              cs
-resource           61363
+resource           2580
 entry              CopyEyeAdaptationToTextureCS
 encoding           6
-bytes              3668
-hash               74a568dbdeef7059ab12529c8f0861ddb352da51cdcc938829ead00071c343f6
+bytes              7296
+hash               4630d0eec99fb34d93b521025758fd6681a91872a87ad034e5cd5163f981566f
 EyeAdaptationBuffer t0 s0 n1
 RWEyeAdaptationTexture u0 s0 n1
 threadId0 reg0 c3 uint
-#=== trace 304 --pixel 640,360
+#=== trace 2731 --pixel 640,360
+#=== trace 2731 --vertex 0
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+event              2731
+stage              vs
+shader             166971
+stageAsked         vs
+invocation         vertex 0,0,0,0
+debuggable         on
+sourceDebugInfo    on
+constantBlocks     5
+resources          5
+samplers           0
+sourceVariables    701
+inputs:
+_IN = { ATTRIBUTE0=-43.2635, 3.32134, 79.2488, 1, ATTRIBUTE13=1529, SV_InstanceID=0, SV_VertexID=0 }
+steps:
+step 1     instr 0      none        [Main]
+        | _OUT = { TEXCOORD10_centroid=0, 0, 0, 0, TEXCOORD11_centroid=0, 0, 0, 0, TEXCOORD0=0, 0, 0, 0, PRIMITIVE_ID=0, TEXCOORD9=0, 0, 0, SV_Position=0, 0, 0, 0 } (new)
+        | _0 = 217 (new)
+        | _1 = { .member0=4, .member1=4, .member2=0, .member3=0 } (new)
+        | _2 = 4 (new)
+        | _3 = 0 (new)
+        | _4 = { .member0=3, .member1=3, .member2=0, .member3=0 } (new)
+        | _5 = 3 (new)
+        | _6 = { .member0=2, .member1=2, .member2=0, .member3=0 } (new)
+        | _7 = 2 (new)
+        | _8 = { .member0=1, .member1=1, .member2=0, .member3=0 } (new)
+        | _9 = 1 (new)
+        | _10 = { .member0=0, .member1=0, .member2=0, .member3=0 } (new)
+        | _11 = 0 (new)
+        | _12 = { .member0=4, .member1=4, .member2=0, .member3=2 } (new)
+        | _13 = { .member0=3, .member1=3, .member2=0, .member3=2 } (new)
+        | _14 = { .member0=2, .member1=2, .member2=0, .member3=2 } (new)
+        | _15 = { .member0=1, .member1=1, .member2=0, .member3=2 } (new)
+        | _16 = { .member0=0, .member1=0, .member2=0, .member3=2 } (new)
+        | _17 = 216 (new)
+        | _18 = { .member0=13, .member1=156 } (new)
+        | _19 = { .member0=13, .member1=60 } (new)
+        | _20 = { .member0=13, .member1=188 } (new)
+        | _21 = { .member0=13, .member1=5996 } (new)
+        | _22 = { .member0=13, .member1=4 } (new)
+        | _23 = 0 (new)
+        | _24 = 0 (new)
+        | _25 = 1 (new)
+        | _26 = 2 (new)
+        | _28 = 59 (new)
+        | _29 = 72 (new)
+        | _30 = 73 (new)
+        | _31 = 2147483647 (new)
+        | _32 = 44 (new)
+        | _33 = { .member0=12, .member1=16 } (new)
+        | _34 = 139 (new)
+        | _35 = 15 (new)
+        | _36 = { .member0=12, .member1=4 } (new)
+        | _37 = 16777215 (new)
+        | _38 = 24 (new)
+        | _39 = 1048575 (new)
+        | _40 = 20 (new)
+        | _41 = 512 (new)
+        | _42 = 65535 (new)
+        | _43 = 16 (new)
+        | _44 = 32767 (new)
+        | _45 = -32768 (new)
+        | _46 = 3.05185e-05 (new)
+        | _47 = -16384 (new)
+        | _48 = 4.3161e-05 (new)
+        | _49 = 32768 (new)
+        | _50 = 6 (new)
+        | _51 = 54 (new)
+        | _52 = 1 (new)
+        | _53 = 2 (new)
+        | _54 = 55 (new)
+        | _55 = 25 (new)
+        | _56 = -0 (new)
+        | _57 = 23 (new)
+        | _58 = -125829120 (new)
+        | _59 = -1 (new)
+        | _60 = 0 (new)
+        | _61 = 18 (new)
+        | _62 = 19 (new)
+        | _63 = 2.09715e+06 (new)
+        | _64 = 31 (new)
+        | _65 = 32 (new)
+        | _66 = 42 (new)
+        | _67 = 43 (new)
+        | _68 = { .member0=10, .member1=1033 } (new)
+        | _69 = 68 (new)
+        | _70 = 255 (new)
+        | _71 = 127 (new)
+        | _72 = -128 (new)
+        | _73 = 0.015748 (new)
+        | _74 = 46 (new)
+        | _75 = 262144 (new)
+        | _76 = 1 (new)
+        | _77 = -1 (new)
+        | _78 = 40 (new)
+        | _79 = { .member0=10, .member1=521 } (new)
+        | _80 = 150 (new)
+        | _81 = 6.28319 (new)
+        | _82 = 13 (new)
+        | _83 = 0.3 (new)
+        | _84 = 0.2 (new)
+        | _85 = 35 (new)
+        | _86 = 36 (new)
+        | _87 = 5 (new)
+        | _88 = 3 (new)
+step 2     instr 1      none        [Main]
+        | _LocalVF_VertexFetch_PackedTangentsBuffer_texture_buf_89 = ? (new)
+step 3     instr 2      none        [Main]
+        | _LocalVF_VertexFetch_TexCoordBuffer_texture_buf_90 = ? (new)
+step 4     instr 3      none        [Main]
+        | _Scene_GPUScene_GPUScenePrimitiveSceneData_texture_structbuf_91 = ? (new)
+step 5     instr 4      none        [Main]
+        | _Scene_GPUScene_GPUSceneInstanceSceneData_texture_structbuf_92 = ? (new)
+step 6     instr 5      none        [Main]
+        | _InstanceCulling_InstanceIdsBuffer_texture_structbuf_93 = ? (new)
+step 7     instr 6      none        [Main]
+        | _Material_cbuffer_94 = { [0]=1073741824, 1065353216, 1075838976, 1114636288, [1]=1084227584, 1041865114, 1065353216, 2361, [2]=1056964608, 1056964608, 1056964608, 2361, [3]=1082130432, 1073741824, 0, 1065353216, [4]=1092616192, 1092087034, 1085348958, 1065353216, [5]=0, 0, 0, 0, [6]=0, 0, 1008981770, 1050253722, [7]=168692352, 2363, 3763105120, 2361, [8]=168691904, 2363, 3763105120, 2361, [9]=3763105120, 2361, 2029545088, 2361 } (new)
+step 8     instr 7      none        [Main]
+        | _LocalVF_cbuffer_95 = { [0]=0, 1, 0, 0, [1]=0, 2, 168870976, 2363, [2]=168871296, 2363, 2029199488, 2361, [3]=168870656, 2363, 2029199488, 2361 } (new)
+step 9     instr 8      none        [Main]
+        | _Scene_cbuffer_96 = { [0]=1203713696, 2361, 1203713792, 2361, [1]=1203713888, 2361, 1203713984, 2361, [2]=1203714080, 2361, 2097152, 7084, [3]=1970276, 18859, 0, 0, [4]=12, 0, 1203751344, 2361, [5]=1203751440, 2361, 0, 0, [6]=1065353216, 1065353216, 1065353216, 1065353216, [7]=0, 0, 0, 0, [8]=872780184, 2383, 872786648, 2383, [9]=2029539808, 2361, 2029539808, 2361, [10]=1065353216, 1065353216, 1203715072, 2361, [11]=1203715824, 2361, 2029540608, 2361 } (new)
+step 10    instr 9      none        [Main]
+        | _View_cbuffer_97 = { [0]=3207198100, 1048945057, 0, 3208302787, [1]=3208605953, 3194832322, 0, 1059445305, [2]=0, 1070039862, 0, 1046462329, [3]=0, 0, 1092616192, 0, [4]=3207198100, 1048945057, 0, 3208302787, [5]=3208605953, 3194832323, 0, 1059445305, [6]=0, 1070039862, 0, 1046462329, [7]=963240033, 3104295956, 1092616192, 965545133, [8]=3207198103, 3208605956, 0, 0, [9]=1037140526, 3183083456, 1058825753, 0, [10]=940966533, 3053535915, 906524675, 1036831949, [11]=3208302787, 1059445305, 1046462329, 0, [12]=3207198102, 1042764449, 3208302787, 0, [13]=3208605955, 3189017612, 1059445305, 0, [14]=0, 1064947813, 1046462329, 0, [15]=0, 0, 0, 1065353216, [16]=3207198102, 3208605955, 0, 0, [17]=1042764449, 3189017612, 1064947813, 0, [18]=3208302787, 1059445305, 1046462329, 0, [19]=0, 0, 0, 1065353216, [20]=3207198102, 1042764449, 3208302787, 0, [21]=3208605955, 3189017612, 1059445305, 0, [22]=0, 1064947813, 1046462329, 0, [23]=0, 0, 0, 1065353216, [24]=3207198102, 3208605955, 0, 0, [25]=1042764449, 3189017612, 1064947813, 0, [26]=3208302787, 1059445305, 1046462329, 0, [27]=0, 0, 0, 1065353216, [28]=1065353213, 0, 0, 0, [29]=0, 1070363635, 0, 0, [30]=0, 0, 0, 1065353216, [31]=0, 0, 1092616192, 0, [32]=1065353213, 0, 0, 0, [33]=0, 1070363635, 0, 0, [34]=0, 0, 0, 1065353216, [35]=0, 0, 1092616192, 0, [36]=1065353217, 0, 0, 0, [37]=0, 1059079560, 0, 0, [38]=0, 0, 0, 1036831949, [39]=2147483648, 2147483648, 1065353216, 2147483648, [40]=3207198103, 3208605957, 0, 0, [41]=1037140527, 3183083456, 1058825753, 0, [42]=0, 0, 0, 1036831949, [43]=3208302787, 1059445305, 1046462329, 0, [44]=3128848683, 3129953566, 0, 0, [45]=3111821444, 962494694, 3132823563, 0, [46]=0, 0, 0, 1036831949, [47]=1024807325, 1067910563, 1062491640, 0, [48]=3207198103, 3208605956, 0, 0, [49]=1037140526, 3183083456, 1058825753, 0, [50]=3208302787, 1059445305, 1046462329, 0, [51]=968590118, 3080819542, 933926404, 1065353216, [52]=3207198103, 3208605957, 0, 0, [53]=1037140527, 3183083456, 1058825753, 0, [54]=3208302787, 1059445305, 1046462329, 0, [55]=0, 0, 0, 1065353216, [56]=3207198103, 3208605957, 0, 0, [57]=1037140527, 3183083456, 1058825753, 0, [58]=3208302787, 1059445305, 1046462329, 0, [59]=3326751873, 3301166101, 1148519356, 1065353216, [60]=3326751873, 3301166101, 1148519356, 0, [61]=3208302787, 1059445305, 1046462329, 0, [62]=1042764449, 3189017612, 1064947813, 0, [63]=3207198102, 3208605955, 0, 0, [64]=1042764449, 3189017612, 1064947813, 0, [65]=3207198102, 3208605955, 0, 0, [66]=0, 0, 1036831949, 2989214839, [67]=1056964608, 3204448255, 1056964607, 1056964608, [68]=968590118, 3080819541, 933926403, 0, [69]=0, 0, 0, 0, [70]=3326751873, 3301166101, 1148519356, 0, [71]=0, 0, 0, 0, [72]=1179268225, 1153682453, 3296003004, 0, [73]=3116073766, 933335893, 3081410051, 0, [74]=1065353213, 0, 0, 0, [75]=0, 1070363635, 0, 0, [76]=3107954736, 975839886, 0, 1065353216, [77]=0, 0, 1092616192, 0, [78]=1065353217, 0, 0, 0, [79]=0, 1059079560, 0, 0, [80]=0, 0, 0, 1036831949, [81]=960471090, 3117746078, 1065353216, 2147483648, [82]=3207195862, 1048929166, 0, 3208302787, [83]=3208607940, 3194804105, 0, 1059445305, [84]=3089595357, 1070041052, 0, 1046462329, [85]=0, 0, 1092616192, 0, [86]=3207198102, 1042764449, 3208302787, 0, [87]=3208605955, 3189017612, 1059445305, 0, [88]=0, 1064947813, 1046462329, 0, [89]=0, 0, 0, 1065353216, [90]=3207198102, 3208605955, 0, 0, [91]=1042764449, 3189017612, 1064947813, 0, [92]=3208302787, 1059445305, 1046462329, 0, [93]=0, 0, 0, 1065353216, [94]=3207198102, 1042764449, 3208302787, 0, [95]=3208605955, 3189017612, 1059445305, 0, [96]=0, 1064947813, 1046462329, 0, [97]=0, 0, 0, 1065353216, [98]=3207198102, 3208605955, 0, 0, [99]=1042764449, 3189017612, 1064947813, 0, [100]=3208302787, 1059445305, 1046462329, 0, [101]=0, 0, 0, 1065353216, [102]=0, 0, 0, 0, [103]=3326751873, 3301166101, 1148519356, 0, [104]=968590118, 3080819541, 933926403, 0, [105]=3326751873, 3301166101, 1148519356, 0, [106]=968590118, 3080819541, 933926403, 0, [107]=1179268225, 1153682453, 3296003004, 0, [108]=3116073766, 933335893, 3081410051, 0, [109]=0, 0, 0, 0, [110]=3326751873, 3301166101, 1148519356, 0, [111]=3326751873, 3301166101, 1148519356, 0, [112]=1179268225, 1153682453, 3296003004, 0, [113]=3326751873, 3301166101, 1148519356, 0, [114]=3326751873, 3301166101, 1148519356, 0, [115]=1179268225, 1153682453, 3296003004, 0, [116]=3207198103, 3208605956, 0, 0, [117]=1037140526, 3183083456, 1058825753, 0, [118]=940966533, 3053535915, 906524675, 1036831949, [119]=3208305936, 1059444001, 1046435720, 0, [120]=3207198103, 3208605957, 0, 0, [121]=1037140527, 3183083456, 1058825753, 0, [122]=3208305937, 1059444001, 1046435720, 0, [123]=0, 0, 0, 1065353216, [124]=1065353216, 2759852032, 0, 0, [125]=2743074816, 1065353216, 0, 2751463424, [126]=0, 0, 1065353216, 0, [127]=612368384, 2772434944, 0, 1065353216, [128]=1065353216, 2764046336, 0, 0, [129]=2751459328, 1065353216, 0, 2751463424, [130]=0, 0, 1065353216, 0, [131]=3107954736, 975839886, 0, 1065353216, [132]=0, 0, 3107954736, 975839886, [133]=0, 0, 0, 2147483648, [134]=1070141404, 1066349144, 1070141404, 1066349144, [135]=0, 0, 0, 0, [136]=1152057344, 1146486784, 977248304, 983113498, [137]=0, 0, 1368, 856, [138]=1065353216, 1065353216, 1065353216, 1065353216, [139]=1152057344, 1146486784, 977248304, 983113498, [140]=968859696, 974724890, 1065347084, 1065343416, [141]=1073741825, 3214951815, 3212836865, 1059079560, [142]=1065353216, 1065353216, 1060034428, 1069247051, [143]=1, 1065353216, 1074037647, 1056393116, [144]=0, 0, 0, 1065353216, [145]=0, 0, 0, 1065353216, [146]=0, 0, 0, 1065353216, [147]=0, 1065353216, 1053609165, 1048576000, [148]=1141956890, 1145833927, 0, 0, [149]=0, 0, 0, 1065353216, [150]=1092616192, 1141957417, 1145834454, 1023660277, [151]=0, 1065353216, 0, 1065353216, [152]=1065353216, 0, 0, 1065353216, [153]=28990, 7084, 12189, 6, [154]=8702, 0, 0, 0, [155]=0, 0, 0, 0, [156]=1064041167, 1060603489, 1059359867, 1061926884, [157]=1058335785, 3198156888, 1061174941, 0, [158]=3309453415, 3298226583, 3303396597, 1015021568, [159]=3324119350, 3313613865, 3317477782, 1015021568, [160]=964170215, 964170215, 964170215, 1115953023, [161]=949288975, 949288975, 949288975, 1130097484, [162]=0, 1065353216, 0, 0, [163]=1075545375, 1059816735, 1075419546, 1065151889, [164]=1043878380, 0, 0, 0, [165]=0, 1065353216, 0, 0, [166]=1103403942, 0, 0, 1112014848, [167]=0, 1133903872, 1140457472, 1116261581, [168]=1065353216, 1065353216, 0, 1000593162, [169]=1065353216, 1065353216, 1065353216, 0, [170]=1065353216, 1065353216, 1065353216, 0, [171]=1065353216, 1065353216, 1065353216, 0, [172]=1058335785, 3198156888, 1061174941, 1065353216, [173]=0, 0, 1065353216, 1065353216, [174]=1077499530, 1074799584, 1073822846, 0, [175]=0, 0, 0, 0, [176]=1077499530, 1074799584, 1073822846, 0, [177]=0, 0, 0, 1065353216, [178]=0, 0, 0, 1065353216, [179]=0, 0, 0, 1065353216, [180]=1065353216, 0, 0, 0, [181]=1065353216, 0, 0, 0, [182]=1065353216, 1065353216, 1065353216, 1065353216, [183]=0, 0, 0, 0, [184]=0, 0, 0, 0, [185]=1065353216, 0, 0, 0, [186]=0, 1065353216, 0, 0, [187]=0, 0, 1065353216, 0, [188]=0, 0, 0, 1065353216, [189]=1065353216, 1065353216, 1065353216, 1065353216, [190]=0, 0, 1065353216, 1065353216, [191]=1065353216, 1065353216, 1065353216, 1065353216, [192]=1065353216, 1065353216, 1065353216, 1065353216, [193]=1065353216, 0, 0, 0, [194]=1065353216, 0, 1051361018, 0, [195]=0, 1065353216, 0, 0, [196]=1065353216, 1065353216, 1065353216, 1065353216, [197]=0, 0, 1065353216, 1065353216, [198]=1064324533, 1061982719, 1061982719, 1065353216, [199]=0, 0, 0, 0, [200]=0, 0, 0, 0, [201]=0, 0, 0, 0, [202]=0, 0, 0, 0, [203]=0, 0, 0, 0, [204]=0, 0, 0, 0, [205]=0, 0, 0, 0, [206]=0, 0, 0, 0, [207]=0, 0, 0, 0, [208]=0, 1065353216, 1088421888, 1065353216, [209]=1, 1061997773, 0, 0, [210]=1084227583, 3204448255, 1176256512, 0, [211]=0, 0, 0, 1065353216, [212]=0, 0, 0, 1065353216, [213]=0, 0, 0, 1065353216, [214]=0, 0, 0, 1065353216, [215]=0, 0, 0, 1065353216, [216]=0, 0, 0, 1065353216, [217]=0, 0, 0, 1065353216, [218]=0, 0, 0, 1065353216, [219]=0, 0, 0, 1065353216, [220]=0, 0, 0, 1065353216, [221]=0, 0, 0, 1065353216, [222]=0, 0, 0, 1065353216, [223]=0, 0, 0, 1065353216, [224]=0, 0, 0, 1065353216, [225]=0, 0, 0, 1065353216, [226]=0, 0, 0, 1065353216, [227]=0, 0, 0, 1065353216, [228]=0, 0, 0, 1065353216, [229]=0, 0, 0, 1065353216, [230]=0, 0, 0, 1065353216, [231]=0, 0, 0, 1065353216, [232]=0, 0, 0, 1065353216, [233]=0, 0, 0, 1065353216, [234]=0, 0, 0, 1065353216, [235]=1065353216, 0, 1, 0, [236]=1065353216, 1065353216, 1065353216, 0, [237]=1065353216, 1065353216, 1065353216, 0, [238]=0, 0, 0, 0, [239]=0, 0, 0, 0, [240]=1926, 11, 0, 0, [241]=0, 0, 0, 0, [242]=0, 0, 0, 0, [243]=0, 0, 1065353216, 1065353216, [244]=1065353216, 1065353216, 1065353216, 1065353216, [245]=1065353216, 1065353216, 1065353216, 1065353216, [246]=1065291896, 1065255218, 0, 0, [247]=0, 0, 0, 0, [248]=0, 0, 0, 0, [249]=0, 0, 0, 0, [250]=0, 0, 0, 1065353216, [251]=991502088, 0, 0, 0, [252]=0, 0, 0, 1065353216, [253]=1065353216, 0, 1065353216, 1065353216, [254]=0, 4, 15, 86, [255]=127, 287, 0, 0, [256]=0, 0, 0, 0, [257]=0, 0, 0, 0, [258]=0, 0, 0, 0, [259]=0, 1017370378, 0, 0, [260]=961612759, 970001367, 974964961, 1024832806, [261]=0, 0, 31, 1065353216, [262]=1115947008, 1115684864, 1014513168, 1015021568, [263]=1065353216, 1065353216, 1065353216, 1065353216, [264]=1065353216, 1065353216, 1065353216, 1065353216, [265]=0, 0, 0, 1176256512, [266]=32, 2, 4, 20, [267]=1, 4, 0, 0, [268]=6, 5, 19, 0, [269]=9, 16, 18, 0, [270]=12, 17, 4294967295, 0, [271]=4294967295, 15, 4294967295, 0, [272]=4294967295, 4294967295, 4294967295, 0, [273]=4294967295, 4294967295, 4294967295, 0, [274]=4294967295, 4294967295, 4294967295, 0, [275]=4294967295, 4294967295, 4294967295, 0, [276]=4294967295, 4294967295, 4294967295, 0, [277]=4294967295, 4294967295, 4294967295, 0, [278]=4294967295, 4294967295, 4294967295, 0, [279]=4294967295, 4294967295, 4294967295, 0, [280]=4294967295, 4294967295, 4294967295, 0, [281]=4294967295, 4294967295, 4294967295, 0, [282]=4294967295, 4294967295, 4294967295, 0, [283]=4294967295, 4294967295, 4294967295, 0, [284]=4294967295, 4294967295, 4294967295, 0, [285]=4294967295, 4294967295, 4294967295, 0, [286]=4294967295, 4294967295, 4294967295, 0, [287]=4294967295, 4294967295, 4294967295, 0, [288]=4294967295, 4294967295, 4294967295, 0, [289]=4294967295, 4294967295, 4294967295, 0, [290]=4294967295, 4294967295, 4294967295, 0, [291]=4294967295, 4294967295, 4294967295, 0, [292]=4294967295, 4294967295, 4294967295, 0, [293]=4294967295, 4294967295, 4294967295, 0, [294]=4294967295, 4294967295, 4294967295, 0, [295]=4294967295, 4294967295, 4294967295, 0, [296]=4294967295, 4294967295, 4294967295, 0, [297]=4294967295, 4294967295, 4294967295, 0, [298]=4294967295, 4294967295, 4294967295, 0, [299]=0, 1060034428, 1041865114, 0, [300]=1065353217, 1059079560, 1065353213, 1070363635, [301]=1065353217, 1059079560, 1065353213, 1070363635, [302]=977248305, 0, 0, 0, [303]=1065353217, 1059079560, 0, 0, [304]=0, 0, 0, 0, [305]=0, 0, 0, 0, [306]=32, 0, 0, 0, [307]=0, 0, 0, 0, [308]=1065353216, 1065353216, 1065353216, 1065353216, [309]=2028305152, 2361, 2029543168, 2361, [310]=0, 0, 0, 0, [311]=0, 0, 0, 0, [312]=1065353216, 1065353216, 1065353216, 0, [313]=2028305152, 2361, 2029543168, 2361, [314]=3763105120, 2361, 2029545088, 2361, [315]=2028305920, 2361, 2028304384, 2361, [316]=2028304384, 2361, 2028304384, 2361, [317]=2028304384, 2361, 2028304384, 2361, [318]=2028304384, 2361, 2028304384, 2361, [319]=2028304384, 2361, 2028304384, 2361, [320]=2029540608, 2361, 2029540608, 2361, [321]=2029540608, 2361, 2029540608, 2361, [322]=2029540608, 2361, 2029540608, 2361, [323]=2029540608, 2361, 2029540608, 2361, [324]=2029540608, 2361, 2028304384, 2361, [325]=2028304384, 2361, 2028305920, 2361, [326]=2028304384, 2361, 2029539968, 2361, [327]=2029539968, 2361, 2029541728, 2361, [328]=2028298240, 2361, 2029540608, 2361, [329]=2028298240, 2361, 2029540608, 2361, [330]=2028304384, 2361, 2029540608, 2361, [331]=1786581504, 2362, 2029540128, 2361, [332]=1786587648, 2362, 2029539808, 2361, [333]=1786584576, 2362, 2029540128, 2361, [334]=2029540448, 2361, 2029539808, 2361, [335]=2029540608, 2361, 2029544608, 2361, [336]=2029539968, 2361, 2029541728, 2361, [337]=2389076992, 2361, 2029540608, 2361, [338]=1796139456, 2363, 2028297472, 2361, [339]=2029540608, 2361, 2028298240, 2361, [340]=2029540608, 2361, 2028298240, 2361, [341]=2029543968, 2361, 2028305152, 2361, [342]=2029540608, 2361, 2028305152, 2361, [343]=2029540608, 2361, 2028305152, 2361, [344]=2029540608, 2361, 1786599936, 2362, [345]=2029540608, 2361, 1786588416, 2362, [346]=2029540608, 2361, 1786589184, 2362, [347]=2029540608, 2361, 1786589952, 2362, [348]=2029540608, 2361, 0, 0, [349]=2028298240, 2361, 2028304384, 2361, [350]=2028298240, 2361, 2028298240, 2361, [351]=2029540608, 2361, 2028306688, 2361, [352]=2029541728, 2361, 2028304384, 2361, [353]=2029541728, 2361, 2028304384, 2361, [354]=2029541728, 2361, 1786596096, 2362, [355]=2029540448, 2361, 2029540608, 2361, [356]=2028306688, 2361, 2029540608, 2361, [357]=2028298240, 2361, 2029540608, 2361, [358]=2029198848, 2361, 2029198848, 2361, [359]=0, 0, 0, 0, [360]=0, 0, 0, 0, [361]=0, 0, 0, 0, [362]=0, 0, 0, 0, [363]=2028298240, 2361, 2029540608, 2361, [364]=2028298240, 2361, 2029540608, 2361, [365]=1065353216, 1065353216, 1065353216, 1065353216, [366]=0, 0, 1785920512, 2362, [367]=2029540608, 2361, 0, 0, [368]=1065353216, 1065353216, 1065353216, 1065353216, [369]=1786576896, 2362, 2029540608, 2361, [370]=2029544608, 2361, 43654016, 2367, [371]=43666176, 2367, 1785291456, 2362, [372]=1801941760, 2363, 0, 0, [373]=1179268225, 1153682453, 3296003004, 0, [374]=3116073766, 933335893, 3081410051, 0 } (new)
+step 11    instr 10     none        [Main]
+        | _"$Globals_cbuffer"_98 = { [0]=0, 985520807, 985520807, 1019381196 } (new)
+step 12    instr 11     none        [Main]
+        | __Material_99 = { [0]=1073741824, 1065353216, 1075838976, 1114636288, [1]=1084227584, 1041865114, 1065353216, 2361, [2]=1056964608, 1056964608, 1056964608, 2361, [3]=1082130432, 1073741824, 0, 1065353216, [4]=1092616192, 1092087034, 1085348958, 1065353216, [5]=0, 0, 0, 0, [6]=0, 0, 1008981770, 1050253722, [7]=168692352, 2363, 3763105120, 2361, [8]=168691904, 2363, 3763105120, 2361, [9]=3763105120, 2361, 2029545088, 2361 } (new)
+step 13    instr 12     none        [Main]
+        | _Material_cbuffer_94 left scope
+        | __LocalVF_100 = { [0]=0, 1, 0, 0, [1]=0, 2, 168870976, 2363, [2]=168871296, 2363, 2029199488, 2361, [3]=168870656, 2363, 2029199488, 2361 } (new)
+step 14    instr 13     none        [Main]
+        | _LocalVF_cbuffer_95 left scope
+        | __Scene_101 = { [0]=1203713696, 2361, 1203713792, 2361, [1]=1203713888, 2361, 1203713984, 2361, [2]=1203714080, 2361, 2097152, 7084, [3]=1970276, 18859, 0, 0, [4]=12, 0, 1203751344, 2361, [5]=1203751440, 2361, 0, 0, [6]=1065353216, 1065353216, 1065353216, 1065353216, [7]=0, 0, 0, 0, [8]=872780184, 2383, 872786648, 2383, [9]=2029539808, 2361, 2029539808, 2361, [10]=1065353216, 1065353216, 1203715072, 2361, [11]=1203715824, 2361, 2029540608, 2361 } (new)
+step 15    instr 14     none        [Main]
+        | _Scene_cbuffer_96 left scope
+        | __View_102 = { [0]=3207198100, 1048945057, 0, 3208302787, [1]=3208605953, 3194832322, 0, 1059445305, [2]=0, 1070039862, 0, 1046462329, [3]=0, 0, 1092616192, 0, [4]=3207198100, 1048945057, 0, 3208302787, [5]=3208605953, 3194832323, 0, 1059445305, [6]=0, 1070039862, 0, 1046462329, [7]=963240033, 3104295956, 1092616192, 965545133, [8]=3207198103, 3208605956, 0, 0, [9]=1037140526, 3183083456, 1058825753, 0, [10]=940966533, 3053535915, 906524675, 1036831949, [11]=3208302787, 1059445305, 1046462329, 0, [12]=3207198102, 1042764449, 3208302787, 0, [13]=3208605955, 3189017612, 1059445305, 0, [14]=0, 1064947813, 1046462329, 0, [15]=0, 0, 0, 1065353216, [16]=3207198102, 3208605955, 0, 0, [17]=1042764449, 3189017612, 1064947813, 0, [18]=3208302787, 1059445305, 1046462329, 0, [19]=0, 0, 0, 1065353216, [20]=3207198102, 1042764449, 3208302787, 0, [21]=3208605955, 3189017612, 1059445305, 0, [22]=0, 1064947813, 1046462329, 0, [23]=0, 0, 0, 1065353216, [24]=3207198102, 3208605955, 0, 0, [25]=1042764449, 3189017612, 1064947813, 0, [26]=3208302787, 1059445305, 1046462329, 0, [27]=0, 0, 0, 1065353216, [28]=1065353213, 0, 0, 0, [29]=0, 1070363635, 0, 0, [30]=0, 0, 0, 1065353216, [31]=0, 0, 1092616192, 0, [32]=1065353213, 0, 0, 0, [33]=0, 1070363635, 0, 0, [34]=0, 0, 0, 1065353216, [35]=0, 0, 1092616192, 0, [36]=1065353217, 0, 0, 0, [37]=0, 1059079560, 0, 0, [38]=0, 0, 0, 1036831949, [39]=2147483648, 2147483648, 1065353216, 2147483648, [40]=3207198103, 3208605957, 0, 0, [41]=1037140527, 3183083456, 1058825753, 0, [42]=0, 0, 0, 1036831949, [43]=3208302787, 1059445305, 1046462329, 0, [44]=3128848683, 3129953566, 0, 0, [45]=3111821444, 962494694, 3132823563, 0, [46]=0, 0, 0, 1036831949, [47]=1024807325, 1067910563, 1062491640, 0, [48]=3207198103, 3208605956, 0, 0, [49]=1037140526, 3183083456, 1058825753, 0, [50]=3208302787, 1059445305, 1046462329, 0, [51]=968590118, 3080819542, 933926404, 1065353216, [52]=3207198103, 3208605957, 0, 0, [53]=1037140527, 3183083456, 1058825753, 0, [54]=3208302787, 1059445305, 1046462329, 0, [55]=0, 0, 0, 1065353216, [56]=3207198103, 3208605957, 0, 0, [57]=1037140527, 3183083456, 1058825753, 0, [58]=3208302787, 1059445305, 1046462329, 0, [59]=3326751873, 3301166101, 1148519356, 1065353216, [60]=3326751873, 3301166101, 1148519356, 0, [61]=3208302787, 1059445305, 1046462329, 0, [62]=1042764449, 3189017612, 1064947813, 0, [63]=3207198102, 3208605955, 0, 0, [64]=1042764449, 3189017612, 1064947813, 0, [65]=3207198102, 3208605955, 0, 0, [66]=0, 0, 1036831949, 2989214839, [67]=1056964608, 3204448255, 1056964607, 1056964608, [68]=968590118, 3080819541, 933926403, 0, [69]=0, 0, 0, 0, [70]=3326751873, 3301166101, 1148519356, 0, [71]=0, 0, 0, 0, [72]=1179268225, 1153682453, 3296003004, 0, [73]=3116073766, 933335893, 3081410051, 0, [74]=1065353213, 0, 0, 0, [75]=0, 1070363635, 0, 0, [76]=3107954736, 975839886, 0, 1065353216, [77]=0, 0, 1092616192, 0, [78]=1065353217, 0, 0, 0, [79]=0, 1059079560, 0, 0, [80]=0, 0, 0, 1036831949, [81]=960471090, 3117746078, 1065353216, 2147483648, [82]=3207195862, 1048929166, 0, 3208302787, [83]=3208607940, 3194804105, 0, 1059445305, [84]=3089595357, 1070041052, 0, 1046462329, [85]=0, 0, 1092616192, 0, [86]=3207198102, 1042764449, 3208302787, 0, [87]=3208605955, 3189017612, 1059445305, 0, [88]=0, 1064947813, 1046462329, 0, [89]=0, 0, 0, 1065353216, [90]=3207198102, 3208605955, 0, 0, [91]=1042764449, 3189017612, 1064947813, 0, [92]=3208302787, 1059445305, 1046462329, 0, [93]=0, 0, 0, 1065353216, [94]=3207198102, 1042764449, 3208302787, 0, [95]=3208605955, 3189017612, 1059445305, 0, [96]=0, 1064947813, 1046462329, 0, [97]=0, 0, 0, 1065353216, [98]=3207198102, 3208605955, 0, 0, [99]=1042764449, 3189017612, 1064947813, 0, [100]=3208302787, 1059445305, 1046462329, 0, [101]=0, 0, 0, 1065353216, [102]=0, 0, 0, 0, [103]=3326751873, 3301166101, 1148519356, 0, [104]=968590118, 3080819541, 933926403, 0, [105]=3326751873, 3301166101, 1148519356, 0, [106]=968590118, 3080819541, 933926403, 0, [107]=1179268225, 1153682453, 3296003004, 0, [108]=3116073766, 933335893, 3081410051, 0, [109]=0, 0, 0, 0, [110]=3326751873, 3301166101, 1148519356, 0, [111]=3326751873, 3301166101, 1148519356, 0, [112]=1179268225, 1153682453, 3296003004, 0, [113]=3326751873, 3301166101, 1148519356, 0, [114]=3326751873, 3301166101, 1148519356, 0, [115]=1179268225, 1153682453, 3296003004, 0, [116]=3207198103, 3208605956, 0, 0, [117]=1037140526, 3183083456, 1058825753, 0, [118]=940966533, 3053535915, 906524675, 1036831949, [119]=3208305936, 1059444001, 1046435720, 0, [120]=3207198103, 3208605957, 0, 0, [121]=1037140527, 3183083456, 1058825753, 0, [122]=3208305937, 1059444001, 1046435720, 0, [123]=0, 0, 0, 1065353216, [124]=1065353216, 2759852032, 0, 0, [125]=2743074816, 1065353216, 0, 2751463424, [126]=0, 0, 1065353216, 0, [127]=612368384, 2772434944, 0, 1065353216, [128]=1065353216, 2764046336, 0, 0, [129]=2751459328, 1065353216, 0, 2751463424, [130]=0, 0, 1065353216, 0, [131]=3107954736, 975839886, 0, 1065353216, [132]=0, 0, 3107954736, 975839886, [133]=0, 0, 0, 2147483648, [134]=1070141404, 1066349144, 1070141404, 1066349144, [135]=0, 0, 0, 0, [136]=1152057344, 1146486784, 977248304, 983113498, [137]=0, 0, 1368, 856, [138]=1065353216, 1065353216, 1065353216, 1065353216, [139]=1152057344, 1146486784, 977248304, 983113498, [140]=968859696, 974724890, 1065347084, 1065343416, [141]=1073741825, 3214951815, 3212836865, 1059079560, [142]=1065353216, 1065353216, 1060034428, 1069247051, [143]=1, 1065353216, 1074037647, 1056393116, [144]=0, 0, 0, 1065353216, [145]=0, 0, 0, 1065353216, [146]=0, 0, 0, 1065353216, [147]=0, 1065353216, 1053609165, 1048576000, [148]=1141956890, 1145833927, 0, 0, [149]=0, 0, 0, 1065353216, [150]=1092616192, 1141957417, 1145834454, 1023660277, [151]=0, 1065353216, 0, 1065353216, [152]=1065353216, 0, 0, 1065353216, [153]=28990, 7084, 12189, 6, [154]=8702, 0, 0, 0, [155]=0, 0, 0, 0, [156]=1064041167, 1060603489, 1059359867, 1061926884, [157]=1058335785, 3198156888, 1061174941, 0, [158]=3309453415, 3298226583, 3303396597, 1015021568, [159]=3324119350, 3313613865, 3317477782, 1015021568, [160]=964170215, 964170215, 964170215, 1115953023, [161]=949288975, 949288975, 949288975, 1130097484, [162]=0, 1065353216, 0, 0, [163]=1075545375, 1059816735, 1075419546, 1065151889, [164]=1043878380, 0, 0, 0, [165]=0, 1065353216, 0, 0, [166]=1103403942, 0, 0, 1112014848, [167]=0, 1133903872, 1140457472, 1116261581, [168]=1065353216, 1065353216, 0, 1000593162, [169]=1065353216, 1065353216, 1065353216, 0, [170]=1065353216, 1065353216, 1065353216, 0, [171]=1065353216, 1065353216, 1065353216, 0, [172]=1058335785, 3198156888, 1061174941, 1065353216, [173]=0, 0, 1065353216, 1065353216, [174]=1077499530, 1074799584, 1073822846, 0, [175]=0, 0, 0, 0, [176]=1077499530, 1074799584, 1073822846, 0, [177]=0, 0, 0, 1065353216, [178]=0, 0, 0, 1065353216, [179]=0, 0, 0, 1065353216, [180]=1065353216, 0, 0, 0, [181]=1065353216, 0, 0, 0, [182]=1065353216, 1065353216, 1065353216, 1065353216, [183]=0, 0, 0, 0, [184]=0, 0, 0, 0, [185]=1065353216, 0, 0, 0, [186]=0, 1065353216, 0, 0, [187]=0, 0, 1065353216, 0, [188]=0, 0, 0, 1065353216, [189]=1065353216, 1065353216, 1065353216, 1065353216, [190]=0, 0, 1065353216, 1065353216, [191]=1065353216, 1065353216, 1065353216, 1065353216, [192]=1065353216, 1065353216, 1065353216, 1065353216, [193]=1065353216, 0, 0, 0, [194]=1065353216, 0, 1051361018, 0, [195]=0, 1065353216, 0, 0, [196]=1065353216, 1065353216, 1065353216, 1065353216, [197]=0, 0, 1065353216, 1065353216, [198]=1064324533, 1061982719, 1061982719, 1065353216, [199]=0, 0, 0, 0, [200]=0, 0, 0, 0, [201]=0, 0, 0, 0, [202]=0, 0, 0, 0, [203]=0, 0, 0, 0, [204]=0, 0, 0, 0, [205]=0, 0, 0, 0, [206]=0, 0, 0, 0, [207]=0, 0, 0, 0, [208]=0, 1065353216, 1088421888, 1065353216, [209]=1, 1061997773, 0, 0, [210]=1084227583, 3204448255, 1176256512, 0, [211]=0, 0, 0, 1065353216, [212]=0, 0, 0, 1065353216, [213]=0, 0, 0, 1065353216, [214]=0, 0, 0, 1065353216, [215]=0, 0, 0, 1065353216, [216]=0, 0, 0, 1065353216, [217]=0, 0, 0, 1065353216, [218]=0, 0, 0, 1065353216, [219]=0, 0, 0, 1065353216, [220]=0, 0, 0, 1065353216, [221]=0, 0, 0, 1065353216, [222]=0, 0, 0, 1065353216, [223]=0, 0, 0, 1065353216, [224]=0, 0, 0, 1065353216, [225]=0, 0, 0, 1065353216, [226]=0, 0, 0, 1065353216, [227]=0, 0, 0, 1065353216, [228]=0, 0, 0, 1065353216, [229]=0, 0, 0, 1065353216, [230]=0, 0, 0, 1065353216, [231]=0, 0, 0, 1065353216, [232]=0, 0, 0, 1065353216, [233]=0, 0, 0, 1065353216, [234]=0, 0, 0, 1065353216, [235]=1065353216, 0, 1, 0, [236]=1065353216, 1065353216, 1065353216, 0, [237]=1065353216, 1065353216, 1065353216, 0, [238]=0, 0, 0, 0, [239]=0, 0, 0, 0, [240]=1926, 11, 0, 0, [241]=0, 0, 0, 0, [242]=0, 0, 0, 0, [243]=0, 0, 1065353216, 1065353216, [244]=1065353216, 1065353216, 1065353216, 1065353216, [245]=1065353216, 1065353216, 1065353216, 1065353216, [246]=1065291896, 1065255218, 0, 0, [247]=0, 0, 0, 0, [248]=0, 0, 0, 0, [249]=0, 0, 0, 0, [250]=0, 0, 0, 1065353216, [251]=991502088, 0, 0, 0, [252]=0, 0, 0, 1065353216, [253]=1065353216, 0, 1065353216, 1065353216, [254]=0, 4, 15, 86, [255]=127, 287, 0, 0, [256]=0, 0, 0, 0, [257]=0, 0, 0, 0, [258]=0, 0, 0, 0, [259]=0, 1017370378, 0, 0, [260]=961612759, 970001367, 974964961, 1024832806, [261]=0, 0, 31, 1065353216, [262]=1115947008, 1115684864, 1014513168, 1015021568, [263]=1065353216, 1065353216, 1065353216, 1065353216, [264]=1065353216, 1065353216, 1065353216, 1065353216, [265]=0, 0, 0, 1176256512, [266]=32, 2, 4, 20, [267]=1, 4, 0, 0, [268]=6, 5, 19, 0, [269]=9, 16, 18, 0, [270]=12, 17, 4294967295, 0, [271]=4294967295, 15, 4294967295, 0, [272]=4294967295, 4294967295, 4294967295, 0, [273]=4294967295, 4294967295, 4294967295, 0, [274]=4294967295, 4294967295, 4294967295, 0, [275]=4294967295, 4294967295, 4294967295, 0, [276]=4294967295, 4294967295, 4294967295, 0, [277]=4294967295, 4294967295, 4294967295, 0, [278]=4294967295, 4294967295, 4294967295, 0, [279]=4294967295, 4294967295, 4294967295, 0, [280]=4294967295, 4294967295, 4294967295, 0, [281]=4294967295, 4294967295, 4294967295, 0, [282]=4294967295, 4294967295, 4294967295, 0, [283]=4294967295, 4294967295, 4294967295, 0, [284]=4294967295, 4294967295, 4294967295, 0, [285]=4294967295, 4294967295, 4294967295, 0, [286]=4294967295, 4294967295, 4294967295, 0, [287]=4294967295, 4294967295, 4294967295, 0, [288]=4294967295, 4294967295, 4294967295, 0, [289]=4294967295, 4294967295, 4294967295, 0, [290]=4294967295, 4294967295, 4294967295, 0, [291]=4294967295, 4294967295, 4294967295, 0, [292]=4294967295, 4294967295, 4294967295, 0, [293]=4294967295, 4294967295, 4294967295, 0, [294]=4294967295, 4294967295, 4294967295, 0, [295]=4294967295, 4294967295, 4294967295, 0, [296]=4294967295, 4294967295, 4294967295, 0, [297]=4294967295, 4294967295, 4294967295, 0, [298]=4294967295, 4294967295, 4294967295, 0, [299]=0, 1060034428, 1041865114, 0, [300]=1065353217, 1059079560, 1065353213, 1070363635, [301]=1065353217, 1059079560, 1065353213, 1070363635, [302]=977248305, 0, 0, 0, [303]=1065353217, 1059079560, 0, 0, [304]=0, 0, 0, 0, [305]=0, 0, 0, 0, [306]=32, 0, 0, 0, [307]=0, 0, 0, 0, [308]=1065353216, 1065353216, 1065353216, 1065353216, [309]=2028305152, 2361, 2029543168, 2361, [310]=0, 0, 0, 0, [311]=0, 0, 0, 0, [312]=1065353216, 1065353216, 1065353216, 0, [313]=2028305152, 2361, 2029543168, 2361, [314]=3763105120, 2361, 2029545088, 2361, [315]=2028305920, 2361, 2028304384, 2361, [316]=2028304384, 2361, 2028304384, 2361, [317]=2028304384, 2361, 2028304384, 2361, [318]=2028304384, 2361, 2028304384, 2361, [319]=2028304384, 2361, 2028304384, 2361, [320]=2029540608, 2361, 2029540608, 2361, [321]=2029540608, 2361, 2029540608, 2361, [322]=2029540608, 2361, 2029540608, 2361, [323]=2029540608, 2361, 2029540608, 2361, [324]=2029540608, 2361, 2028304384, 2361, [325]=2028304384, 2361, 2028305920, 2361, [326]=2028304384, 2361, 2029539968, 2361, [327]=2029539968, 2361, 2029541728, 2361, [328]=2028298240, 2361, 2029540608, 2361, [329]=2028298240, 2361, 2029540608, 2361, [330]=2028304384, 2361, 2029540608, 2361, [331]=1786581504, 2362, 2029540128, 2361, [332]=1786587648, 2362, 2029539808, 2361, [333]=1786584576, 2362, 2029540128, 2361, [334]=2029540448, 2361, 2029539808, 2361, [335]=2029540608, 2361, 2029544608, 2361, [336]=2029539968, 2361, 2029541728, 2361, [337]=2389076992, 2361, 2029540608, 2361, [338]=1796139456, 2363, 2028297472, 2361, [339]=2029540608, 2361, 2028298240, 2361, [340]=2029540608, 2361, 2028298240, 2361, [341]=2029543968, 2361, 2028305152, 2361, [342]=2029540608, 2361, 2028305152, 2361, [343]=2029540608, 2361, 2028305152, 2361, [344]=2029540608, 2361, 1786599936, 2362, [345]=2029540608, 2361, 1786588416, 2362, [346]=2029540608, 2361, 1786589184, 2362, [347]=2029540608, 2361, 1786589952, 2362, [348]=2029540608, 2361, 0, 0, [349]=2028298240, 2361, 2028304384, 2361, [350]=2028298240, 2361, 2028298240, 2361, [351]=2029540608, 2361, 2028306688, 2361, [352]=2029541728, 2361, 2028304384, 2361, [353]=2029541728, 2361, 2028304384, 2361, [354]=2029541728, 2361, 1786596096, 2362, [355]=2029540448, 2361, 2029540608, 2361, [356]=2028306688, 2361, 2029540608, 2361, [357]=2028298240, 2361, 2029540608, 2361, [358]=2029198848, 2361, 2029198848, 2361, [359]=0, 0, 0, 0, [360]=0, 0, 0, 0, [361]=0, 0, 0, 0, [362]=0, 0, 0, 0, [363]=2028298240, 2361, 2029540608, 2361, [364]=2028298240, 2361, 2029540608, 2361, [365]=1065353216, 1065353216, 1065353216, 1065353216, [366]=0, 0, 1785920512, 2362, [367]=2029540608, 2361, 0, 0, [368]=1065353216, 1065353216, 1065353216, 1065353216, [369]=1786576896, 2362, 2029540608, 2361, [370]=2029544608, 2361, 43654016, 2367, [371]=43666176, 2367, 1785291456, 2362, [372]=1801941760, 2363, 0, 0, [373]=1179268225, 1153682453, 3296003004, 0, [374]=3116073766, 933335893, 3081410051, 0 } (new)
+step 16    instr 15     none       BasePassVertexShader.dxil:3437  [Main]
+        | _View_cbuffer_97 left scope
+        | __$Globals_103 = { [0]=0, 985520807, 985520807, 1019381196 } (new)
+step 17    instr 16     none       BasePassVertexShader.dxil:3437  [Main]
+        | _"$Globals_cbuffer"_98 left scope
+        | _104 = 0 (new)
+step 18    instr 17     none       BasePassVertexShader.dxil:3437  [Main]
+        | _105 = 0 (new)
+step 19    instr 18     none       BasePassVertexShader.dxil:3437  [Main]
+        | _106 = 1529 (new)
+step 20    instr 19     none       BasePassVertexShader.dxil:3437  [Main]
+        | _107 = -43.2635 (new)
+step 21    instr 20     none       BasePassVertexShader.dxil:3437  [Main]
+        | _108 = 3.32134 (new)
+step 22    instr 48     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _109 = 79.2488 (new)
+step 23    instr 49     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _110 = -0.663903, 0.260999, 0, -0.729748 (new)
+step 24    instr 50     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _111 = -0.663903 (new)
+step 25    instr 51     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _112 = 0.260999 (new)
+step 26    instr 52     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _113 = 0 (new)
+step 27    instr 53     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _114 = -0.729748 (new)
+step 28    instr 54     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _110 left scope
+        | _115 = -0.747818, -0.231711, 0, 0.647861 (new)
+step 29    instr 55     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _116 = -0.747818 (new)
+step 30    instr 56     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _117 = -0.231711 (new)
+step 31    instr 57     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _118 = 0 (new)
+step 32    instr 58     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _119 = 0.647861 (new)
+step 33    instr 59     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _115 left scope
+        | _120 = 0, 1.55869, 0, 0.218504 (new)
+step 34    instr 60     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _121 = 0 (new)
+step 35    instr 61     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _122 = 1.55869 (new)
+step 36    instr 62     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _123 = 0 (new)
+step 37    instr 63     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _124 = 0.218504 (new)
+step 38    instr 64     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _120 left scope
+        | _125 = 0, 0, 10, 0 (new)
+step 39    instr 65     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _126 = 0 (new)
+step 40    instr 66     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _127 = 0 (new)
+step 41    instr 67     none       BasePassVertexShader.dxil:1880  [Main > ResolveView > GetPrimaryView]
+        | _128 = 10 (new)
+step 42    instr 88     none       BasePassVertexShader.dxil:1907  [Main > ResolveView > GetPrimaryView]
+        | _129 = 0 (new)
+step 43    instr 89     none       BasePassVertexShader.dxil:1907  [Main > ResolveView > GetPrimaryView]
+        | _125 left scope
+        | _130 = 12941.1, 1566.38, -980.058, 0 (new)
+step 44    instr 90     none       BasePassVertexShader.dxil:1907  [Main > ResolveView > GetPrimaryView]
+        | _131 = 12941.1 (new)
+step 45    instr 91     none       BasePassVertexShader.dxil:1907  [Main > ResolveView > GetPrimaryView]
+        | _132 = 1566.38 (new)
+step 46    instr 95     none       BasePassVertexShader.dxil:1908  [Main > ResolveView > GetPrimaryView]
+        | _133 = -980.058 (new)
+step 47    instr 96     none       BasePassVertexShader.dxil:1908  [Main > ResolveView > GetPrimaryView]
+        | _130 left scope
+        | _134 = -0.000357651, 1.92613e-05, -2.03354e-05, 0 (new)
+step 48    instr 97     none       BasePassVertexShader.dxil:1908  [Main > ResolveView > GetPrimaryView]
+        | _135 = -0.000357651 (new)
+step 49    instr 98     none       BasePassVertexShader.dxil:1908  [Main > ResolveView > GetPrimaryView]
+        | _136 = 1.92613e-05 (new)
+step 50    instr 398    none       BasePassVertexShader.dxil:2727  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | _137 = -2.03354e-05 (new)
+step 51    instr 399    none       BasePassVertexShader.dxil:2727  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | _134 left scope
+        | _138 = 0 (new)
+step 52    instr 429    none       BasePassVertexShader.dxil:2737  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+step 53    instr 430    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | _138 left scope
+        | _146 = 1529 (new)
+step 54    instr 431    none       BasePassVertexShader.dxil:2737  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | __InstanceCulling_InstanceIdsBuffer_147 = ? (new)
+step 55    instr 432    none       BasePassVertexShader.dxil:2737  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | _InstanceCulling_InstanceIdsBuffer_texture_structbuf_93 left scope
+        | __InstanceCulling_InstanceIdsBuffer_147: ? -> ?
+        | _RawBufferLoad3999_148 = 16777796, 168367, 168368, 168408 (new)
+step 56    instr 435    none       BasePassVertexShader.dxil:2709  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > UnpackInstanceCullingOutput]
+        | _146 left scope
+        | __InstanceCulling_InstanceIdsBuffer_147 left scope
+        | _149 = 16777796 (new)
+step 57    instr 438    none       BasePassVertexShader.dxil:2711  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > UnpackInstanceCullingOutput]
+        | _RawBufferLoad3999_148 left scope
+        | _150 = 580 (new)
+step 58    instr 439    none       BasePassVertexShader.dxil:3348  [Main > GetVertexFactoryIntermediates]
+        | _151 = 1 (new)
+step 59    instr 440    none       BasePassVertexShader.dxil:3348  [Main > GetVertexFactoryIntermediates]
+        | _149 left scope
+        | _phitmp_152 = 1 (new)
+step 60    instr 441    none        [Main > GetVertexFactoryIntermediates]
+        | _151 left scope
+        | _phitmp_152 left scope
+step 61    instr 442    none        [Main > GetVertexFactoryIntermediates]
+        | __1372_0_153 = 580 (new)
+step 62    instr 445    none       BasePassVertexShader.dxil:2740  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | __3374_0_154 = 1 (new)
+step 63    instr 446    none       BasePassVertexShader.dxil:2740  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | _155 = 1203714080, 2361, 2097152, 7084 (new)
+step 64    instr 476    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates]
+        | __Scene_101 left scope
+        | _156 = 2097152 (new)
+step 65    instr 477    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstancePrimitiveIdAndFlags > LoadInstanceSceneDataElement]
+        | _155 left scope
+        | __Scene_GPUScene_GPUSceneInstanceSceneData_157 = ? (new)
+step 66    instr 478    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstancePrimitiveIdAndFlags > LoadInstanceSceneDataElement]
+        | _Scene_GPUScene_GPUSceneInstanceSceneData_texture_structbuf_92 left scope
+        | _150 left scope
+        | __Scene_GPUScene_GPUSceneInstanceSceneData_157: ? -> ?
+        | _RawBufferLoad3998_158 = 2.42256e-41, 0, 8.18358e-43, 0 (new)
+step 67    instr 479    none       BasePassVertexShader.dxil:2548  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstancePrimitiveIdAndFlags]
+        | _159 = 2.42256e-41 (new)
+step 68    instr 484    none       BasePassVertexShader.dxil:43  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstancePrimitiveIdAndFlags > UnpackPrimitiveIdAndInstanceFlags > BitFieldExtractU32]
+        | _RawBufferLoad3998_158 left scope
+        | _160 = 17288 (new)
+step 69    instr 490    none       BasePassVertexShader.dxil:43  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstancePrimitiveIdAndFlags > UnpackPrimitiveIdAndInstanceFlags > BitFieldExtractU32]
+        | _159 left scope
+        | _161 = 17288 (new)
+step 70    instr 493    none       BasePassVertexShader.dxil:2637  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _162 = 0 (new)
+step 71    instr 494    none       BasePassVertexShader.dxil:2638  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _160 left scope
+        | _163 = 1 (new)
+step 72    instr 495    none       BasePassVertexShader.dxil:2638  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _164 = 0 (new)
+step 73    instr 496    none       BasePassVertexShader.dxil:2637  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _165 = 1 (new)
+step 74    instr 497    none       BasePassVertexShader.dxil:2369  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData]
+        | _164 left scope
+        | _166 = 1 (new)
+step 75    instr 498    none       BasePassVertexShader.dxil:2640  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _163 left scope
+        | _165 left scope
+        | _167 = 760672 (new)
+step 76    instr 520    none       BasePassVertexShader.dxil:2362  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData > LoadPrimitivePrimitiveSceneDataElement]
+step 77    instr 522    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData > LoadPrimitivePrimitiveSceneDataElement]
+        | _166 left scope
+        | _168 = 760673 (new)
+step 78    instr 523    none       BasePassVertexShader.dxil:2364  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData > LoadPrimitivePrimitiveSceneDataElement]
+        | __Scene_GPUScene_GPUScenePrimitiveSceneData_169 = ? (new)
+step 79    instr 524    none       BasePassVertexShader.dxil:2364  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData > LoadPrimitivePrimitiveSceneDataElement]
+        | __Scene_GPUScene_GPUScenePrimitiveSceneData_169: ? -> ?
+        | _RawBufferLoad3952_170 = -13717, 744, 863.489, 4.41325e-41 (new)
+step 80    instr 525    none       BasePassVertexShader.dxil:2364  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData > LoadPrimitivePrimitiveSceneDataElement]
+        | __Scene_GPUScene_GPUScenePrimitiveSceneData_169 left scope
+        | _171 = -13717 (new)
+step 81    instr 526    none       BasePassVertexShader.dxil:2364  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > GetPrimitiveData > LoadPrimitivePrimitiveSceneDataElement]
+        | _172 = 744 (new)
+step 82    instr 542    none       BasePassVertexShader.dxil:2649  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _173 = 863.489 (new)
+step 83    instr 544    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _RawBufferLoad3952_170 left scope
+        | _174 = 2097732 (new)
+step 84    instr 545    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | __Scene_GPUScene_GPUSceneInstanceSceneData_157: ? -> ?
+        | _RawBufferLoad3932_175 = -4.59177e-41, 3.86064e-05, 2.00391, 1.18238e-38 (new)
+step 85    instr 546    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _176 = -4.59177e-41 (new)
+step 86    instr 547    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _177 = 3.86064e-05 (new)
+step 87    instr 548    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _178 = 2.00391 (new)
+step 88    instr 549    none       BasePassVertexShader.dxil:2649  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _179 = 1.18238e-38 (new)
+step 89    instr 550    none       BasePassVertexShader.dxil:2649  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _RawBufferLoad3932_175 left scope
+        | __i04237_180 = -2147450880 (new)
+step 90    instr 551    none       BasePassVertexShader.dxil:2649  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _176 left scope
+        | __i14238_181 = 941747521 (new)
+step 91    instr 552    none       BasePassVertexShader.dxil:2649  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _177 left scope
+        | __i24239_182 = 1073758208 (new)
+step 92    instr 557    none       BasePassVertexShader.dxil:2650  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _178 left scope
+        | __i3_183 = 8437760 (new)
+step 93    instr 558    none       BasePassVertexShader.dxil:2650  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _179 left scope
+        | _184 = 4194304 (new)
+step 94    instr 560    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _156 left scope
+        | _185 = 4194884 (new)
+step 95    instr 561    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _184 left scope
+        | __Scene_GPUScene_GPUSceneInstanceSceneData_157: ? -> ?
+        | _RawBufferLoad3931_186 = 0, 0, 2.05742e-05, 1 (new)
+step 96    instr 562    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | __Scene_GPUScene_GPUSceneInstanceSceneData_157 left scope
+        | _187 = 0 (new)
+step 97    instr 563    none       BasePassVertexShader.dxil:2482  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > LoadInstanceSceneDataElement]
+        | _187 left scope
+        | _188 = 0 (new)
+step 98    instr 571    none       BasePassVertexShader.dxil:2503  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _188 left scope
+        | _189 = 2.05742e-05 (new)
+step 99    instr 572    none       BasePassVertexShader.dxil:2503  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _174 left scope
+        | _185 left scope
+        | _RawBufferLoad3931_186 left scope
+        | _189 left scope
+        | _190 = 32768 (new)
+step 100   instr 573    none       BasePassVertexShader.dxil:2504  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _191 = 32768 (new)
+step 101   instr 574    none       BasePassVertexShader.dxil:2504  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _190 left scope
+        | _192 = 32768 (new)
+step 102   instr 575    none       BasePassVertexShader.dxil:2505  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _193 = 32768 (new)
+step 103   instr 576    none       BasePassVertexShader.dxil:2505  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _192 left scope
+        | _194 = 27969 (new)
+step 104   instr 580    none       BasePassVertexShader.dxil:2507  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _195 = 27969 (new)
+step 105   instr 581    none       BasePassVertexShader.dxil:2507  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _194 left scope
+        | __i04240_196 = 0 (new)
+step 106   instr 582    none       BasePassVertexShader.dxil:2507  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14241_197 = 0 (new)
+step 107   instr 583    none       BasePassVertexShader.dxil:2507  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04242_198 = 0 (new)
+step 108   instr 586    none       BasePassVertexShader.dxil:2508  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04240_196 left scope
+        | __i14243_199 = 0 (new)
+step 109   instr 587    none       BasePassVertexShader.dxil:2508  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14241_197 left scope
+        | _200 = 11585 (new)
+step 110   instr 589    none       BasePassVertexShader.dxil:2509  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _201 = 0.50002 (new)
+step 111   instr 590    none       BasePassVertexShader.dxil:2509  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _200 left scope
+        | _202 = 32768 (new)
+step 112   instr 593    none       BasePassVertexShader.dxil:2203  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _203 = 1 (new)
+step 113   instr 594    none       BasePassVertexShader.dxil:2203  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _202 left scope
+        | _204 = 0 (new)
+step 114   instr 595    none       BasePassVertexShader.dxil:2204  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _205 = 0 (new)
+step 115   instr 596    none       BasePassVertexShader.dxil:2204  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _FAbs4022_206 = 0 (new)
+step 116   instr 597    none       BasePassVertexShader.dxil:2204  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _FAbs4023_207 = 0 (new)
+step 117   instr 598    none       BasePassVertexShader.dxil:2204  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _208 = 0 (new)
+step 118   instr 602    none       BasePassVertexShader.dxil:2205  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _FAbs4022_206 left scope
+        | _FAbs4023_207 left scope
+        | _209 = 2 (new)
+step 119   instr 603    none       BasePassVertexShader.dxil:2205  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _208 left scope
+        | _210 = 4 (new)
+step 120   instr 604    none       BasePassVertexShader.dxil:2205  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _Rsqrt4013_211 = 0.5 (new)
+step 121   instr 605    none       BasePassVertexShader.dxil:2205  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | _210 left scope
+        | __i04244_212 = 0 (new)
+step 122   instr 606    none       BasePassVertexShader.dxil:2205  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > HemiOctahedronToUnitVector]
+        | __i14245_213 = 0 (new)
+step 123   instr 607    none       BasePassVertexShader.dxil:2490  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | __i24246_214 = 1 (new)
+step 124   instr 608    none       BasePassVertexShader.dxil:2490  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _204 left scope
+        | _205 left scope
+        | _209 left scope
+        | _Rsqrt4013_211 left scope
+        | _215 = 2 (new)
+step 125   instr 610    none       BasePassVertexShader.dxil:2491  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _216 = 0.5 (new)
+step 126   instr 611    none       BasePassVertexShader.dxil:2491  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _215 left scope
+        | _217 = 0 (new)
+step 127   instr 612    none       BasePassVertexShader.dxil:2491  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _218 = 0 (new)
+step 128   instr 614    none       BasePassVertexShader.dxil:2492  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _217 left scope
+        | _219 = -0 (new)
+step 129   instr 615    none       BasePassVertexShader.dxil:2492  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _218 left scope
+        | _220 = 0 (new)
+step 130   instr 616    none       BasePassVertexShader.dxil:2492  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _221 = 0 (new)
+step 131   instr 621    none       BasePassVertexShader.dxil:2493  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _220 left scope
+        | _222 = 1 (new)
+step 132   instr 622    none       BasePassVertexShader.dxil:2493  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _221 left scope
+        | _223 = 0 (new)
+step 133   instr 623    none       BasePassVertexShader.dxil:2493  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform > GetHemiOrthoBasis]
+        | _224 = 0 (new)
+step 134   instr 628    none       BasePassVertexShader.dxil:2513  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _223 left scope
+        | _225 = 1 (new)
+step 135   instr 629    none       BasePassVertexShader.dxil:2513  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _216 left scope
+        | _224 left scope
+        | _226 = 0.25002 (new)
+step 136   instr 630    none       BasePassVertexShader.dxil:2513  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _227 = 0.74998 (new)
+step 137   instr 632    none       BasePassVertexShader.dxil:2514  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _226 left scope
+        | _Sqrt_228 = 0.866014 (new)
+step 138   instr 634    none       BasePassVertexShader.dxil:2515  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _227 left scope
+        | _229 = 0.50002 (new)
+step 139   instr 636    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _230 = 0.866014 (new)
+step 140   instr 637    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _203 left scope
+        | __i04247_231 = 0.50002 (new)
+step 141   instr 638    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14248_232 = -0 (new)
+step 142   instr 639    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _233 = 0 (new)
+step 143   instr 640    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04250_234 = -0 (new)
+step 144   instr 641    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14251_235 = 0.866014 (new)
+step 145   instr 642    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _236 = 0 (new)
+step 146   instr 643    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i24252_237 = -0 (new)
+step 147   instr 644    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _236 left scope
+        | __i04253_238 = 0.50002 (new)
+step 148   instr 645    none       BasePassVertexShader.dxil:2516  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04247_231 left scope
+        | __i04250_234 left scope
+        | __i14254_239 = 0.866014 (new)
+step 149   instr 649    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14248_232 left scope
+        | __i14251_235 left scope
+        | __i24255_240 = -0 (new)
+step 150   instr 650    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _233 left scope
+        | __i24252_237 left scope
+        | _241 = -0 (new)
+step 151   instr 651    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _242 = 0.866014 (new)
+step 152   instr 652    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _243 = -0.866014 (new)
+step 153   instr 653    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _241 left scope
+        | _242 left scope
+        | _244 = 0.50002 (new)
+step 154   instr 654    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _245 = -0 (new)
+step 155   instr 655    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _246 = 0.50002 (new)
+step 156   instr 656    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _244 left scope
+        | _245 left scope
+        | _247 = 0 (new)
+step 157   instr 657    none       BasePassVertexShader.dxil:2517  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _248 = 0 (new)
+step 158   instr 661    none       BasePassVertexShader.dxil:2523  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _249 = 0 (new)
+step 159   instr 663    none       BasePassVertexShader.dxil:2524  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _191 left scope
+        | _193 left scope
+        | _195 left scope
+        | __i04242_198 left scope
+        | __i14243_199 left scope
+        | _201 left scope
+        | _219 left scope
+        | _222 left scope
+        | _225 left scope
+        | _Sqrt_228 left scope
+        | _229 left scope
+        | _230 left scope
+        | _247 left scope
+        | _248 left scope
+        | _250 = 128 (new)
+step 160   instr 664    none       BasePassVertexShader.dxil:2524  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _251 = 1073741824 (new)
+step 161   instr 665    none       BasePassVertexShader.dxil:2524  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _252 = 947912704 (new)
+step 162   instr 667    none       BasePassVertexShader.dxil:2528  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _251 left scope
+        | _253 = 6.10352e-05 (new)
+step 163   instr 671    none       BasePassVertexShader.dxil:2531  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _252 left scope
+        | _254 = 16384 (new)
+step 164   instr 672    none       BasePassVertexShader.dxil:2531  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04256_255 = 16384 (new)
+step 165   instr 676    none       BasePassVertexShader.dxil:2532  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i24258_256 = 49152 (new)
+step 166   instr 677    none       BasePassVertexShader.dxil:2532  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04259_257 = 16384 (new)
+step 167   instr 678    none       BasePassVertexShader.dxil:2532  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14260_258 = 16384 (new)
+step 168   instr 685    none       BasePassVertexShader.dxil:2533  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i24261_259 = 49152 (new)
+step 169   instr 686    none       BasePassVertexShader.dxil:2533  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04262_260 = -16384 (new)
+step 170   instr 687    none       BasePassVertexShader.dxil:2533  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14263_261 = -16384 (new)
+step 171   instr 694    none       BasePassVertexShader.dxil:2534  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i24264_262 = 16384 (new)
+step 172   instr 695    none       BasePassVertexShader.dxil:2534  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04265_263 = -1 (new)
+step 173   instr 696    none       BasePassVertexShader.dxil:2534  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14266_264 = -1 (new)
+step 174   instr 703    none       BasePassVertexShader.dxil:2535  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i24267_265 = 1 (new)
+step 175   instr 704    none       BasePassVertexShader.dxil:2535  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04268_266 = -0.50002 (new)
+step 176   instr 705    none       BasePassVertexShader.dxil:2535  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04253_238 left scope
+        | __i14269_267 = -0.866014 (new)
+step 177   instr 709    none       BasePassVertexShader.dxil:2536  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i14254_239 left scope
+        | __i24270_268 = 0 (new)
+step 178   instr 710    none       BasePassVertexShader.dxil:2536  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i24255_240 left scope
+        | __i04272_269 = 0.866014 (new)
+step 179   instr 711    none       BasePassVertexShader.dxil:2536  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _243 left scope
+        | __i04272_269 left scope
+        | __i14273_270 = -0.50002 (new)
+step 180   instr 715    none       BasePassVertexShader.dxil:2537  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _246 left scope
+        | __i14273_270 left scope
+        | __i24274_271 = -0 (new)
+step 181   instr 716    none       BasePassVertexShader.dxil:2537  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | _249 left scope
+        | __i24274_271 left scope
+        | __i04276_272 = 0 (new)
+step 182   instr 717    none       BasePassVertexShader.dxil:2537  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > DecodeTransform]
+        | __i04244_212 left scope
+        | __i04276_272 left scope
+        | __i14277_273 = 0 (new)
+step 183   instr 724    none       BasePassVertexShader.dxil:2653  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __i14245_213 left scope
+        | __i14277_273 left scope
+        | __i24278_274 = 1 (new)
+step 184   instr 725    none       BasePassVertexShader.dxil:2653  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __i24246_214 left scope
+        | _250 left scope
+        | _253 left scope
+        | _254 left scope
+        | __i04256_255 left scope
+        | __i24258_256 left scope
+        | __i24278_274 left scope
+        | _FAbs_275 = 1 (new)
+step 185   instr 726    none       BasePassVertexShader.dxil:2653  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _FAbs4011_276 = 1 (new)
+step 186   instr 730    none       BasePassVertexShader.dxil:2654  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _FAbs4012_277 = 1 (new)
+step 187   instr 731    none       BasePassVertexShader.dxil:2654  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __i04280_278 = 1 (new)
+step 188   instr 732    none       BasePassVertexShader.dxil:2654  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _FAbs_275 left scope
+        | __i04280_278 left scope
+        | __i14281_279 = 1 (new)
+step 189   instr 743    none       BasePassVertexShader.dxil:2563  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > ComputeInstanceDerivedData > GetInstanceDeterminantSignFromFlags]
+        | _FAbs4011_276 left scope
+        | __i14281_279 left scope
+        | __i24282_280 = 1 (new)
+step 190   instr 744    none       BasePassVertexShader.dxil:2563  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > ComputeInstanceDerivedData > GetInstanceDeterminantSignFromFlags]
+        | _FAbs4012_277 left scope
+        | __i24282_280 left scope
+        | _281 = 0 (new)
+step 191   instr 747    none       BasePassVertexShader.dxil:27  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData > ComputeInstanceDerivedData > GetInstanceDeterminantSignFromFlags > CondMask]
+        | _282 = 0 (new)
+step 192   instr 753    none       BasePassVertexShader.dxil:2704  [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _281 left scope
+        | _283 = 1 (new)
+step 193   instr 754    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | _282 left scope
+        | _283 left scope
+step 194   instr 755    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __41383_0_i0_284 = 1 (new)
+step 195   instr 756    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __41383_0_i1_285 = 1 (new)
+step 196   instr 757    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __41383_0_i2_286 = 1 (new)
+step 197   instr 758    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __51384_0_287 = 1 (new)
+step 198   instr 759    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __01379_1_0_i0_288 = -13717 (new)
+step 199   instr 760    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __01379_1_0_i1_289 = 744 (new)
+step 200   instr 761    none        [Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]
+        | __01379_1_0_i2_290 = 863.489 (new)
+outputs (after 200 step(s), stopped early):
+_0 = 217
+_1 = { .member0=4, .member1=4, .member2=0, .member3=0 }
+_10 = { .member0=0, .member1=0, .member2=0, .member3=0 }
+_104 = 0
+_105 = 0
+_106 = 1529
+_107 = -43.2635
+_108 = 3.32134
+_109 = 79.2488
+_11 = 0
+_111 = -0.663903
+_112 = 0.260999
+_113 = 0
+_114 = -0.729748
+_116 = -0.747818
+_117 = -0.231711
+_118 = 0
+_119 = 0.647861
+_12 = { .member0=4, .member1=4, .member2=0, .member3=2 }
+_121 = 0
+_122 = 1.55869
+_123 = 0
+_124 = 0.218504
+_126 = 0
+_127 = 0
+_128 = 10
+_129 = 0
+_13 = { .member0=3, .member1=3, .member2=0, .member3=2 }
+_131 = 12941.1
+_132 = 1566.38
+_133 = -980.058
+_135 = -0.000357651
+_136 = 1.92613e-05
+_137 = -2.03354e-05
+_14 = { .member0=2, .member1=2, .member2=0, .member3=2 }
+_15 = { .member0=1, .member1=1, .member2=0, .member3=2 }
+_16 = { .member0=0, .member1=0, .member2=0, .member3=2 }
+_161 = 17288
+_162 = 0
+_167 = 760672
+_168 = 760673
+_17 = 216
+_171 = -13717
+_172 = 744
+_173 = 863.489
+_18 = { .member0=13, .member1=156 }
+_19 = { .member0=13, .member1=60 }
+_2 = 4
+_20 = { .member0=13, .member1=188 }
+_21 = { .member0=13, .member1=5996 }
+_22 = { .member0=13, .member1=4 }
+_23 = 0
+_24 = 0
+_25 = 1
+_26 = 2
+_28 = 59
+_29 = 72
+_3 = 0
+_30 = 73
+_31 = 2147483647
+_32 = 44
+_33 = { .member0=12, .member1=16 }
+_34 = 139
+_35 = 15
+_36 = { .member0=12, .member1=4 }
+_37 = 16777215
+_38 = 24
+_39 = 1048575
+_4 = { .member0=3, .member1=3, .member2=0, .member3=0 }
+_40 = 20
+_41 = 512
+_42 = 65535
+_43 = 16
+_44 = 32767
+_45 = -32768
+_46 = 3.05185e-05
+_47 = -16384
+_48 = 4.3161e-05
+_49 = 32768
+_5 = 3
+_50 = 6
+_51 = 54
+_52 = 1
+_53 = 2
+_54 = 55
+_55 = 25
+_56 = -0
+_57 = 23
+_58 = -125829120
+_59 = -1
+_6 = { .member0=2, .member1=2, .member2=0, .member3=0 }
+_60 = 0
+_61 = 18
+_62 = 19
+_63 = 2.09715e+06
+_64 = 31
+_65 = 32
+_66 = 42
+_67 = 43
+_68 = { .member0=10, .member1=1033 }
+_69 = 68
+_7 = 2
+_70 = 255
+_71 = 127
+_72 = -128
+_73 = 0.015748
+_74 = 46
+_75 = 262144
+_76 = 1
+_77 = -1
+_78 = 40
+_79 = { .member0=10, .member1=521 }
+_8 = { .member0=1, .member1=1, .member2=0, .member3=0 }
+_80 = 150
+_81 = 6.28319
+_82 = 13
+_83 = 0.3
+_84 = 0.2
+_85 = 35
+_86 = 36
+_87 = 5
+_88 = 3
+_9 = 1
+_LocalVF_VertexFetch_PackedTangentsBuffer_texture_buf_89 = ?
+_LocalVF_VertexFetch_TexCoordBuffer_texture_buf_90 = ?
+_OUT = { TEXCOORD10_centroid=0, 0, 0, 0, TEXCOORD11_centroid=0, 0, 0, 0, TEXCOORD0=0, 0, 0, 0, PRIMITIVE_ID=0, TEXCOORD9=0, 0, 0, SV_Position=0, 0, 0, 0 }
+_Scene_GPUScene_GPUScenePrimitiveSceneData_texture_structbuf_91 = ?
+__$Globals_103 = { [0]=0, 985520807, 985520807, 1019381196 }
+__01379_1_0_i0_288 = -13717
+__01379_1_0_i1_289 = 744
+__01379_1_0_i2_290 = 863.489
+__1372_0_153 = 580
+__3374_0_154 = 1
+__41383_0_i0_284 = 1
+__41383_0_i1_285 = 1
+__41383_0_i2_286 = 1
+__51384_0_287 = 1
+__LocalVF_100 = { [0]=0, 1, 0, 0, [1]=0, 2, 168870976, 2363, [2]=168871296, 2363, 2029199488, 2361, [3]=168870656, 2363, 2029199488, 2361 }
+__Material_99 = { [0]=1073741824, 1065353216, 1075838976, 1114636288, [1]=1084227584, 1041865114, 1065353216, 2361, [2]=1056964608, 1056964608, 1056964608, 2361, [3]=1082130432, 1073741824, 0, 1065353216, [4]=1092616192, 1092087034, 1085348958, 1065353216, [5]=0, 0, 0, 0, [6]=0, 0, 1008981770, 1050253722, [7]=168692352, 2363, 3763105120, 2361, [8]=168691904, 2363, 3763105120, 2361, [9]=3763105120, 2361, 2029545088, 2361 }
+__View_102 = { [0]=3207198100, 1048945057, 0, 3208302787, [1]=3208605953, 3194832322, 0, 1059445305, [2]=0, 1070039862, 0, 1046462329, [3]=0, 0, 1092616192, 0, [4]=3207198100, 1048945057, 0, 3208302787, [5]=3208605953, 3194832323, 0, 1059445305, [6]=0, 1070039862, 0, 1046462329, [7]=963240033, 3104295956, 1092616192, 965545133, [8]=3207198103, 3208605956, 0, 0, [9]=1037140526, 3183083456, 1058825753, 0, [10]=940966533, 3053535915, 906524675, 1036831949, [11]=3208302787, 1059445305, 1046462329, 0, [12]=3207198102, 1042764449, 3208302787, 0, [13]=3208605955, 3189017612, 1059445305, 0, [14]=0, 1064947813, 1046462329, 0, [15]=0, 0, 0, 1065353216, [16]=3207198102, 3208605955, 0, 0, [17]=1042764449, 3189017612, 1064947813, 0, [18]=3208302787, 1059445305, 1046462329, 0, [19]=0, 0, 0, 1065353216, [20]=3207198102, 1042764449, 3208302787, 0, [21]=3208605955, 3189017612, 1059445305, 0, [22]=0, 1064947813, 1046462329, 0, [23]=0, 0, 0, 1065353216, [24]=3207198102, 3208605955, 0, 0, [25]=1042764449, 3189017612, 1064947813, 0, [26]=3208302787, 1059445305, 1046462329, 0, [27]=0, 0, 0, 1065353216, [28]=1065353213, 0, 0, 0, [29]=0, 1070363635, 0, 0, [30]=0, 0, 0, 1065353216, [31]=0, 0, 1092616192, 0, [32]=1065353213, 0, 0, 0, [33]=0, 1070363635, 0, 0, [34]=0, 0, 0, 1065353216, [35]=0, 0, 1092616192, 0, [36]=1065353217, 0, 0, 0, [37]=0, 1059079560, 0, 0, [38]=0, 0, 0, 1036831949, [39]=2147483648, 2147483648, 1065353216, 2147483648, [40]=3207198103, 3208605957, 0, 0, [41]=1037140527, 3183083456, 1058825753, 0, [42]=0, 0, 0, 1036831949, [43]=3208302787, 1059445305, 1046462329, 0, [44]=3128848683, 3129953566, 0, 0, [45]=3111821444, 962494694, 3132823563, 0, [46]=0, 0, 0, 1036831949, [47]=1024807325, 1067910563, 1062491640, 0, [48]=3207198103, 3208605956, 0, 0, [49]=1037140526, 3183083456, 1058825753, 0, [50]=3208302787, 1059445305, 1046462329, 0, [51]=968590118, 3080819542, 933926404, 1065353216, [52]=3207198103, 3208605957, 0, 0, [53]=1037140527, 3183083456, 1058825753, 0, [54]=3208302787, 1059445305, 1046462329, 0, [55]=0, 0, 0, 1065353216, [56]=3207198103, 3208605957, 0, 0, [57]=1037140527, 3183083456, 1058825753, 0, [58]=3208302787, 1059445305, 1046462329, 0, [59]=3326751873, 3301166101, 1148519356, 1065353216, [60]=3326751873, 3301166101, 1148519356, 0, [61]=3208302787, 1059445305, 1046462329, 0, [62]=1042764449, 3189017612, 1064947813, 0, [63]=3207198102, 3208605955, 0, 0, [64]=1042764449, 3189017612, 1064947813, 0, [65]=3207198102, 3208605955, 0, 0, [66]=0, 0, 1036831949, 2989214839, [67]=1056964608, 3204448255, 1056964607, 1056964608, [68]=968590118, 3080819541, 933926403, 0, [69]=0, 0, 0, 0, [70]=3326751873, 3301166101, 1148519356, 0, [71]=0, 0, 0, 0, [72]=1179268225, 1153682453, 3296003004, 0, [73]=3116073766, 933335893, 3081410051, 0, [74]=1065353213, 0, 0, 0, [75]=0, 1070363635, 0, 0, [76]=3107954736, 975839886, 0, 1065353216, [77]=0, 0, 1092616192, 0, [78]=1065353217, 0, 0, 0, [79]=0, 1059079560, 0, 0, [80]=0, 0, 0, 1036831949, [81]=960471090, 3117746078, 1065353216, 2147483648, [82]=3207195862, 1048929166, 0, 3208302787, [83]=3208607940, 3194804105, 0, 1059445305, [84]=3089595357, 1070041052, 0, 1046462329, [85]=0, 0, 1092616192, 0, [86]=3207198102, 1042764449, 3208302787, 0, [87]=3208605955, 3189017612, 1059445305, 0, [88]=0, 1064947813, 1046462329, 0, [89]=0, 0, 0, 1065353216, [90]=3207198102, 3208605955, 0, 0, [91]=1042764449, 3189017612, 1064947813, 0, [92]=3208302787, 1059445305, 1046462329, 0, [93]=0, 0, 0, 1065353216, [94]=3207198102, 1042764449, 3208302787, 0, [95]=3208605955, 3189017612, 1059445305, 0, [96]=0, 1064947813, 1046462329, 0, [97]=0, 0, 0, 1065353216, [98]=3207198102, 3208605955, 0, 0, [99]=1042764449, 3189017612, 1064947813, 0, [100]=3208302787, 1059445305, 1046462329, 0, [101]=0, 0, 0, 1065353216, [102]=0, 0, 0, 0, [103]=3326751873, 3301166101, 1148519356, 0, [104]=968590118, 3080819541, 933926403, 0, [105]=3326751873, 3301166101, 1148519356, 0, [106]=968590118, 3080819541, 933926403, 0, [107]=1179268225, 1153682453, 3296003004, 0, [108]=3116073766, 933335893, 3081410051, 0, [109]=0, 0, 0, 0, [110]=3326751873, 3301166101, 1148519356, 0, [111]=3326751873, 3301166101, 1148519356, 0, [112]=1179268225, 1153682453, 3296003004, 0, [113]=3326751873, 3301166101, 1148519356, 0, [114]=3326751873, 3301166101, 1148519356, 0, [115]=1179268225, 1153682453, 3296003004, 0, [116]=3207198103, 3208605956, 0, 0, [117]=1037140526, 3183083456, 1058825753, 0, [118]=940966533, 3053535915, 906524675, 1036831949, [119]=3208305936, 1059444001, 1046435720, 0, [120]=3207198103, 3208605957, 0, 0, [121]=1037140527, 3183083456, 1058825753, 0, [122]=3208305937, 1059444001, 1046435720, 0, [123]=0, 0, 0, 1065353216, [124]=1065353216, 2759852032, 0, 0, [125]=2743074816, 1065353216, 0, 2751463424, [126]=0, 0, 1065353216, 0, [127]=612368384, 2772434944, 0, 1065353216, [128]=1065353216, 2764046336, 0, 0, [129]=2751459328, 1065353216, 0, 2751463424, [130]=0, 0, 1065353216, 0, [131]=3107954736, 975839886, 0, 1065353216, [132]=0, 0, 3107954736, 975839886, [133]=0, 0, 0, 2147483648, [134]=1070141404, 1066349144, 1070141404, 1066349144, [135]=0, 0, 0, 0, [136]=1152057344, 1146486784, 977248304, 983113498, [137]=0, 0, 1368, 856, [138]=1065353216, 1065353216, 1065353216, 1065353216, [139]=1152057344, 1146486784, 977248304, 983113498, [140]=968859696, 974724890, 1065347084, 1065343416, [141]=1073741825, 3214951815, 3212836865, 1059079560, [142]=1065353216, 1065353216, 1060034428, 1069247051, [143]=1, 1065353216, 1074037647, 1056393116, [144]=0, 0, 0, 1065353216, [145]=0, 0, 0, 1065353216, [146]=0, 0, 0, 1065353216, [147]=0, 1065353216, 1053609165, 1048576000, [148]=1141956890, 1145833927, 0, 0, [149]=0, 0, 0, 1065353216, [150]=1092616192, 1141957417, 1145834454, 1023660277, [151]=0, 1065353216, 0, 1065353216, [152]=1065353216, 0, 0, 1065353216, [153]=28990, 7084, 12189, 6, [154]=8702, 0, 0, 0, [155]=0, 0, 0, 0, [156]=1064041167, 1060603489, 1059359867, 1061926884, [157]=1058335785, 3198156888, 1061174941, 0, [158]=3309453415, 3298226583, 3303396597, 1015021568, [159]=3324119350, 3313613865, 3317477782, 1015021568, [160]=964170215, 964170215, 964170215, 1115953023, [161]=949288975, 949288975, 949288975, 1130097484, [162]=0, 1065353216, 0, 0, [163]=1075545375, 1059816735, 1075419546, 1065151889, [164]=1043878380, 0, 0, 0, [165]=0, 1065353216, 0, 0, [166]=1103403942, 0, 0, 1112014848, [167]=0, 1133903872, 1140457472, 1116261581, [168]=1065353216, 1065353216, 0, 1000593162, [169]=1065353216, 1065353216, 1065353216, 0, [170]=1065353216, 1065353216, 1065353216, 0, [171]=1065353216, 1065353216, 1065353216, 0, [172]=1058335785, 3198156888, 1061174941, 1065353216, [173]=0, 0, 1065353216, 1065353216, [174]=1077499530, 1074799584, 1073822846, 0, [175]=0, 0, 0, 0, [176]=1077499530, 1074799584, 1073822846, 0, [177]=0, 0, 0, 1065353216, [178]=0, 0, 0, 1065353216, [179]=0, 0, 0, 1065353216, [180]=1065353216, 0, 0, 0, [181]=1065353216, 0, 0, 0, [182]=1065353216, 1065353216, 1065353216, 1065353216, [183]=0, 0, 0, 0, [184]=0, 0, 0, 0, [185]=1065353216, 0, 0, 0, [186]=0, 1065353216, 0, 0, [187]=0, 0, 1065353216, 0, [188]=0, 0, 0, 1065353216, [189]=1065353216, 1065353216, 1065353216, 1065353216, [190]=0, 0, 1065353216, 1065353216, [191]=1065353216, 1065353216, 1065353216, 1065353216, [192]=1065353216, 1065353216, 1065353216, 1065353216, [193]=1065353216, 0, 0, 0, [194]=1065353216, 0, 1051361018, 0, [195]=0, 1065353216, 0, 0, [196]=1065353216, 1065353216, 1065353216, 1065353216, [197]=0, 0, 1065353216, 1065353216, [198]=1064324533, 1061982719, 1061982719, 1065353216, [199]=0, 0, 0, 0, [200]=0, 0, 0, 0, [201]=0, 0, 0, 0, [202]=0, 0, 0, 0, [203]=0, 0, 0, 0, [204]=0, 0, 0, 0, [205]=0, 0, 0, 0, [206]=0, 0, 0, 0, [207]=0, 0, 0, 0, [208]=0, 1065353216, 1088421888, 1065353216, [209]=1, 1061997773, 0, 0, [210]=1084227583, 3204448255, 1176256512, 0, [211]=0, 0, 0, 1065353216, [212]=0, 0, 0, 1065353216, [213]=0, 0, 0, 1065353216, [214]=0, 0, 0, 1065353216, [215]=0, 0, 0, 1065353216, [216]=0, 0, 0, 1065353216, [217]=0, 0, 0, 1065353216, [218]=0, 0, 0, 1065353216, [219]=0, 0, 0, 1065353216, [220]=0, 0, 0, 1065353216, [221]=0, 0, 0, 1065353216, [222]=0, 0, 0, 1065353216, [223]=0, 0, 0, 1065353216, [224]=0, 0, 0, 1065353216, [225]=0, 0, 0, 1065353216, [226]=0, 0, 0, 1065353216, [227]=0, 0, 0, 1065353216, [228]=0, 0, 0, 1065353216, [229]=0, 0, 0, 1065353216, [230]=0, 0, 0, 1065353216, [231]=0, 0, 0, 1065353216, [232]=0, 0, 0, 1065353216, [233]=0, 0, 0, 1065353216, [234]=0, 0, 0, 1065353216, [235]=1065353216, 0, 1, 0, [236]=1065353216, 1065353216, 1065353216, 0, [237]=1065353216, 1065353216, 1065353216, 0, [238]=0, 0, 0, 0, [239]=0, 0, 0, 0, [240]=1926, 11, 0, 0, [241]=0, 0, 0, 0, [242]=0, 0, 0, 0, [243]=0, 0, 1065353216, 1065353216, [244]=1065353216, 1065353216, 1065353216, 1065353216, [245]=1065353216, 1065353216, 1065353216, 1065353216, [246]=1065291896, 1065255218, 0, 0, [247]=0, 0, 0, 0, [248]=0, 0, 0, 0, [249]=0, 0, 0, 0, [250]=0, 0, 0, 1065353216, [251]=991502088, 0, 0, 0, [252]=0, 0, 0, 1065353216, [253]=1065353216, 0, 1065353216, 1065353216, [254]=0, 4, 15, 86, [255]=127, 287, 0, 0, [256]=0, 0, 0, 0, [257]=0, 0, 0, 0, [258]=0, 0, 0, 0, [259]=0, 1017370378, 0, 0, [260]=961612759, 970001367, 974964961, 1024832806, [261]=0, 0, 31, 1065353216, [262]=1115947008, 1115684864, 1014513168, 1015021568, [263]=1065353216, 1065353216, 1065353216, 1065353216, [264]=1065353216, 1065353216, 1065353216, 1065353216, [265]=0, 0, 0, 1176256512, [266]=32, 2, 4, 20, [267]=1, 4, 0, 0, [268]=6, 5, 19, 0, [269]=9, 16, 18, 0, [270]=12, 17, 4294967295, 0, [271]=4294967295, 15, 4294967295, 0, [272]=4294967295, 4294967295, 4294967295, 0, [273]=4294967295, 4294967295, 4294967295, 0, [274]=4294967295, 4294967295, 4294967295, 0, [275]=4294967295, 4294967295, 4294967295, 0, [276]=4294967295, 4294967295, 4294967295, 0, [277]=4294967295, 4294967295, 4294967295, 0, [278]=4294967295, 4294967295, 4294967295, 0, [279]=4294967295, 4294967295, 4294967295, 0, [280]=4294967295, 4294967295, 4294967295, 0, [281]=4294967295, 4294967295, 4294967295, 0, [282]=4294967295, 4294967295, 4294967295, 0, [283]=4294967295, 4294967295, 4294967295, 0, [284]=4294967295, 4294967295, 4294967295, 0, [285]=4294967295, 4294967295, 4294967295, 0, [286]=4294967295, 4294967295, 4294967295, 0, [287]=4294967295, 4294967295, 4294967295, 0, [288]=4294967295, 4294967295, 4294967295, 0, [289]=4294967295, 4294967295, 4294967295, 0, [290]=4294967295, 4294967295, 4294967295, 0, [291]=4294967295, 4294967295, 4294967295, 0, [292]=4294967295, 4294967295, 4294967295, 0, [293]=4294967295, 4294967295, 4294967295, 0, [294]=4294967295, 4294967295, 4294967295, 0, [295]=4294967295, 4294967295, 4294967295, 0, [296]=4294967295, 4294967295, 4294967295, 0, [297]=4294967295, 4294967295, 4294967295, 0, [298]=4294967295, 4294967295, 4294967295, 0, [299]=0, 1060034428, 1041865114, 0, [300]=1065353217, 1059079560, 1065353213, 1070363635, [301]=1065353217, 1059079560, 1065353213, 1070363635, [302]=977248305, 0, 0, 0, [303]=1065353217, 1059079560, 0, 0, [304]=0, 0, 0, 0, [305]=0, 0, 0, 0, [306]=32, 0, 0, 0, [307]=0, 0, 0, 0, [308]=1065353216, 1065353216, 1065353216, 1065353216, [309]=2028305152, 2361, 2029543168, 2361, [310]=0, 0, 0, 0, [311]=0, 0, 0, 0, [312]=1065353216, 1065353216, 1065353216, 0, [313]=2028305152, 2361, 2029543168, 2361, [314]=3763105120, 2361, 2029545088, 2361, [315]=2028305920, 2361, 2028304384, 2361, [316]=2028304384, 2361, 2028304384, 2361, [317]=2028304384, 2361, 2028304384, 2361, [318]=2028304384, 2361, 2028304384, 2361, [319]=2028304384, 2361, 2028304384, 2361, [320]=2029540608, 2361, 2029540608, 2361, [321]=2029540608, 2361, 2029540608, 2361, [322]=2029540608, 2361, 2029540608, 2361, [323]=2029540608, 2361, 2029540608, 2361, [324]=2029540608, 2361, 2028304384, 2361, [325]=2028304384, 2361, 2028305920, 2361, [326]=2028304384, 2361, 2029539968, 2361, [327]=2029539968, 2361, 2029541728, 2361, [328]=2028298240, 2361, 2029540608, 2361, [329]=2028298240, 2361, 2029540608, 2361, [330]=2028304384, 2361, 2029540608, 2361, [331]=1786581504, 2362, 2029540128, 2361, [332]=1786587648, 2362, 2029539808, 2361, [333]=1786584576, 2362, 2029540128, 2361, [334]=2029540448, 2361, 2029539808, 2361, [335]=2029540608, 2361, 2029544608, 2361, [336]=2029539968, 2361, 2029541728, 2361, [337]=2389076992, 2361, 2029540608, 2361, [338]=1796139456, 2363, 2028297472, 2361, [339]=2029540608, 2361, 2028298240, 2361, [340]=2029540608, 2361, 2028298240, 2361, [341]=2029543968, 2361, 2028305152, 2361, [342]=2029540608, 2361, 2028305152, 2361, [343]=2029540608, 2361, 2028305152, 2361, [344]=2029540608, 2361, 1786599936, 2362, [345]=2029540608, 2361, 1786588416, 2362, [346]=2029540608, 2361, 1786589184, 2362, [347]=2029540608, 2361, 1786589952, 2362, [348]=2029540608, 2361, 0, 0, [349]=2028298240, 2361, 2028304384, 2361, [350]=2028298240, 2361, 2028298240, 2361, [351]=2029540608, 2361, 2028306688, 2361, [352]=2029541728, 2361, 2028304384, 2361, [353]=2029541728, 2361, 2028304384, 2361, [354]=2029541728, 2361, 1786596096, 2362, [355]=2029540448, 2361, 2029540608, 2361, [356]=2028306688, 2361, 2029540608, 2361, [357]=2028298240, 2361, 2029540608, 2361, [358]=2029198848, 2361, 2029198848, 2361, [359]=0, 0, 0, 0, [360]=0, 0, 0, 0, [361]=0, 0, 0, 0, [362]=0, 0, 0, 0, [363]=2028298240, 2361, 2029540608, 2361, [364]=2028298240, 2361, 2029540608, 2361, [365]=1065353216, 1065353216, 1065353216, 1065353216, [366]=0, 0, 1785920512, 2362, [367]=2029540608, 2361, 0, 0, [368]=1065353216, 1065353216, 1065353216, 1065353216, [369]=1786576896, 2362, 2029540608, 2361, [370]=2029544608, 2361, 43654016, 2367, [371]=43666176, 2367, 1785291456, 2362, [372]=1801941760, 2363, 0, 0, [373]=1179268225, 1153682453, 3296003004, 0, [374]=3116073766, 933335893, 3081410051, 0 }
+__i04237_180 = -2147450880
+__i04259_257 = 16384
+__i04262_260 = -16384
+__i04265_263 = -1
+__i04268_266 = -0.50002
+__i14238_181 = 941747521
+__i14260_258 = 16384
+__i14263_261 = -16384
+__i14266_264 = -1
+__i14269_267 = -0.866014
+__i24239_182 = 1073758208
+__i24261_259 = 49152
+__i24264_262 = 16384
+__i24267_265 = 1
+__i24270_268 = 0
+__i3_183 = 8437760
+stepCount          200
+variables          156
+truncated          on
 --- stderr ---
-error: no ps shader is bound at eid 304
+error: the engine produced no trace for pixel 640,360 at eid 2731 (ps, res166972): sourceDebugInfo is 1
+       its shader loading log says: Found debug data in the shader
+       the shader has its debug data, so the *invocation* is what the engine could not run: for a pixel, a co-ordinate no fragment wrote or none that passed the depth test at it (`state <eid>` shows the target and its viewport); for a vertex or a thread, an index outside the draw or dispatch; or a feature its interpreter does not implement. `--vertex 0`/`--thread 0,0,0 0,0,0` on the same event is the cheapest way to tell an empty co-ordinate from an engine limitation, because an invocation with no fragment to find cannot fail for want of one. The engine's own log (`--log <file>`) has whatever it was willing to say.
+       its shader loading log says: Found debug data in the shader
+       the shader has its debug data, so the *invocation* is what the engine could not run: for a pixel, a co-ordinate no fragment wrote or none that passed the depth test at it (`state <eid>` shows the target and its viewport); for a vertex or a thread, an index outside the draw or dispatch; or a feature its interpreter does not implement. `--vertex 0`/`--thread 0,0,0 0,0,0` on the same event is the cheapest way to tell an empty co-ordinate from an engine limitation, because an invocation with no fragment to find cannot fail for want of one. The engine's own log (`--log <file>`) has whatever it was willing to say.

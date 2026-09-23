@@ -891,18 +891,19 @@ Binding is not using either: a draw that binds a UAV and writes nothing reads as
 words around every finding say.
 
 **Measured** on the two captures (the stream is cached for every run after the first, §4.8; the ledger phase is
-0.08 s of `deps`' 0.27 s / 0.45 s):
+0.06 s of `deps`' 0.50 s / 0.45 s):
 
-| | `desktop-1` (631 MB stream, 52 draws) | `desktop-2` (1.47 GB, 50 draws) |
+| | `desktop-1` (1.54 GB stream, 599 draws) | `desktop-2` (1.47 GB, 50 draws) |
 |---|---|---|
-| resources with a use the stream shows | 88 | 117 |
-| `read-before-write` | 27 | 26 |
-| `write-never-read` | 52 | 62 |
-| table bindings that resolve to nothing | 118 | 9 |
+| resources with a use the stream shows | 155 | 117 |
+| `read-before-write` | 34 | 26 |
+| `write-never-read` | 85 | 62 |
+| table bindings that resolve to nothing | 1113 | 9 |
 
 Those counts are large for a reason worth stating plainly: **most of UE's descriptor tables are filled at
-startup**, so a read through an unwritten slot is invisible — the PC capture resolves 9 slots of its 118 table
-bindings (§8). The commands print that count *with* the finding, and `desktop-2`'s nine is why its
+startup**, so a read through an unwritten slot is invisible — and the two frames show that at very different
+scales, `desktop-2` leaving 9 table bindings unresolved against `desktop-1`'s 1113 (§8). The commands print
+that count *with* the finding, and the nine is why `desktop-2`'s
 `write-never-read` list is the more meaningful of the two. `deps` also prints which resource-referencing chunks
 it does **not** attribute (`rdc_chunkmap.UNATTRIBUTED_CHUNKS`: `List_ResolveQueryData`, `List_ExecuteIndirect`,
 `List_BuildRaytracingAccelerationStructure`, `List_SetDescriptorHeaps`, …), because "nothing read it" and
@@ -1099,11 +1100,12 @@ tools" a command rather than a reading (§4.16). The driver's own device-free ch
 runs in the same pass when `bin/replay_dump.exe` is built; everything else the driver does needs a GPU and
 stays a manual gate (§9).
 
-**What is here, checked on 2026-09-21**: three captures, 22 transcripts, 58 labels (49 of them about a
-capture, nine about the pair) and two driver texts. `goldens --check` compares them in about a minute on
-this machine — the offline half is ~36 s (every child runs without the stream cache (§4.8) and pays its own
-decode, and the pair's A/B reads both bundles) and the driver half is three replay sessions, one per capture
-that pins driver commands. On a machine with no GPU and no capture none of that is paid: both halves report
+**What is here, checked on 2026-09-23**: three captures, 22 transcripts, 59 labels (50 of them about a
+capture, nine about the pair) and two driver texts. `goldens --check` compares them in about two and a half
+minutes on this machine — **154 s** measured with the captures in the file cache, where the offline half pays a
+1.5 GB decode per child (every child runs without the stream cache, §4.8), the pair's A/B reads both bundles
+and their images, and the driver half is one `batch` session per capture that pins driver commands (two here,
+ten commands each). On a machine with no GPU and no capture none of that is paid: both halves report
 themselves as **not compared** — nothing runs, and nothing is claimed either — which is what keeps a run on a
 capture-less machine fast and honest. One of the
 three is held **by identity only** — `desktop-2` is a frame from a renderer that is not Unreal, and what a
@@ -1111,15 +1113,20 @@ frame says about itself (its marker names, its resource names, its pass names) i
 has no transcript, label, document or driver text here and its `commands` and `driverCommands` lists are
 empty **by design**. Its size and
 digest are still checked, so the file is verified when it is on this machine; nothing it prints is compared,
-and the corpus's `known` lines for it are numbers and API facts rather than quotations. The two bundles' self-A/Bs are `47`
-and `12` passes with every difference at 0, and the pair — the mobile frame against the desktop one, both
-dumped `--with-images` — answers `10` passes in both, `2` only in A, `37` only in B, `55` constant blocks
-whose values moved, `16` shader hashes differing and `2` image pairs compared. **The captures themselves are not verified**: the SHA-256 in the corpus is, so a re-capture under
-the same name is caught, but nothing here can tell you that a frame recorded on a phone is what it says it
-is.
+and the corpus's `known` lines for it are numbers and API facts rather than quotations. The two bundles' self-A/Bs are `104`
+and `28` passes with every difference at 0, and the pair — the mobile frame against the desktop one, both
+dumped `--with-images` — answers `10` passes in both, `18` only in A, `94` only in B, `51` constant blocks
+whose values moved, `26` shader hashes differing, `3` image pairs compared and `2` counted as not compared
+(the pair's `why` in `captures.json` says why the same two pairs are in both of those numbers, and that the 7
+slots read across different sizes are counted in neither). **The captures themselves are not verified**: the
+SHA-256 in the corpus is, so a re-capture under the same name is caught, but nothing here can tell you that a
+frame recorded on a phone is what it says it is. A **key is a slot rather than a file**: `desktop-1` and
+`mobile-1` were re-pinned on 2026-09-23 against longer captures of the same project, so a measurement
+elsewhere in this document that names a key describes the file that key held when it was made, while the
+corpus's own numbers — the labels, the pair, the sizes — are the ones that moved with the new files.
 
 **`known`: notes, and the causes that make a finding a verdict.** A capture's `known` list holds two kinds of
-entry. A **note** (a string) is prose about the frame for a reader — "its markers balance", "1186 ids carry
+entry. A **note** (a string) is prose about the frame for a reader — "its markers balance", "6994 ids carry
 bound state" — and nothing reads it. A **cause** is an object, and the report *uses* it:
 
 | member | what it is |

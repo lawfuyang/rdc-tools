@@ -1,106 +1,170 @@
 # summary <capture>
 # exit: 0
 --- stdout ---
-chunk count        : 723
-draw/dispatch calls: 24
-markers            : 57
+chunk count        : 11923
+draw/dispatch calls: 238
+markers            : 287
 --- chunk type histogram ---
-  List_SetGraphicsRootConstantBufferView       74
-  SetName                                      57
-  PushMarker                                   57
-  PopMarker                                    57
-  List_EndQuery                                47
-  InitialContents                              29
-  Queue_Signal                                 22
-  List_Reset                                   20
-  List_Close                                   20
-  Device_CreatePlacedResource                  18
-  List_ResolveQueryData                        18
-  Device_CopyDescriptors                       17
-  List_DrawIndexedInstanced                    17
-  List_ResourceBarrier                         15
-  List_SetComputeRootConstantBufferView        15
-  Device_CreateCommittedResource               14
-  Device_CreatePipelineState                   14
-  List_SetPipelineState                        14
-  List_SetGraphicsRootDescriptorTable          14
-  Queue_Wait                                   13
-  List_SetComputeRootDescriptorTable           13
-  List_IASetVertexBuffers                      13
-  Device_CreateRootSignature                   11
-  List_SetDescriptorHeaps                      11
-  Queue_ExecuteCommandLists                    11
-  Device_CreateCommandAllocator                8
-  List_CopyBufferRegion                        8
-  List_IASetIndexBuffer                        8
-  List_BeginQuery                              7
-  Device_CreateHeap                            6
-  List_Dispatch                                6
-  List_SetGraphicsRootSignature                6
-  Device_CreateFence                           5
-  Device_CreateDescriptorHeap                  5
-  Device_CreateCommandList                     5
-  List_DiscardResource                         5
-  List_SetComputeRootSignature                 5
-  Device_CreateQueryHeap                       4
-  CoherentMapWrite                             4
-  Device_CreateCommandQueue                    3
+  InitialContents                              3774
+  CreateAS                                     3341
+  List_SetGraphicsRootConstantBufferView       1018
+  SetName                                      660
+  Device_CreatePlacedResource                  465
+  List_SetGraphicsRootDescriptorTable          331
+  PushMarker                                   287
+  PopMarker                                    287
+  List_DrawIndexedInstanced                    228
+  List_IASetVertexBuffers                      201
+  Device_CopyDescriptors                       199
+  List_IASetIndexBuffer                        163
+  Device_CreateCommittedResource               140
+  List_SetPipelineState                        105
+  Device_CreatePipelineState                   100
+  List_SetGraphicsRootSignature                76
+  Device_CreateShaderResourceView              55
+  List_ResourceBarrier                         47
+  List_EndQuery                                38
+  List_OMSetStencilRef                         37
+  Device_CreateRootSignature                   35
+  List_RSSetScissorRects                       30
+  Device_CreateHeap                            29
+  List_DiscardResource                         26
+  List_RSSetViewports                          26
+  List_OMSetRenderTargets                      22
+  List_CopyBufferRegion                        21
+  CoherentMapWrite                             21
+  Device_CreateDescriptorHeap                  20
+  List_Reset                                   12
+  List_Close                                   12
+  List_ResolveQueryData                        12
+  List_ClearRenderTargetView                   12
+  Queue_Signal                                 8
+  List_IASetPrimitiveTopology                  7
+  List_DrawInstanced                           7
+  List_SetComputeRootDescriptorTable           6
+  List_SetComputeRootConstantBufferView        6
+  Device_CreateCommandAllocator                4
+  List_BeginQuery                              4
 --- markers in order ---
-  #188    PushMarker       MobileSceneRender
-  #190    PushMarker       InitViews
-  #194    PushMarker       FRDGBuilder::Execute
-  #240    PushMarker       MobileSceneRender
-  #241    PushMarker       Niagara::GPUProfiler_BeginFrame
-  #244    PushMarker       UpdateDirectionalLightUniformBuffers
-  #246    PushMarker       ComputeLightGrid
-  #247    PushMarker       CullLights 32x20x8 NumLights 0 NumCaptures 0
-  #248    PushMarker       ClearBuffer(NumCulledLightsGrid Size=81920bytes)
-  #259    PushMarker       LightGridInject:NotLinkedList
-  #274    PushMarker       FFXSystem::PreRender
-  #276    PushMarker       GPUParticles_PreRender
-  #279    PushMarker       FGPUSortManager::OnPreRender
-  #282    PushMarker       SkyAtmosphereLUTs
-  #283    PushMarker       TransmittanceLut
-  #293    PushMarker       MultiScatteringLut
-  #306    PushMarker       DistantSkyLightLut
-  #320    PushMarker       SkyViewLut
-  #328    PushMarker       CameraVolumeLut
-  #352    PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
-  #358    PushMarker       MobileSceneRender
-  #359    PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
-  #366    PushMarker       PollOcclusionQueries
-  #408    PushMarker       SceneColorRendering
-  #426    PushMarker       MobileRenderPrePass
-  #428    PushMarker       MobileBasePass
-  #429    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #454    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #461    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #468    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #475    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #482    PushMarker       /Game/Developers/rogerfylaw/M_Red.M_Red Cube
-  #505    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #516    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #523    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
-  #532    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Cube
-  #539    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #548    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #555    PushMarker       /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial Sphere
-  #562    PushMarker       /Game/Developers/rogerfylaw/M_Blue.M_Blue Cube
-  #573    PushMarker       DynamicEd
-  #577    PushMarker       DecalsAndTranslucency
-  #578    PushMarker       ShadowProjectionOnOpaque
-  #580    PushMarker       Translucency
-  #583    PushMarker       Niagara::PostRenderFinish
-  #585    PushMarker       FGPUSortManager::OnPostRenderOpaque
-  #587    PushMarker       PostProcessing
-  #588    PushMarker       Tonemap 2003x1254 (PS GammaOnly=0)
-  #609    PushMarker       FXAA(Quality=0) 2003x1254 PS
-  #621    PushMarker       RenderFinish
-  #622    PushMarker       CanvasFlush
-  #623    PushMarker       CanvasBatchedElements
-  #637    PushMarker       EndScene
-  #640    PushMarker       PollOcclusionQueries
-  #642    PushMarker       ExtractUniformBuffer
-  #645    PushMarker       AccessModePass[Graphics] (Textures: 4, Buffers: 0)
-  #652    PushMarker       AccessModePass[AsyncCompute] (Textures: 3, Buffers: 0)
+  #8663   PushMarker       PlanarReflection PlanarReflection_UAID_2CF05DC04B3DF81F02_1969080887
+  #8665   PushMarker       MobileSceneRender
+  #8667   PushMarker       InitViews
+  #8671   PushMarker       FRDGBuilder::Execute
+  #8729   PushMarker       MobileSceneRender
+  #8730   PushMarker       Niagara::GPUProfiler_BeginFrame
+  #8733   PushMarker       UpdateDirectionalLightUniformBuffers
+  #8735   PushMarker       ComputeLightGrid
+  #8736   PushMarker       CullLights 32x20x8 NumLights 0 NumCaptures 0
+  #8737   PushMarker       ClearBuffer(NumCulledLightsGrid Size=81920bytes)
+  #8751   PushMarker       LightGridInject:NotLinkedList
+  #8766   PushMarker       FFXSystem::PreRender
+  #8768   PushMarker       GPUParticles_PreRender
+  #8771   PushMarker       FGPUSortManager::OnPreRender
+  #8774   PushMarker       PollOcclusionQueries
+  #8776   PushMarker       ShadowDepths
+  #8777   PushMarker       Atlas0 5124x2048
+  #8778   PushMarker       ClearShadowDepth
+  #8782   PushMarker       L_m_MainWorld_New.DirectionalLight_Sun
+  #8783   PushMarker       WholeScene split0 2040x2040
+  #8784   PushMarker       CopyCachedShadowMap
+  #8805   PushMarker       ShadowDepthPass
+  #8806   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SK_IslandNPC_004a
+  #8821   PushMarker       WholeScene split1 2040x2040
+  #8822   PushMarker       CopyCachedShadowMap
+  #8836   PushMarker       ShadowDepthPass
+  #8839   PushMarker       WholeScene split2 1020x1020
+  #8840   PushMarker       CopyCachedShadowMap
+  #8849   PushMarker       ShadowDepthPass
+  #8855   PushMarker       AccessModePass[Graphics] (Textures: 1, Buffers: 0)
+  #8858   PushMarker       SceneColorRendering
+  #8871   PushMarker       MobileRenderPrePass
+  #8872   PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 2 instances
+  #8890   PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 5 instances
+  #8895   PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02
+  #8901   PushMarker       MI_Hearthbound_Grass_Fern_01 SM_Hearthbound_Grass_Fern_02 2 instances
+  #8906   PushMarker       MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_01 18 instances
+  #8919   PushMarker       MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_02 3 instances
+  #8927   PushMarker       MI_HappyLand_Island_Flower_01 SM_HappyLand_Island_Flower_02 11 instances
+  #8932   PushMarker       MI_HappyLand_Island_Tree_NewBanian_3 SM_HappyLand_Island_Tree_NewBanian_06
+  #8945   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 7 instances
+  #8956   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01
+  #8962   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 3 instances
+  #8968   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_Shrub_01 6 instances
+  #8974   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_03
+  #8981   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_03
+  #8987   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_04 2 instances
+  #8994   PushMarker       MI_HappyLand_Island_Tree_NewBanian_01 SM_HappyLand_Island_Tree_NewBanian_03 4 instances
+  #9001   PushMarker       MI_HappyLand_Building_StreetRoad_test_05 SM_HappyLand_Building_StreetRoad_test_06 17 instances
+  #9013   PushMarker       MI_HappyLand_Island_Tree_Root_06 SM_HappyLand_Island_Tree_Root_06
+  #9024   PushMarker       MI_HappyLand_Island_Flower_Vine_01 SM_HappyLand_Island_Flower_Vine_04 2 instances
+  #9036   PushMarker       MI_HappyLand_Island_Flower_Vine_01 SM_HappyLand_Island_Flower_Vine_04
+  #9041   PushMarker       MI_HappyLand_Island_Flower_Vine_01 SM_HappyLand_Island_Flower_Vine_07 2 instances
+  #9048   PushMarker       MI_HappyLand_Island_Flower_Vine_01 SM_HappyLand_Island_Flower_Vine_07 2 instances
+  #9053   PushMarker       MI_HappyLand_Island_Grass_SeaGrass_09 SM_Plant_Sea_SeaweedC_01 12 instances
+  #9070   PushMarker       MobileBasePass
+  #9071   PushMarker       MI_IslandNPC_004a SK_IslandNPC_004a
+  #9097   PushMarker       MI_HappyLand_Island_Tree_Banana_02 SM_HappyLand_Island_Tree_Banana_02 2 instances
+  #9123   PushMarker       MI_RockA_S_01 SM_HappyLand_RockA_S_01 13 instances
+  #9145   PushMarker       MI_HappyLand_prop_Rivet_test_01 SM_HappyLand_Building_StreetRoad_test_07 10 instances
+  #9156   PushMarker       MI_RockC_S_01 SM_HappyLand_RockC_S_01 2 instances
+  #9178   PushMarker       MI_RockC_S_01 SM_HappyLand_RockC_S_01
+  #9183   PushMarker       MI_RockB_M_01 SM_HappyLand_RockB_M_01 2 instances
+  #9192   PushMarker       MI_RockA_S_01 SM_HappyLand_RockA_S_01 2 instances
+  #9202   PushMarker       MI_HappyLand_Building_Birthplace_01_07 SM_HappyLand_Building_StreetRoad_06
+  #9226   PushMarker       MI_HappyLand_Parterre02_PropMerge SM_HappyLand_Parterre02_PropMerge
+  #9248   PushMarker       MI_HappyLand_Building_StreetRoad_02_01_MaskColor SM_HappyLand_Building_StreetRoad_06
+  #9271   PushMarker       MI_HappyLand_Island_Tree_Banana_03_Opaque SM_HappyLand_Island_Tree_Banana_03
+  #9295   PushMarker       MI_HappyLand_Island_Tree_Banana_03_Opaque SM_HappyLand_Island_Tree_Banana_02
+  #9303   PushMarker       MI_HappyLand_Island_Tree_Banana_02 SM_HappyLand_Island_Tree_Banana_03
+  #9317   PushMarker       MI_HappyLand_Island_Tree_Banana_02 SM_HappyLand_Island_Tree_Banana_02
+  #9324   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_05 2 instances
+  #9336   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_05
+  #9342   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_10
+  #9349   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_10 2 instances
+  #9355   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_06
+  #9362   PushMarker       LandscapeMaterialInstanceConstant_0 Landscape 256 instances
+  #9387   PushMarker       MI_Prop_Base_Inst SM_CommentBoard
+  #9409   PushMarker       MI_HappyLand_Prop_Balloon_C_01 SM_HappyLand_MusicBalloon_PropMerge
+  #9433   PushMarker       MI_HappyLand_Prop_FishGuide SM_HappyLand_Prop_FishGuide
+  #9455   PushMarker       MI_HappyLand_Prop_spittoon_01 SM_HappyLand_Prop_spittoon_02
+  #9466   PushMarker       MI_HappyLand_Prop_Totem_A_01 SM_HappyLand_Prop_Totem_A_01
+  #9476   PushMarker       MI_HappyLand_Prop_StreetLamp_A_5 SM_HappyLand_Prop_Arch_C_01
+  #9486   PushMarker       MI_HappyLand_Prop_spittoon_01 SM_HappyLand_Prop_spittoon_01
+  #9496   PushMarker       MI_HappyLand_Building_Furniturestore_01 SM_HappyLand_Building_Furniturestore_01
+  #9519   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_06
+  #9544   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_03
+  #9552   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_03
+  #9558   PushMarker       MI_HappyLand_Island_Tree_NewBanian_04 SM_HappyLand_Island_Tree_NewBanian_04 2 instances
+  #9570   PushMarker       MI_HappyLand_Island_Tree_NewBanian_03 SM_HappyLand_Island_Tree_NewBanian_03 4 instances
+  #9582   PushMarker       MI_HappyLand_Island_Tree_Palm_02_Opaque SM_HappyLand_Island_Tree_Palm_04 4 instances
+  #9596   PushMarker       MI_HappyLand_Prop_guardrail_01 SM_HappyLand_Prop_guardrail_01 2 instances
+  #9619   PushMarker       MI_HappyLand_Prop_guardrail_01 SM_HappyLand_Prop_guardrail_01 7 instances
+  #9623   PushMarker       MI_HappyLand_Prop_guardrail_01 SM_HappyLand_Prop_guardrail_01 2 instances
+  #9628   PushMarker       MI_HappyLand_Prop_guardrail_01 SM_HappyLand_Prop_guardrail_01 3 instances
+  #9633   PushMarker       LandscapeMaterialInstanceConstant_0 Landscape 256 instances
+  #9658   PushMarker       LandscapeMaterialInstanceConstant_0 Landscape 256 instances
+  #9670   PushMarker       MI_HappyLand_Building_Wharf_01_01 SM_HappyLand_Building_Wharf_01
+  #9692   PushMarker       MI_HappyLand_Cliff_Vertical_01 SM_HappyLand_Cliff_Vertical_01
+  #9704   PushMarker       MI_HappyLand_Cliff_S_02 SM_HappyLand_Cliff_S_02
+  #9714   PushMarker       MI_HappyLand_Cliff_S_02 SM_HappyLand_Cliff_S_02
+  #9721   PushMarker       MI_HappyLand_Cliff_L_02 SM_HappyLand_Cliff_L_02
+  #9731   PushMarker       MI_HappyLand_Cliff_L_02 SM_HappyLand_Cliff_L_02
+  #9736   PushMarker       MI_HappyLand_Cliff_S_02 SM_HappyLand_Cliff_S_02
+  #9746   PushMarker       MI_HappyLand_Cliff_L_01 SM_HappyLand_Cliff_L_01
+  #9756   PushMarker       MI_HappyLand_Rock_Sea_07 SM_HappyLand_Rock_Sea_07
+  #9766   PushMarker       MI_HappyLand_Prop_Floortile_01 SM_HappyLand_Prop_Floortile_04
+  #9777   PushMarker       MI_HappyLand_Prop_Floortile_01 SM_HappyLand_Prop_Floortile_01
+  #9784   PushMarker       MI_HappyLand_Prop_Cruise_B_07 SM_HappyLand_Prop_Cruise_B_01
+  #9794   PushMarker       MI_HappyLand_Island_Tree_Palm_02_Opaque SM_HappyLand_Island_Tree_Palm_02 5 instances
+  #9819   PushMarker       /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Waves_06
+  #9843   PushMarker       MI_HappyLand_Island_Tree_PalmTrunk_01 SM_HappyLand_lsland_Tree_Coconuttree_10
+  #9866   PushMarker       MI_HappyLand_Rock_Sea_08 SM_HappyLand_Rock_Sea_08 2 instances
+  #9888   PushMarker       LandscapeMaterialInstanceConstant_0 Landscape
+  #9911   PushMarker       LandscapeMaterialInstanceConstant_0 Landscape
+  #9933   PushMarker       LandscapeMaterialInstanceConstant_0 Landscape
+  #9945   PushMarker       MI_HappyLand_Mountain_04 SM_HappyLand_Mountain_04
+  #9966   PushMarker       MI_HappyLand_Rock_Sea_04 SM_HappyLand_Rock_Sea_04
+  #9976   PushMarker       MI_HappyLand_Rock_Sea_04 SM_HappyLand_Rock_Sea_04
+  #9981   PushMarker       MI_HappyLand_Prop_Rudder_01 SM_HappyLand_Prop_Rudder_01
+  ... 167 more
 --- stderr ---

@@ -42,7 +42,9 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   lowering the comparison: an older engine answering from another version's decoding is the failure this
   exists to prevent (REFERENCE §9 has the tested matrix).
 - **The corpus is generic, and a path is never committed.** A capture is a key (`desktop-1`, `desktop-2`,
-  `mobile-1`: platform, then size ascending) plus a SHA-256; where *this* machine keeps the file is
+  `mobile-1`: platform, then ascending size for a *new* key — a key re-pinned against a different file keeps
+  its name, and the measurements elsewhere that name it stay statements about the file it held then) plus a
+  SHA-256; where *this* machine keeps the file is
   `goldens/captures.local.json`, which `.gitignore` keeps out of the repository because a path is local state
   and a file name may name the frame it came from. `redact` is what enforces it: everything a run records (a
   transcript's command line, both streams, an A/B document's `capture` member) says `<capture>` where the path
@@ -74,10 +76,10 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
   their setup and found nothing.
 - A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
-  `desktop-1` must still print `1186 events / 47 passes / 493 resources / 63 findings from
-  20 detectors` and `engine   : Unreal Engine (31 concept(s) by name, 1 question(s))`, and the driver's text
-  output must stay byte-identical. (1,186 is every id with bound state up to the frame's last event; the
-  sweep that produced 2,132 also collected the clamped tail past it, which is gone since REFERENCE §9's
+  `desktop-1` must still print `6994 events / 104 passes / 4843 resources / 115 findings from
+  21 detectors` and `engine   : Unreal Engine (108 concept(s) by name, 1 question(s))`, and the driver's text
+  output must stay byte-identical. (6,994 is every id with bound state up to the frame's last event; the
+  sweep that produced 16,857 also collected the clamped tail past it, which is gone since REFERENCE §9's
   sweep bound.)
 - New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix. A new **detector**
   needs a fixture bundle in `tests/test_rdc_report.py` that makes it fire (and one that makes it not fire),

@@ -1,49 +1,36 @@
 # rootsig <capture> 8
 # exit: 0
 --- stdout ---
-root signatures: 21  (no RDEF reflection in this capture: parameters are typed, not named)
-res1904    ver=1.1 dwords=3 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+root signatures: 43  (no RDEF reflection in this capture: parameters are typed, not named)
+res1893    ver=1.1 dwords=3 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
   rp0(table u0 n16 s0)
   rp1(cbv b0 s0)
-res1939    ver=1.1 dwords=4 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+res1913    ver=1.1 dwords=4 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
   rp0(table t0 n64 s0)
   rp1(table u0 n16 s0)
   rp2(cbv b0 s0)
-res2240    ver=1.1 dwords=8 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+res2196    ver=1.1 dwords=1 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+  rp0(table u0 n16 s0)
+res2225    ver=1.1 dwords=0 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+res2231    ver=1.1 dwords=2 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+  rp0(table t0 n64 s0)
+  rp1(table u0 n16 s0)
+res2235    ver=1.1 dwords=8 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
   rp0(table t0 n64 s0)
   rp1(table u0 n16 s0)
   rp2(cbv b0 s0)
   rp3(cbv b1 s0)
   rp4(cbv b2 s0)
-res2241    ver=1.1 dwords=5 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
-  rp0(table u0 n16 s0)
-  rp1(cbv b0 s0)
-  rp2(cbv b1 s0)
-res2242    ver=1.1 dwords=7 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
+res2236    ver=1.1 dwords=5 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
   rp0(table t0 n64 s0)
   rp1(table s0 n32 s0)
   rp2(table u0 n16 s0)
   rp3(cbv b0 s0)
-  rp4(cbv b1 s0)
-res2243    ver=1.1 dwords=9 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
-  rp0(table t0 n64 s0)
-  rp1(table s0 n32 s0)
-  rp2(table u0 n16 s0)
-  rp3(cbv b0 s0)
-  rp4(cbv b1 s0)
-  rp5(cbv b2 s0)
-res2244    ver=1.1 dwords=11 samplers=6 flags=0x332 [deny-vs deny-gs deny-ps deny-as deny-ms]
-  rp0(table t0 n64 s0)
-  rp1(table s0 n32 s0)
-  rp2(table u0 n16 s0)
-  rp3(cbv b0 s0)
-  rp4(cbv b1 s0)
-  rp5(cbv b2 s0)
-  rp6(cbv b3 s0)
-res2288    ver=1.1 dwords=6 samplers=6 flags=0x313 [ia-layout deny-vs deny-gs deny-as deny-ms]
+res2545    ver=1.1 dwords=8 samplers=6 flags=0x311 [ia-layout deny-gs deny-as deny-ms]
   rp0(ps table t0 n64 s0)
   rp1(ps table s0 n32 s0)
   rp2(ps cbv b0 s0)
   rp3(ps cbv b1 s0)
-... 13 more
+  rp4(vs cbv b0 s0)
+... 35 more
 --- stderr ---

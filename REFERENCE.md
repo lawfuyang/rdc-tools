@@ -1381,6 +1381,67 @@ no scan on a 1.5 GB capture at all.
 
 ---
 
+### 4.23 What a frame costs, which shaders it uses, and what a dispatch writes
+
+Three additions of 2026-09-23, all of them the *bundle* half of questions the driver could already answer one
+session at a time.
+
+**A pass's cost, in the report.** `counters --per-pass` folded one counter over the engine's own passes since
+the counter work, and a bundle now carries that fold: `dump --with-counters` writes `counters.json` (per event)
+**and** `counters-passes.json`, both from one `FetchCounters` -- the fetch is the slow part, and a second one for
+the second document would double it. The two documents are written by one implementation
+(`WriteCounterPasses`), so the command's fold and the bundle's cannot disagree about which counter they folded:
+that choice is `CostCounterOf`'s, `EventGPUDuration` when the replay produced one and the first counter otherwise,
+and the document names it because a column headed `counter(7)` says nothing. Two things were wrong in
+`counters.json` before this and are fixed with it: its rows are objects (`{eid, counter, value}` -- the *schema*
+said strings, which nothing ever wrote, and the one offline reader parsed the text form the *command* prints, so
+a real bundle's counters were silently summed as nothing), and each value is now read through its own counter's
+result type rather than through the union's `double` member (a `u64` read as a double is a number nobody can
+use).
+
+The report's pass table costs *its own* passes -- the state-derived ones, not the engine's marker runs -- by
+summing the per-event rows over each pass's eid range (`pass_cost`, `rdc_passes.py`), because the two groupings
+divide a frame differently and the honest comparison is each pass's own events. Each pass row carries `cost`,
+`share` (against the frame's total, so a driver that measured part of the frame says so rather than scaling the
+missing half to zero), `costRows` (how many events produced a value -- 0 is "not measured", which is a different
+answer from a pass that cost nothing) and `dearestEid`; the frame block names the counter and its unit; the
+pipeline map gains a cost column and says whether costs were measured at all; and the caveat that said counters
+were not folded into the pass sections is rewritten rather than deleted.
+
+**Which shaders the frame uses: `permutations <bundle>`.** One row per `(stage, hash)`: how many events bind it,
+the first and last eid, the entry point, the reflection summary, and -- with `--capture` -- the container it
+lives at, its size and whether it carries its own debug data. The count comes from the *events* (each row names
+the shader resource it binds, `vs=2348`), and the identity comes from the state documents
+(`(stage, resource) -> hash`), because those are written per state *change* rather than per event: a shader that
+no document names was never bound, which is what makes the count complete rather than a sample. The join's key is
+measured: a bundle's `hash` is `sha256` of the shader's bytes, one of the three identities `psos` keeps per
+container (§4.22) -- **204 of 204** of `desktop-1`'s bound shaders joined their containers, all 204 carrying
+`ILDB`. `--hash <prefix>` answers one shader the way `psos --hash` answers one container.
+
+**What a dispatch writes.** A dispatch sets no output-merge state, so the render targets the engine reports at a
+compute event are leftovers from an earlier draw -- which is why the report used to answer `n/a` for a compute
+pass's targets. What it *does* write is its bound read-write resources, and the state document now carries them:
+`uavs`, one row per stage and slot (`cs  u0   res6979`), resolved through the descriptor heaps. The state hash
+that decides when a document is rewritten includes them (`dump`'s manifest says so), because a UAV change that
+did not rewrite the document would leave the report reading state older than the frame. The pass row's `writes`
+is that array verbatim and the renderer names it as the compute pass's targets -- `res6979 (cs u0)` -- falling
+back to `n/a` only where the bundle has no such rows, since "not recorded" and "writes nothing" are different
+claims.
+
+*`PipeState::GetReadWriteResources` would be the single call for that set and is **not reachable from a client**:
+it is implemented in `pipestate.inl` inside the replay library, which does not export it -- a link error rather
+than a comment. The set is walked the way this client already walks bindings (`BoundUavs`, the same
+`GetDescriptorAccess` + `GetDescriptors` path `BlockRead` uses for a constant block).*
+
+**The A/B's counter section.** `replaydiff` compares two bundles' pass costs (`compare_counters`): per aligned
+pass, each side's own events summed by the bundle's own cost counter, the percent change, and a verdict of
+`cheaper`/`dearer`/`same` -- or `not compared`, with the note saying which side was not measured, because a cost
+against nothing is not a smaller cost. The summary carries `countersCompared`, `cheaper` and `dearer`; the
+Markdown gains a `## Counters` section ranked by how far the cost moved (a pass that doubled from 1 ms is what a
+change was made for, and a pass that is simply half the frame is not); and the caveats say when neither bundle
+carried counters, or when the two sides folded *different* counters (two measurements that are not the same
+quantity).
+
 ## 5. Worked examples
 
 **Find the two sphere groups in a mobile base pass and see how they differ**
@@ -1639,6 +1700,7 @@ the answers look like answers, and only the source says what the library should 
 | `textures <rdc> [filter] [--save <dir>] [--mip N] [--slice N] [--sample N] [--raw] [--cast <type>] [--range min,max]` | the texture list; `--save` decodes **one subresource** at a time to PNG through `SaveTexture` (`--mip`/`--slice`/`--sample`; a cubemap face is a slice), into a folder the tool creates (parents included, like `dump`/`sheet`/`patch` destinations) and **fails** on if it cannot — it used to warn once per texture and exit 0, which left the files a caller asked for missing behind a run that said it succeeded. `--raw` writes the engine's undecoded bytes as `<name>.bin` with the format and size named, which is the answer for a format the display path will not take; `--cast` reads the bits as another type (a typeless texture needs one) and `--range min,max` is the black/white point mapping that turns a float/HDR texture into a file a person can look at |
 | `formats <rdc>` | the format coverage audit: every format in the frame's texture list, how many resources use it and how many bytes it costs, what it is made of (components × width, type, sRGB, block-compressed, element size) and whether the engine can make a picture of it — `yes`, `with a cast` (typeless: `--cast` says how to read the bits) or `no` (a special layout the display path does not take), with the reason. `needCast` and `noLayout` count the textures in the two "cannot just look at it" classes, so a summary can say *12 textures use something this engine cannot show* rather than silently skipping them. The other half of the RT-format question — what the shader *wrote* into those targets — is `crosscheck`'s |
 | `cubemap <rdc> <resId\|name> [outDir=cross]` | an environment map as six pictures plus the engine's own cruciform: `<outDir>/px.png` .. `nz.png` in D3D's face order (+X, −X, +Y, −Y, +Z, −Z) and `<outDir>/cross.png`, which is `TextureSliceMapping::cubeCruciform` — the engine laying out the unfolded cross itself, because reassembling one from six bitmaps by hand is where the rotations go wrong. `--mip`/`--cast`/`--range` apply; a resource that is not a cube is refused with what it is (and `textures --save --slice N` is the way to one subresource of it) |
+| `histogram <rdc> <resId\|name>` · `--eid N` `[--mip N] [--slice N] [--sample N] [--cast <type>] [--channels rgba] [--rows N]` | **a target's statistics instead of its picture**: `GetMinMax` and then `GetHistogram` over exactly the range min/max reports — the range is the caller's, so the target's own ends are used and a band of values inside them is not clipped away — as bars in the terminal and as the engine's own bucket array under `--json`. This is the numeric form of "is this target black? blown out? clipping?", which the picture commands answer by making a person look at a PNG. `--channels` picks which of r, g, b, a are counted (a letter that is not one of them is refused, not ignored); `--rows` groups adjacent buckets for the terminal only; the target is a resource id or name, or render target 0 at an event with `--eid` (the two are exclusive). The values are read as the cast asked for, and as the *resource's own* component type when none was: passing `Typeless` straight through is how a float target's min/max comes back as the bit patterns of its floats (measured: `R11G11B10_FLOAT` answered `1055653888` for a maximum) |
 | `mesh <rdc> <eid> [instance] [max] [--stage vsin\|vsout\|gsout\|taskout\|meshout] [--obj <file>]` | one instance's geometry **at one stage**: `vsout` (the default) is what the vertex shader emitted, `vsin` the stream the draw read, and `gsout`/`taskout`/`meshout` what a geometry, task/amplification or mesh shader produced — with the vertices, the index count, the **primitive count** (absent, with `primitivesNote` in its place, when the topology does not fix one from the counts: a strip with adjacency, a meshlet list), and the **position bounds** (the first three components, vertices that are not all finite dropped whole, with `boundsNote` when none was usable). `--obj <file>` exports a Wavefront OBJ for an external viewer — one `v` line per vertex and faces only where the vertex order *is* the primitive's, which the file's own header says |
 | `image <rdc> <eid> <out.bmp> [--overlay <name>] [--mip N] [--slice N] [--sample N] [--cast <type>] [--hdr M] [--gamma]` | the texture display at that event, written as a BMP (no PNG encoder needed). `--overlay` draws the engine's own `DebugOverlay` **into** the picture — `wireframe` is the topology the frame actually rasterised, `quad-draw`/`quad-pass` and `triangle-size-draw`/`triangle-size-pass` are the cost hunches, and a typo is refused with the list of fifteen — and `--hdr <multiplier>`/`--gamma` are the display path's tonemapping for float/HDR content. The subresource and cast options are the same ones `textures --save` takes; the document says which overlay and which subresource the file is |
 | `pixelhistory <rdc> <eid\|last> <resId\|name> <x> <y>` | every event up to `<eid>` that tried to write that pixel: the test that rejected each attempt and the value before, from and after it (below) |

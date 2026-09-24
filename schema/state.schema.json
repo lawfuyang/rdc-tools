@@ -3,7 +3,7 @@
   "description": "One event's bound state: the capture header, then that event. The arrays are the driver's own rows, which are text by design -- they carry the engine's names verbatim.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "marker",
-               "api", "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters"],
+               "api", "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters", "uavs"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -20,6 +20,8 @@
     "depthTarget": {"type": "string", "description": "a resource id, `0` for none"},
     "rootSignature": {"type": "string"},
     "rootParameters": {"type": "array", "items": {"type": "string"}},
+    "uavs": {"type": "array", "items": {"type": "string"},
+             "description": "`cs  u0   res6979`, one row per bound read-write resource per stage: what this state *writes*. A dispatch sets no output-merge state, so its `renderTargets` are leftover from an earlier draw and this array is the one that names its targets. The reflection's own `readWriteResources` rows (in the `shaders` document) are the *declarations* -- which bind points the shader has -- and these are the resources bound to them."},
     "viewports": {"type": "array", "items": {
       "type": "object",
       "required": ["x", "y", "width", "height", "minDepth", "maxDepth", "enabled"],

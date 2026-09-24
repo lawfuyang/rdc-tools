@@ -301,6 +301,7 @@ progress lines and `$RDC_NO_CACHE` to read the stream from scratch, none of whic
 | Command | What it answers | Example |
 |---|---|---|
 | `dxbc` | one row per DXBC/DXIL container: index, offset, size, stage, hash and the parts it carries — an inventory, not a disassembler | `dxbc 'capture.rdc' verbose` |
+| `permutations` | which shaders the frame actually binds, one row per stage and hash: how many events bind it, the first and last eid, the entry point, the reflection summary — and with `--capture`, the container it lives at and whether it carries its own debug data | `permutations build/bundle --capture 'capture.rdc'` |
 | `psos` | the pipeline state objects the frame creates and the shaders each one holds, by hash: the id a command list binds, its stages, all three of a container's identities, whether its debug data is embedded (`ilbd`) or needs its PDB, and how many `SetPipelineState` calls name it. `--hash <h>` answers one hash — any of the three, by prefix — from an index cached beside the stream, and **exits 1** when it is not in the capture (REFERENCE §4.22) | `psos 'capture.rdc'`, `psos 'capture.rdc' --hash ec6e6433f96a985d50` |
 | `dump-shaders` | writes `shader_NN_<hash>.dxil` per container plus `shaders.txt` — for `dxc`, `dxil-spirv`, RenderDoc, or any tool of your own that can take a shader | `dump-shaders 'capture.rdc' .\shaders` |
 | `dump-chunk` | writes one chunk's payload to a file, for a hex editor or a bug report | `dump-chunk 'capture.rdc' 452 452.bin` |
@@ -366,6 +367,7 @@ badly (REFERENCE §9).
 | Command | What it answers | Example |
 |---|---|---|
 | `textures` | the texture list; `--save` decodes them to PNG at full size (the engine decodes but does not resize) | `textures 'capture.rdc' Sky --save .\tex` |
+| `histogram` | a target's statistics instead of its picture: the engine's min/max and its own histogram of the range between them, as bars (`--json` for the numbers). A resource id or name, or `--eid` for render target 0 at an event | `histogram 'capture.rdc' res1195304 --rows 32` · `histogram 'capture.rdc' --eid 692` |
 | `image` | the texture display at one event, as a BMP | `image 'capture.rdc' 27931 pass1.bmp` |
 | `sheet` | one image per pass, a montage of them and an index; `--list` writes nothing | `sheet 'capture.rdc' .\sheet --max 40` |
 | `mesh` | post-VS vertices for one instance | `mesh 'capture.rdc' 27931 0 20` |

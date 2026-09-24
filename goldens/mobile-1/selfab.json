@@ -4,6 +4,8 @@
     "bundle": "build/goldens/mobile-1",
     "capture": "<capture>",
     "captureSha256": "f127bc20474834b09546126049c2d4aa309b7a657cee79047770216f249418ec",
+    "costCounter": "",
+    "costUnit": "",
     "events": 2972,
     "messages": 0,
     "passes": 28,
@@ -16,6 +18,8 @@
     "bundle": "build/goldens/mobile-1",
     "capture": "<capture>",
     "captureSha256": "f127bc20474834b09546126049c2d4aa309b7a657cee79047770216f249418ec",
+    "costCounter": "",
+    "costUnit": "",
     "events": 2972,
     "messages": 0,
     "passes": 28,
@@ -29,7 +33,8 @@
     "A bundle holds no shader source: a shader that differs only in its body is caught by its hash, but nothing here can say what it does.",
     "Passes are compared at their first state event: a constant buffer rebound later inside a pass is not compared (the bundle writes one cbuffer document per state event, and this reads the pass's first).",
     "A pass only one side has is reported as added or removed, not as changed: two frames need not contain the same passes at all.",
-    "The renders themselves are not compared: pass --with-images (and write the bundles with it) to compare each pass's readback."
+    "The renders themselves are not compared: pass --with-images (and write the bundles with it) to compare each pass's readback.",
+    "Counter costs are not compared: no pass has a counter row on either side. A bundle written without --with-counters has no counters at all, and a driver that publishes none for a frame leaves a file with none either."
   ],
   "imageDetail": 8,
   "imagesFound": false,
@@ -70,22 +75,20 @@
           "slot": 2,
           "stage": "cs",
           "values": []
-        },
-        {
-          "aFile": "365_ps_0.json",
-          "bFile": "365_ps_0.json",
-          "block": "ps_0",
-          "notes": [
-            "every member the two documents share has the same value"
-          ],
-          "slot": 0,
-          "stage": "ps",
-          "values": []
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
-      "note": "aligned by the resources both passes write (graphics: BufferedRT)",
+      "note": "aligned by call order (pass 1 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 1 of A",
       "shaders": [
         {
@@ -96,36 +99,27 @@
           "changes": [],
           "stage": "cs",
           "verdict": "same"
-        },
-        {
-          "aBytes": 22396,
-          "aHash": "3f889dc2a4dbbae66426cf0cb4336b5bad0e888c89ececbf3373ea93bf60aab0",
-          "bBytes": 22396,
-          "bHash": "3f889dc2a4dbbae66426cf0cb4336b5bad0e888c89ececbf3373ea93bf60aab0",
-          "changes": [],
-          "stage": "ps",
-          "verdict": "same"
-        },
-        {
-          "aBytes": 6272,
-          "aHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
-          "bBytes": 6272,
-          "bHash": "89e2b830c27151d90e63ded272892683c6129bbb728ccb6635b25e2c358f3d87",
-          "changes": [],
-          "stage": "vs",
-          "verdict": "same"
         }
       ],
       "stateAdded": [],
       "stateRemoved": [],
       "status": "same",
-      "structure": "graphics, colour only (no depth target), 8 event(s), eids 365..372  |  graphics, colour only (no depth target), 8 event(s), eids 365..372"
+      "structure": "graphics, no targets bound, 8 event(s), eids 365..372  |  graphics, no targets bound, 8 event(s), eids 365..372"
     },
     {
       "aFirstEid": 373,
       "bFirstEid": 373,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > ComputeLightGrid > CullLights 32x20x8 NumLights 0 NumCaptures 0 > LightGridInject:NotLinkedList",
@@ -196,6 +190,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 3 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 3 of A",
@@ -238,6 +241,15 @@
       "bFirstEid": 413,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > ShadowDepths > Atlas0 5124x2048 > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split0 2040x2040 > CopyCachedShadowMap",
@@ -308,6 +320,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > SceneColorRendering",
@@ -395,6 +416,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > SLW::CopySceneWithoutWater > View0",
@@ -603,6 +633,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > SingleLayerWater > SingleLayerWaterRendering > WaterRenderActorOceanMID_3 None 6 instances",
@@ -645,6 +684,15 @@
       "bFirstEid": 2709,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > ClearTextureUint(ProjectionTexture R32_UINT 1002x628 Mip=0)",
@@ -748,6 +796,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PixelProjectedReflection_Projection 1002x627 (CS)",
@@ -857,6 +914,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 10 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 10 of A",
@@ -899,6 +965,15 @@
       "bFirstEid": 2748,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PixelProjectedReflection_Reflection 1002x627 (PS)",
@@ -969,6 +1044,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomSetup 501x314 (PS)",
@@ -1067,6 +1151,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 251x157 (PS)",
@@ -1165,6 +1258,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 126x79 (PS)",
@@ -1263,6 +1365,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 63x40 (PS)",
@@ -1361,6 +1472,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomDown 32x20 (PS)",
@@ -1459,6 +1579,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomUp 63x40 (PS)",
@@ -1557,6 +1686,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomUp 126x79 (PS)",
@@ -1655,6 +1793,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > BloomUp 251x157 (PS)",
@@ -1731,6 +1878,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > LensFlares > LensFlareBlur 126x79",
@@ -1796,6 +1952,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > LensFlares > LensFlareCopyBloom 251x157",
@@ -1894,6 +2059,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > SunMerge 501x314 (PS)",
@@ -2003,6 +2177,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > Tonemap 2003x1254 (PS GammaOnly=0)",
@@ -2079,6 +2262,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > FXAA(Quality=0) 2003x1254 PS",
@@ -2188,6 +2380,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > EditorSelectionOutlines > OutlineDepth 2003x1254 > EditorSelectionDepth > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Sky",
@@ -2286,6 +2487,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > EditorSelectionOutlines > OutlineColor 2003x1254",
@@ -2373,6 +2583,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > CompositeEditorPrimitives 2003x1254 MSAA=1 > PopulateDepth 2003x1254",
@@ -2449,6 +2668,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > MobileSceneRender > PostProcessing > CompositeEditorPrimitives 2003x1254 MSAA=1 > Composite 2003x1254 MSAA=1",
@@ -2491,7 +2719,10 @@
   "schemaVersion": 1,
   "summary": {
     "added": 0,
+    "cheaper": 0,
     "constantsChanged": 0,
+    "countersCompared": 0,
+    "dearer": 0,
     "imagesCompared": 0,
     "imagesNotCompared": 0,
     "removed": 0,

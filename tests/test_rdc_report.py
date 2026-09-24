@@ -111,7 +111,9 @@ def write_bundle(root: str, events: Optional[List[Dict[str, Any]]] = None,
                  capture: Optional[Dict[str, Any]] = None,
                  states: Optional[Dict[int, Dict[str, Any]]] = None,
                  cbuffers: Optional[Dict[str, Dict[str, Any]]] = None,
-                 counters: Optional[List[str]] = None) -> None:
+                 counters: Optional[List[Dict[str, Any]]] = None,
+                 cost_counter: int = 1, cost_name: str = 'EventGPUDuration',
+                 cost_unit: str = 'ms') -> None:
     """Write a bundle with the files the report requires, plus whatever the test cares about."""
     os.makedirs(root, exist_ok=True)
     base_manifest: Dict[str, Any] = {
@@ -133,8 +135,13 @@ def write_bundle(root: str, events: Optional[List[Dict[str, Any]]] = None,
     write_json(root, 'messages.json', {'capture': RDC, 'messages': messages or [],
                                        'total': len(messages or [])})
     if counters is not None:
+        # The shape the driver writes and `schema/counters` describes: an object per event, the counter's
+        # enum, and the value read through that counter's own result type. `costCounter` names which of them
+        # the pass table costs by -- a bundle holds a row per counter and summing all of them would add a
+        # byte count to a duration.
         write_json(root, 'counters.json', {'capture': RDC, 'counters': counters,
-                                          'total': len(counters)})
+                                          'total': len(counters), 'costCounter': cost_counter,
+                                          'costCounterName': cost_name, 'unit': cost_unit})
     for eid, documents in (states or {}).items():
         if 'state' in documents:
             write_json(root, os.path.join('states', '%d.state.json' % eid), documents['state'])
@@ -274,7 +281,7 @@ class TestReportPasses(BundleCase):
         self.assertIn('the dispatch changed', passes[1]['reason'])
         text = self.markdown(bundle)
         self.assertIn('n/a — a dispatch does not set the output merger', text)
-        self.assertIn('| 1 | 1–2 | — | compute | 2 | n/a | n/a | compute |', text)
+        self.assertIn('| 1 | 1–2 | — | compute | 2 | n/a | n/a | n/a | compute |', text)
 
     def test_shaders_a_pass_does_not_use_are_separated_from_the_ones_it_does(self):
         """The state document lists every bound stage: at a dispatch that includes the vertex and pixel
@@ -513,6 +520,37 @@ class TestReportNotables(BundleCase):
         self.assertFalse(inputs['counter cost']['available'])
         self.assertTrue(inputs['calls']['available'])
 
+    def test_a_dispatches_targets_are_its_bound_uavs_when_the_state_document_has_them(self):
+        """What a dispatch writes: not the leftover output-merge state the engine reports at a compute event,
+        but the bound read-write resources -- and the same `n/a` where the document has none."""
+        bundle = self.path('uavs')
+        write_bundle(bundle, events=[event(1, kind='compute')],
+                     states={1: {'state': {'eid': 1, 'marker': '', 'rootSignature': '99',
+                                           'rootParameters': [], 'shaders': ['cs res10'],
+                                           'renderTargets': ['3 C 100x100 B8G8R8A8_UNORM'],
+                                           'depthTarget': '4',
+                                           'uavs': ['cs u0 res6979', 'cs u3 res11']}}})
+        self.report(bundle)
+        doc = self.document(bundle)
+        entry = doc['passes'][0]
+        self.assertEqual(entry['writes'], ['cs u0 res6979', 'cs u3 res11'])
+        self.assertEqual(entry['targets'], [],
+                         'the leftover output-merge state is not this pass\'s targets -- it stays in the '
+                         'state document, which is where the engine reported it')
+        text = self.markdown(bundle)
+        self.assertIn('- targets: res6979 (cs u0), res11 (cs u3)', text)
+        self.assertIn('| res6979 (cs u0), res11 (cs u3) |', text)
+
+    def test_a_dispatch_with_no_uav_rows_says_not_applicable_rather_than_writes_nothing(self):
+        bundle = self.path('nouavs')
+        write_bundle(bundle, events=[event(1, kind='compute')],
+                     states={1: {'state': {'eid': 1, 'marker': '', 'rootSignature': '99',
+                                           'rootParameters': [], 'shaders': ['cs res10'],
+                                           'renderTargets': [], 'depthTarget': '0'}}})
+        self.report(bundle)
+        self.assertEqual(self.document(bundle)['passes'][0]['writes'], [])
+        self.assertIn('n/a — a dispatch does not set the output merger', self.markdown(bundle))
+
     def test_the_work_volumes_are_summed_per_pass(self):
         """A pass's numbers are the sum over its calls, and they are what the pass-by-pass bullet prints: the
         bundle carries them per *event*, and the report's unit is the pass."""
@@ -586,7 +624,7 @@ class TestReportNotables(BundleCase):
     def test_counter_cost_joins_the_ranking_when_the_bundle_has_counters(self):
         bundle = self.path('c')
         write_bundle(bundle, events=[event(100), event(200)], resources=[resource('10', first=100)],
-                     counters=['eid 200  <counter> = 12.5'])
+                     counters=[{'eid': 200, 'counter': 1, 'value': 12.5}])
         self.report(bundle)
         doc = self.document(bundle)
         entry = [entry for entry in doc['notables']['passInputs'] if entry['input'] == 'counter cost'][0]
@@ -595,6 +633,56 @@ class TestReportNotables(BundleCase):
         costs = [value for row in doc['notables']['passes'] for value in row['values']
                  if value.startswith('counter cost')]
         self.assertEqual(costs, ['counter cost 12.500 over 1 row(s)'])
+
+    def test_a_passes_cost_is_the_counters_sum_and_its_share_of_the_frame(self):
+        """The frame's time per pass: one counter summed over the pass's own events, its share of the frame's
+        total, and the dearest single event in it -- the three numbers a reader used to get by running
+        `counters` beside the report and joining the two documents by hand."""
+        bundle = self.path('cost')
+        write_bundle(bundle,
+                     events=[event(100, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM']),
+                             event(101, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM']),
+                             event(200, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'])],
+                     manifest={'withCounters': 1},
+                     counters=[{'eid': 100, 'counter': 1, 'value': 1.0},
+                               {'eid': 101, 'counter': 1, 'value': 3.0},
+                               {'eid': 200, 'counter': 1, 'value': 4.0}],
+                     cost_unit='ms')
+        self.report(bundle)
+        doc = self.document(bundle)
+        first = [entry for entry in doc['passes'] if entry['firstEid'] == 100][0]
+        self.assertEqual((first['cost'], first['share'], first['costRows'], first['dearestEid']),
+                         (4.0, 0.5, 2, 101))
+        second = [entry for entry in doc['passes'] if entry['firstEid'] == 200][0]
+        self.assertEqual((second['cost'], second['share'], second['dearestEid']), (4.0, 0.5, 200))
+        self.assertEqual((doc['frame']['costCounter'], doc['frame']['costUnit'],
+                          doc['frame']['costMeasured']), ('EventGPUDuration', 'ms', 3))
+        text = self.markdown(bundle)
+        self.assertIn('Costs are `EventGPUDuration` (unit `ms`), measured at 3 of the frame\'s 3 event(s)',
+                      text)
+        self.assertIn('| 4.000ms (50.0%) |', text)
+        self.assertIn('- cost: 4.000ms of `EventGPUDuration` (50.0% of the frame), dearest event 101', text)
+
+    def test_a_pass_the_counter_skipped_is_unmeasured_not_free(self):
+        """A counter that measured part of the frame: the pass with no row says `n/a` rather than 0, and the
+        shares are against what was measured -- the frame is not scaled so that a missing half reads as free."""
+        bundle = self.path('partial')
+        write_bundle(bundle,
+                     events=[event(100, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM']),
+                             event(200, targets=['11 Tiny 10x10 B8G8R8A8_UNORM'])],
+                     manifest={'withCounters': 1},
+                     counters=[{'eid': 200, 'counter': 1, 'value': 4.0}], cost_unit='ms')
+        self.report(bundle)
+        doc = self.document(bundle)
+        skipped = [entry for entry in doc['passes'] if entry['firstEid'] == 100][0]
+        measured = [entry for entry in doc['passes'] if entry['firstEid'] == 200][0]
+        self.assertEqual((skipped['cost'], skipped['costRows'], skipped['dearestEid']), (0.0, 0, 0))
+        self.assertEqual((measured['cost'], measured['share'], measured['dearestEid']), (4.0, 1.0, 200))
+        text = self.markdown(bundle)
+        self.assertIn('| 1 | 100–100 | — | graphics | 1 | n/a |', text)
+        self.assertIn('- cost: 4.000ms of `EventGPUDuration` (100.0% of the frame), dearest event 200', text)
+        self.assertNotIn('- cost:', text.split('### Pass 1')[1].split('### Pass 2')[0],
+                         'the pass with no measured event says nothing about a cost')
 
     def test_a_resource_the_engine_recorded_nothing_for_is_not_called_unread(self):
         bundle = self.path('d')

@@ -104,6 +104,26 @@ std::string VisibilityText(ShaderStageMask mask);
 ShaderStage StageFromName(const char *name);
 const D3D12Pipe::Shader *StageShader(const D3D12Pipe::State *d3d12, ShaderStage stage);
 const rdcarray<ShaderStage> &ReportedStages();
+
+//: One bound read-write resource: the stage it is bound to, its slot, and the resource itself.
+//:
+//: `PipeState::GetReadWriteResources` would be the single call for this, and it is **not reachable
+//: from this client**: it is implemented in `pipestate.inl` inside the replay library and that
+//: library does not export it -- a link error, which is a stronger statement than a comment. So the
+//: set is walked the way this client already walks bindings (`BlockRead` does the same for a
+//: constant block): `GetDescriptorAccess`, filtered by `CategoryForDescriptorType`, each slot
+//: resolved through its own heap with `GetDescriptors`.
+//:
+//: What it answers is the *bound* set: a resource bound to a slot the shader never reads is still
+//: bound here.
+struct BoundUav
+{
+  ShaderStage m_Stage = ShaderStage::Vertex;
+  uint32_t m_Index = 0;
+  ResourceId m_Resource;
+};
+
+rdcarray<BoundUav> BoundUavs(IReplayController *ctrl);
 const char *CompareFunctionText(CompareFunction fn);
 const char *StencilOperationText(StencilOperation op);
 const char *BlendMultiplierText(BlendMultiplier m);
@@ -438,6 +458,38 @@ std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUC
                                     CompType resultType, const std::vector<PassRange> &passes,
                                     const std::vector<ActionNode> &rows);
 
+//: Which counter *is* the frame's cost, and what the engine says about it.
+//:
+//: One place decides it, because two documents fold the same counter: `counters --per-pass` prints
+//: one and `dump --with-counters` writes one into the bundle, and a bundle whose fold disagreed
+//: with the command's would be worse than no fold. `EventGPUDuration` when this replay produced one
+//: -- it is the counter that answers "where does the frame's time go" -- and the first result's
+//: counter otherwise, because a driver that publishes something else is still answering
+//: *something*. The name, the unit and the result type are the engine's answers too
+//: (`DescribeCounter`): a table headed `counter(7)` says nothing, and a `u64` read through the
+//: union's double member is worse than no table at all.
+struct CostCounter
+{
+  GPUCounter m_Counter = GPUCounter::EventGPUDuration;
+  bool m_bHave = false;
+  std::string m_Name;    // the engine's name for it, or `counter(<enum>)` when it named none
+  std::string m_Unit;    // the engine's unit text, e.g. "ns" -- empty when the driver gives none
+  CompType m_ResultType = CompType::Float;
+};
+
+CostCounter CostCounterOf(IReplayController *ctrl, const rdcarray<CounterResult> &results);
+std::map<GPUCounter, CounterDescription> CounterDescriptions(IReplayController *ctrl);
+double CounterValueAsDouble(const CounterResult &result, CompType resultType);
+
+//: The `counters --per-pass` document, from results the caller already fetched.
+//:
+//: Split out of `CmdCounters` for the bundle's sake: `FetchCounters` is the slow part of a dump and
+//: takes no range, so `dump --with-counters` fetches once and writes both documents from it
+//: (`counters.json` per event, `counters-passes.json` this fold) rather than paying for the fetch
+//: twice.
+int WriteCounterPasses(IReplayController *ctrl, ICaptureFile *file, const char *path,
+                       const char *passesPath, int topN, const rdcarray<CounterResult> &results);
+
 void CollectDispatchKinds(const rdcarray<ActionDescription> &actions, std::map<int, bool> &kinds);
 std::map<int, bool> DispatchByEid(IReplayController *ctrl, int &calls);
 
@@ -558,6 +610,29 @@ struct PictureOptions
 //: fallback inside `SaveTargetImage` cannot be three opinions about the same command line.
 void ApplySaveOptions(TextureSave &save, const PictureOptions &opts);
 std::string PixelValueText(const PixelValue &value, CompType type);
+
+//: A `PixelValue` component as a float, reading the union member the cast's class says is
+//: meaningful.
+//:
+//: `PixelValue` is one union with a float, a uint and an int member: reading the float member of a
+//: `uint` target is the same mistake a counter's `.d` was (`fold-reads-a-u64-as-a-u64` pins that
+//: one), and the cast is what says which member a caller asked for.
+float MinMaxComponent(const PixelValue &value, CompType type, int channel);
+
+//: `--channels rgba`: which of the four channels the histogram counts, in any order and any subset.
+//:
+//: Empty or null means all four. A letter that is not one of them is refused rather than ignored --
+//: a flag silently dropped is a chart of something other than what was asked for.
+bool ChannelFlags(const char *text, rdcfixedarray<bool, 4> &out, std::string &why);
+
+//: The engine's buckets summed into `rows` display groups, in order: the bars never claim a
+//: resolution the engine did not give, and `--json` carries its own array untouched. A bucket count
+//: below `rows` is returned as it is.
+std::vector<double> AggregateBuckets(const rdcarray<uint32_t> &buckets, int rows);
+
+//: The span one *display* row of the histogram covers: the engine's buckets grouped, so the text
+//: says the range of the group rather than of a single bucket.
+std::string BucketRangeText(int index, int count, float low, float high);
 std::string ModificationColorText(const ModificationValue &value, CompType type);
 std::string ModificationDepthText(const ModificationValue &value);
 std::string ModificationStencilText(const ModificationValue &value);
@@ -728,6 +803,12 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 //: into transparent black -- so there is no layout code here to get the rotations wrong.
 int CmdCubemap(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
                const char *outDir, const PictureOptions &opts);
+//: A target's statistics: `GetMinMax` and then `GetHistogram` over exactly the range min/max
+//: reports, because the range is the caller's (a target's own ends, so a band of values inside them
+//: is not clipped away), and the buckets are the engine's own -- `--json` carries its array
+//: untouched while the terminal groups adjacent buckets into `rows` bars (REFERENCE §9).
+int CmdHistogram(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
+                 int eid, const PictureOptions &opts, int rows, const char *channels);
 //: The format coverage audit: every format in the frame's texture list, how many resources use it, what it
 //: is made of, and whether the engine can decode it -- with the reason when it cannot (REFERENCE §9).
 int CmdFormats(IReplayController *ctrl, ICaptureFile *file, const char *path);

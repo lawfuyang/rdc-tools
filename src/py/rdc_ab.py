@@ -215,6 +215,24 @@ class AbImageMember(TypedDict):
     note: str
 
 
+class AbCounterMember(TypedDict):
+    """One aligned pass's cost on each side: the bundle's cost counter summed over that side's own events.
+
+    `verdict` is `cheaper`/`dearer`/`same` when both sides measured something, and `not compared` when one
+    side has no counter rows over the pass (a cost against nothing is not a comparison) or the pass exists on
+    one side only. `rowsA`/`rowsB` are how many events each side's counter actually produced a value for: a
+    side measured at a third of its events is a different claim from one measured all through, so the counts
+    travel with the numbers rather than being assumed equal.
+    """
+    costA: float
+    costB: float
+    rowsA: int
+    rowsB: int
+    percentChange: float
+    verdict: str
+    note: str
+
+
 class AbPassMember(TypedDict):
     """One aligned pass pair, with everything that differs inside it."""
     path: str
@@ -229,6 +247,7 @@ class AbPassMember(TypedDict):
     shaders: List[AbShaderMember]
     cbuffers: List[AbCbufferMember]
     images: List[AbImageMember]
+    counters: AbCounterMember
 
 
 class AbSideMember(TypedDict):
@@ -243,6 +262,11 @@ class AbSideMember(TypedDict):
     messages: int
     withImages: int
     renderdoc: str
+    #: Which counter the costs are in, and its unit: the engine's own choice and its own name for it
+    #: (`counters.json`). Empty when the side carries no counters -- and a comparison whose two sides name
+    #: *different* counters says so in the caveats, because two different measurements are not one number.
+    costCounter: str
+    costUnit: str
 
 
 class AbSummaryMember(TypedDict):
@@ -256,6 +280,11 @@ class AbSummaryMember(TypedDict):
     shadersDifferent: int
     imagesCompared: int
     imagesNotCompared: int
+    #: The counter comparison, in counts: how many aligned passes had a cost on both sides, and how the frame
+    #: moved between them. Zero everywhere when neither bundle was written with `--with-counters`.
+    countersCompared: int
+    cheaper: int
+    dearer: int
 
 
 class ReplayDiffDocument(TypedDict):
@@ -304,6 +333,8 @@ def side_summary(side: AbSide) -> AbSideMember:
         'messages': int(facts['messages']),
         'withImages': int(manifest.get('withImages', 0) or 0),
         'renderdoc': str(manifest.get('renderdoc', '')),
+        'costCounter': str(facts['costCounter']),
+        'costUnit': str(facts['costUnit']),
     }
 
 
@@ -730,6 +761,39 @@ def last_readbacks(files: Sequence[Tuple[int, int, str]], first_eid: int,
     return out
 
 
+def compare_counters(a: AbSide, b: AbSide, pass_a: Optional[ReportPass],
+                     pass_b: Optional[ReportPass]) -> AbCounterMember:
+    """What each side's own events cost, for one aligned pass: `pass_cost` over each side's range.
+
+    The two ranges are different recordings, so what is compared is the *cost* rather than the events.
+    `cheaper`/`dearer`/`same` is the counter's answer about the frame; a side with no rows over the pass is
+    `not compared` instead, because a cost against nothing is not a smaller cost. `percentChange` is B against
+    A, and 0 when A measured nothing (there is no percentage of zero).
+    """
+    if pass_a is None or pass_b is None:
+        return AbCounterMember(costA=0.0, costB=0.0, rowsA=0, rowsB=0, percentChange=0.0,
+                               verdict='not compared',
+                               note='not compared: this pass is only on one side, so it has no counterpart')
+    cost_a, rows_a, _dearest_a = pass_cost(a.bundle, int(pass_a['firstEid']), int(pass_a['lastEid']))
+    cost_b, rows_b, _dearest_b = pass_cost(b.bundle, int(pass_b['firstEid']), int(pass_b['lastEid']))
+    if not rows_a and not rows_b:
+        return AbCounterMember(costA=cost_a, costB=cost_b, rowsA=0, rowsB=0, percentChange=0.0,
+                               verdict='not compared',
+                               note='not measured on either side: no counter rows over these events (a '
+                                    'bundle written without --with-counters has none)')
+    if not rows_a or not rows_b:
+        return AbCounterMember(costA=cost_a, costB=cost_b, rowsA=rows_a, rowsB=rows_b, percentChange=0.0,
+                               verdict='not compared',
+                               note='not measured on %s: a cost against nothing is not a smaller cost'
+                                    % ('A' if not rows_a else 'B'))
+    percent = ((cost_b - cost_a) / cost_a * 100.0) if cost_a else 0.0
+    return AbCounterMember(costA=cost_a, costB=cost_b, rowsA=rows_a, rowsB=rows_b, percentChange=percent,
+                           verdict=('cheaper' if cost_b < cost_a else
+                                    'dearer' if cost_b > cost_a else 'same'),
+                           note='%+.1f%% over %d event(s) measured in A and %d in B'
+                                % (percent, rows_a, rows_b))
+
+
 def compare_images(a: AbSide, b: AbSide, files_a: Sequence[Tuple[int, int, str]],
                    files_b: Sequence[Tuple[int, int, str]], pass_a: ReportPass, pass_b: ReportPass,
                    path: str, out_dir: str, with_images: bool,
@@ -881,7 +945,10 @@ def build_document(a: AbSide, b: AbSide, out_dir: str, with_images: bool,
             rows.append({
                 'path': aligned.path, 'status': aligned.status, 'note': aligned.note, 'aFirstEid': 0,
                 'bFirstEid': 0, 'structure': _structure_of(only), 'changes': [], 'stateRemoved': [],
-                'stateAdded': [], 'shaders': [], 'cbuffers': [], 'images': []})
+                'stateAdded': [], 'shaders': [], 'cbuffers': [], 'images': [],
+                # No counterpart on the other side, so there is no cost to compare it with: the member says
+                # that rather than carrying zeros that a reader would take for measurements.
+                'counters': compare_counters(a, b, None, None)})
             continue
         pass_a, pass_b = aligned.a, aligned.b
         eid_a, eid_b = int(pass_a['firstEid']), int(pass_b['firstEid'])
@@ -907,7 +974,8 @@ def build_document(a: AbSide, b: AbSide, out_dir: str, with_images: bool,
             'stateRemoved': removed, 'stateAdded': added,
             'shaders': [_shader_member(row) for row in compare_shaders(a, b, pass_a, pass_b)],
             'cbuffers': [_cbuffer_member(row) for row in compare_cbuffers(a, b, pass_a, pass_b)],
-            'images': [_image_member(row) for row in images]})
+            'images': [_image_member(row) for row in images],
+            'counters': compare_counters(a, b, pass_a, pass_b)})
 
     summary: AbSummaryMember = {
         'same': sum(1 for row in rows if row['status'] == 'same'),
@@ -922,6 +990,9 @@ def build_document(a: AbSide, b: AbSide, out_dir: str, with_images: bool,
                               if image['verdict'] in ('identical', 'different')),
         'imagesNotCompared': sum(1 for row in rows for image in row['images']
                                  if image['note'].startswith('not compared')),
+        'countersCompared': sum(1 for row in rows if row['counters']['verdict'] != 'not compared'),
+        'cheaper': sum(1 for row in rows if row['counters']['verdict'] == 'cheaper'),
+        'dearer': sum(1 for row in rows if row['counters']['verdict'] == 'dearer'),
     }
     left_side, right_side = side_summary(a), side_summary(b)
     return {
@@ -935,7 +1006,11 @@ def build_document(a: AbSide, b: AbSide, out_dir: str, with_images: bool,
         'imageDetail': image_detail,
         'passes': rows,
         'summary': summary,
-        'caveats': caveats(with_images, image_detail),
+        # `measured` and not "a counter is named": a bundle written with `--with-counters` on a driver that
+        # publishes nothing for that frame has a counters file, a counter name and no rows at all -- the
+        # caveat has to be about the rows, or this machine's own captures would read as compared.
+        'caveats': caveats(with_images, image_detail, left_side['costCounter'], right_side['costCounter'],
+                           any(row['counters']['rowsA'] or row['counters']['rowsB'] for row in rows)),
     }
 
 
@@ -975,7 +1050,8 @@ def _structure_of(pass_entry: ReportPass) -> str:
                                                  pass_entry['lastEid'])
 
 
-def caveats(with_images: bool, image_detail: int) -> List[str]:
+def caveats(with_images: bool, image_detail: int, counter_a: str, counter_b: str,
+            measured: bool) -> List[str]:
     """What this comparison cannot say, in the document rather than in a reader's head.
 
     The contract the report's own caveats follow: a document that lists only findings cannot be told
@@ -1001,6 +1077,18 @@ def caveats(with_images: bool, image_detail: int) -> List[str]:
     else:
         lines.append('The renders themselves are not compared: pass --with-images (and write the '
                      "bundles with it) to compare each pass's readback.")
+    if not measured:
+        lines.append('Counter costs are not compared: no pass has a counter row on either side. A bundle '
+                     'written without --with-counters has no counters at all, and a driver that publishes '
+                     'none for a frame leaves a file with none either.')
+    elif counter_a and counter_b and counter_a != counter_b:
+        lines.append('The two sides cost their passes by *different* counters (`%s` against `%s`): each '
+                     "number is that side's own measurement, and the two are not the same quantity."
+                     % (counter_a, counter_b))
+    else:
+        lines.append('A pass cost is the counter summed over each side\'s *own* events, not a wall-clock '
+                     'measurement of the same work: the two frames need not contain the same number of '
+                     'events, so a cheaper pass can simply be a smaller frame.')
     return lines
 
 
@@ -1087,6 +1175,15 @@ def cmd_replaydiff(bundle_a: str, bundle_b: str, args: Sequence[str] = ()) -> in
     if with_images:
         print('images    : %s pair(s) compared, %s left to identity (raise --image-detail to decode more)'
               % (summary['imagesCompared'] - summary['imagesNotCompared'], summary['imagesNotCompared']))
+    counters = [row['counters'] for row in document['passes']]
+    if any(entry['rowsA'] or entry['rowsB'] for entry in counters):
+        print('counters  : %s pass(es) compared by `%s`, %s cheaper, %s dearer (write the bundles with '
+              '--with-counters)'
+              % (summary['countersCompared'], document['a']['costCounter'] or 'a counter',
+                 summary['cheaper'], summary['dearer']))
+    else:
+        print('counters  : not compared (neither bundle was written with --with-counters, so neither side '
+              'says what a pass cost)')
     print('written   : %s' % markdown_path)
     print('written   : %s' % json_path)
     return 0
@@ -1099,6 +1196,7 @@ __all__ = [
     'AbCbufferRow',
     'AbChange',
     'AbChangeMember',
+    'AbCounterMember',
     'AbImageMember',
     'AbImageRow',
     'AbPassMember',
@@ -1119,6 +1217,7 @@ __all__ = [
     'caveats',
     'cmd_replaydiff',
     'compare_cbuffers',
+    'compare_counters',
     'compare_images',
     'compare_shaders',
     'constant_blocks',

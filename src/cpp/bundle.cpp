@@ -1072,11 +1072,20 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       }
       const std::string depth = IdText(st->outputMerger.depthTarget.resource);
 
+      // The bound read-write resources, per stage, in the hash: this key is the only thing that
+      // decides when `states/<eid>.state.json` is rewritten, so without them a UAV change would
+      // leave the previous document in place -- and the report's "what a dispatch writes" would be
+      // a document older than the frame it describes.
+      std::string uavs;
+      for(const BoundUav &uav : BoundUavs(ctrl))
+        uavs += Fmt("%s u%d res%s;", StageName(uav.m_Stage), uav.m_Index,
+                    IdText(uav.m_Resource).c_str());
+
       const std::string key =
-          Fmt("pso=%s;shaders=%s;targets=%s;depth=%s;rs=%s;rp=%u",
+          Fmt("pso=%s;shaders=%s;targets=%s;depth=%s;rs=%s;rp=%u;uavs=%s",
               IdText(st->pipelineResourceId).c_str(), shaderIds.c_str(), targets.c_str(),
               depth.c_str(), IdText(st->rootSignature.resourceId).c_str(),
-              (unsigned)st->rootSignature.parameters.size());
+              (unsigned)st->rootSignature.parameters.size(), uavs.c_str());
       const std::string stateHash = StateHash(key);
 
       // `marker` is the engine's own marker path for this event (`A > B`), from the action list: it
@@ -1345,23 +1354,56 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   if(opts.m_bWithCounters)
   {
     Log("bundle: fetching counters (the slow part, when the driver supports them)");
-    const JsonDocument bJson;
-    const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "counters.json");
-    if(!out.Ok())
-      return Fail(1, "cannot write counters.json in %s", opts.m_OutDir.c_str());
-
-    PrintCaptureHeader(file, path);
     const rdcarray<CounterResult> results = ctrl->FetchCounters(rdcarray<GPUCounter>());
-    ArrayOpen("counters");
-    for(size_t i = 0; i < results.size(); i++)
-      ObjectRow(Fmt("{\"eid\": %u, \"counter\": %u, \"value\": %g}", (unsigned)results[i].eventId,
-                    (unsigned)results[i].counter, results[i].value.d));
-    ArrayClose(false);
-    g_Indent = 1;
-    Field("total", (long long)results.size(), true);
-    g_Indent = 0;
-    printf("}\n");
-    written.push_back("counters.json");
+    const CostCounter described = CostCounterOf(ctrl, results);
+
+    {
+      const JsonDocument bJson;
+      const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "counters.json");
+      if(!out.Ok())
+        return Fail(1, "cannot write counters.json in %s", opts.m_OutDir.c_str());
+
+      PrintCaptureHeader(file, path);
+      // A row carries the counter's *enum*: this half cannot name it either (the names live in the
+      // engine's stringise.cpp), so the one name that matters -- the counter the fold costs -- is a
+      // field below, and `counter` is what a filter matches on. The value is read through the
+      // counter's own result type: a `u64` through the union's `double` member is a number no
+      // consumer can use, and it is the mistake this writer shipped with.
+      const std::map<GPUCounter, CounterDescription> descriptions = CounterDescriptions(ctrl);
+      ArrayOpen("counters");
+      for(size_t i = 0; i < results.size(); i++)
+      {
+        CompType type = CompType::Float;
+        const std::map<GPUCounter, CounterDescription>::const_iterator dit =
+            descriptions.find(results[i].counter);
+        if(dit != descriptions.end())
+          type = dit->second.resultType;
+        ObjectRow(Fmt("{\"eid\": %u, \"counter\": %u, \"value\": %g}", (unsigned)results[i].eventId,
+                      (unsigned)results[i].counter, CounterValueAsDouble(results[i], type)));
+      }
+      ArrayClose(false);
+      g_Indent = 1;
+      Field("total", (long long)results.size());
+      Field("costCounter", (long long)(int)described.m_Counter);
+      Field("costCounterName", described.m_Name);
+      Field("unit", described.m_Unit, true);
+      g_Indent = 0;
+      printf("}\n");
+      written.push_back("counters.json");
+    }
+
+    // The fold, as the same document `counters --per-pass --json` prints, from the results already
+    // fetched: a second `FetchCounters` would double the slowest part of this dump, and the fold is
+    // what a reader wants from a bundle -- which pass got dearer, not which event.
+    {
+      const JsonDocument bPassesJson;
+      const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "counters-passes.json");
+      if(!out.Ok())
+        return Fail(1, "cannot write counters-passes.json in %s", opts.m_OutDir.c_str());
+      if(WriteCounterPasses(ctrl, file, path, NULL, 5, results) != 0)
+        return Fail(1, "counters-passes.json could not be folded");
+      written.push_back("counters-passes.json");
+    }
   }
 
   // ------------------------------------------------------------------ textures/ (optional)
@@ -1425,7 +1467,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("resourceUsage", std::string(opts.m_bNoUsage ? "not collected" : "collected"));
     Field("stateHashInputs",
           std::string("pso, shader ids, render targets, depth target, root signature"
-                      " id, root parameter count"));
+                      " id, root parameter count, bound UAVs"));
     Field("statesRule",
           std::string("a state file for the first event with bound state and for every event"
                       " whose state hash differs from the previous one, plus --events"));

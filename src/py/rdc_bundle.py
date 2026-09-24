@@ -69,15 +69,36 @@ class BundleMessage(TypedDict, total=False):
     severityText: str
     text: str
 
+class BundleCounter(TypedDict):
+    #: The event the counter was measured at.
+    eid: int
+    #: The engine's `GPUCounter` enum value: RenderDoc's names for them live in its own (unexported)
+    #: `stringise.cpp`, so a bundle carries the number and `costCounterName` is the one name it can give.
+    counter: int
+    #: The value, read by the driver through that counter's own result type (a `u64` counter read as a
+    #: double is a number nobody can use).
+    value: float
+
 class BundleData(TypedDict):
     manifest: Dict[str, Any]
     capture: Dict[str, Any]
     events: List[BundleEvent]
     resources: List[BundleResource]
-    #: The driver's counter results as rows (`eid 12  <name> = <value>`), empty unless the bundle was written
-    #: with `--with-counters`. They are the only per-event *cost* a bundle carries, which is why the notable
-    #: ranking reads them when they are there and says so when they are not.
-    counters: List[str]
+    #: The driver's counter results, one row per event per counter, empty unless the bundle was written with
+    #: `--with-counters`. They are the only per-event *cost* a bundle carries, which is why the notable
+    #: ranking and the pass table read them when they are there and say so when they are not.
+    counters: List[BundleCounter]
+    #: Which counter *is* the cost, and its unit: the same choice the engine's own fold makes
+    #: (`CostCounterOf`, `EventGPUDuration` when the replay produced one). A pass's cost is that counter
+    #: summed over the pass -- summing every row instead would add a duration to a byte count.
+    costCounter: int
+    costCounterName: str
+    counterUnit: str
+    #: The engine's own fold over its passes (`counters-passes.json`, the document `counters --per-pass`
+    #: prints), or `{}` when the bundle carries no counters. The pass table does not need it -- it sums the
+    #: per-event rows over *its own* ranges -- but a reader comparing against `counters --per-pass`, or
+    #: asking which pass the engine itself called dearest, wants the engine's view of its own passes.
+    counterPasses: Dict[str, Any]
     #: The driver writes messages as *rows* (`eid 12  error  <text>`), which is what the schema describes; an
     #: object with the same facts is accepted too, because a consumer should not have to know the spelling.
     messages: List[Union[BundleMessage, str]]
@@ -113,6 +134,21 @@ class ReportPass(TypedDict):
     triangles: int
     threads: int
     volumeCalls: int
+    #: The frame's *time* in this pass, when the bundle carries counters (`--with-counters`): the counter the
+    #: bundle names as the cost summed over the pass's events, the fraction of the frame's total that is
+    #: (`share`, against every event with a value), how many events produced one (`costRows`, so a pass the
+    #: counter skipped reads as unmeasured rather than free) and the dearest single event in it
+    #: (`dearestEid`, 0 when none). All four are 0 in a bundle with no counters, and `costRows` 0 is what
+    #: tells that apart from a pass that cost nothing.
+    cost: float
+    share: float
+    costRows: int
+    dearestEid: int
+    #: What the pass *writes*, for the kind of pass whose outputs are not render targets: the state
+    #: document's `uavs` rows (`cs u0 res6979`), verbatim, from the pass's first event. Empty for a graphics
+    #: pass (its outputs are `targets`/`depth`) and empty for a compute pass in a bundle whose state
+    #: documents predate the array -- which the renderer says as `n/a` rather than as "writes nothing".
+    writes: List[str]
 
 #: One red flag's required keys. `what` is the *observation*; what it means is the reader's, because a
 #: bundle can prove what the engine held, not what the frame intended. `certainty` is what the detector
@@ -320,8 +356,19 @@ def _targets_text(entry: ReportPass, short: bool = False) -> str:
     At a compute event the engine still reports the output-merge state, but a dispatch did not set it:
     printing it as this pass's targets would be a claim about the frame that the event does not
     support, so it says so instead. (The reported values stay in the JSON document.)
+
+    What a dispatch *does* write is its bound UAVs, which the state document carries (`writes`): where they
+    are there they are the answer, and where they are not -- a bundle whose state documents predate that
+    array -- the old sentence stands, because "no UAVs recorded" and "writes nothing" are different claims.
     """
     if entry['kind'] == 'compute':
+        if entry['writes']:
+            # `cs u0 res6979` -> `res6979 (cs u0)`: the resource first, because that is what a reader
+            # compares against the rest of the document, with the binding after it for a second look. The id
+            # keeps the `res` its row carries -- `_res_id` strips it, and a target spelled differently from
+            # every other id in the document is a target a reader has to translate.
+            return ', '.join('%s (%s u%s)' % (row.split()[-1], row.split()[0], row.split()[1][1:])
+                             for row in entry['writes'])
         # The map column is narrow and the reason is the same for every dispatch: `n/a` there, the
         # sentence in the pass section and in the caveats.
         return 'n/a' if short else 'n/a — a dispatch does not set the output merger'
@@ -373,7 +420,12 @@ def load_bundle(bundle_dir: str) -> BundleData:
         'messages', [])
     # Optional like `messages.json`: a bundle written without `--with-counters` has no counter results, and
     # that absence is reported (the notable ranking names the input as unavailable) rather than assumed.
-    counters: List[str] = (_bundle_file(bundle_dir, 'counters.json', False) or {}).get('counters', [])
+    counter_doc: Dict[str, Any] = _bundle_file(bundle_dir, 'counters.json', False) or {}
+    counters: List[BundleCounter] = counter_doc.get('counters', [])
+    # The engine's own fold, written by the same dump from the same fetch: `{}` when there are no counters
+    # at all, which is a different answer from a fold that ran and found no pass to fold over (that one has
+    # `available` 0 and a `note` saying so).
+    counter_passes: Dict[str, Any] = _bundle_file(bundle_dir, 'counters-passes.json', False) or {}
 
     # The per-event documents that exist, keyed by eid: the pass roll-up names the shaders and the
     # constant blocks of the pass's first event, which is exactly the event the bundle writes a state
@@ -398,10 +450,14 @@ def load_bundle(bundle_dir: str) -> BundleData:
                 if isinstance(document, dict):
                     cbuffers[name] = document
 
-    # Built as a `BundleData` rather than as a dict literal: the seven members have different types, and a
-    # literal widens to a union of them, which is no longer the type this function promises to return.
+    # Built as a `BundleData` rather than as a dict literal: the members have different types, and a literal
+    # widens to a union of them, which is no longer the type this function promises to return.
     return BundleData(manifest=manifest, capture=capture, events=events, resources=resources,
-                      messages=messages, counters=counters, states=states, cbuffers=cbuffers)
+                      messages=messages, counters=counters,
+                      costCounter=int(counter_doc.get('costCounter', 0)),
+                      costCounterName=str(counter_doc.get('costCounterName', '')),
+                      counterUnit=str(counter_doc.get('unit', '')),
+                      counterPasses=counter_passes, states=states, cbuffers=cbuffers)
 
 def compact_count(count: int) -> str:
     """A count as a reader compares them at a glance: `1204` -> `1.2 K`, `1234567` -> `1.2 M`.
@@ -432,6 +488,7 @@ def work_text(entry: ReportPass) -> str:
 
 __all__ = [
     'BUNDLE_VERSION',
+    'BundleCounter',
     'BundleData',
     'BundleError',
     'BundleEvent',

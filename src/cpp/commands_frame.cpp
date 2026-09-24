@@ -852,7 +852,7 @@ int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
 //: A counter result as a double, reading whichever member of the union the counter's own
 //: `resultType` says is meaningful. Reading `.d` for every counter -- which is what a first cut did
 //: -- prints a `u64` as a double, and a table of those is worse than no table.
-static double CounterValueAsDouble(const CounterResult &result, CompType resultType)
+double CounterValueAsDouble(const CounterResult &result, CompType resultType)
 {
   switch(ComponentClass(resultType))
   {
@@ -860,6 +860,65 @@ static double CounterValueAsDouble(const CounterResult &result, CompType resultT
     case CompType::SInt: return (double)(long long)result.value.u64;
     default: return result.value.d;
   }
+}
+
+//: The engine's own unit for a counter, which is the only authority for it: `EventGPUDuration`
+//: being milliseconds is a fact about the counter, not about the number.
+static const char *CounterUnitText(CounterUnit unit)
+{
+  switch(unit)
+  {
+    case CounterUnit::Seconds: return "s";
+    case CounterUnit::Percentage: return "%";
+    case CounterUnit::Ratio: return "x";
+    case CounterUnit::Bytes: return " bytes";
+    case CounterUnit::Cycles: return " cycles";
+    case CounterUnit::Hertz: return " Hz";
+    case CounterUnit::Volt: return " V";
+    case CounterUnit::Celsius: return " C";
+    default: return "";    // Absolute: the value is the value
+  }
+}
+
+std::map<GPUCounter, CounterDescription> CounterDescriptions(IReplayController *ctrl)
+{
+  const rdcarray<GPUCounter> available = ctrl->EnumerateCounters();
+  std::map<GPUCounter, CounterDescription> descriptions;
+  for(size_t i = 0; i < available.size(); i++)
+    descriptions[available[i]] = ctrl->DescribeCounter(available[i]);
+  return descriptions;
+}
+
+CostCounter CostCounterOf(IReplayController *ctrl, const rdcarray<CounterResult> &results)
+{
+  CostCounter cost;
+  for(size_t i = 0; i < results.size(); i++)
+  {
+    if(results[i].counter == GPUCounter::EventGPUDuration)
+    {
+      cost.m_Counter = results[i].counter;
+      cost.m_bHave = true;
+      break;
+    }
+  }
+  if(!cost.m_bHave && !results.empty())
+  {
+    cost.m_Counter = results[0].counter;
+    cost.m_bHave = true;
+  }
+
+  cost.m_Name = CounterText(cost.m_Counter);
+  const std::map<GPUCounter, CounterDescription> descriptions = CounterDescriptions(ctrl);
+  const std::map<GPUCounter, CounterDescription>::const_iterator dit =
+      descriptions.find(cost.m_Counter);
+  if(dit != descriptions.end())
+  {
+    if(!dit->second.name.empty())
+      cost.m_Name = dit->second.name.c_str();
+    cost.m_Unit = CounterUnitText(dit->second.unit);
+    cost.m_ResultType = dit->second.resultType;
+  }
+  return cost;
 }
 
 std::vector<PassCost> FoldPassCosts(const rdcarray<CounterResult> &results, GPUCounter cost,
@@ -1029,48 +1088,46 @@ bool ReadPassRanges(const char *path, std::vector<PassRange> &ranges, std::strin
   return true;
 }
 
-//: The engine's own unit for a counter, which is the only authority for it: `EventGPUDuration`
-//: being milliseconds is a fact about the counter, not about the number.
-static const char *CounterUnitText(CounterUnit unit)
-{
-  switch(unit)
-  {
-    case CounterUnit::Seconds: return "s";
-    case CounterUnit::Percentage: return "%";
-    case CounterUnit::Ratio: return "x";
-    case CounterUnit::Bytes: return " bytes";
-    case CounterUnit::Cycles: return " cycles";
-    case CounterUnit::Hertz: return " Hz";
-    case CounterUnit::Volt: return " V";
-    case CounterUnit::Celsius: return " C";
-    default: return "";    // Absolute: the value is the value
-  }
-}
-
 int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, bool bPerPass,
                 const char *passesPath, int topN)
 {
-  rdcarray<CounterResult> results = ctrl->FetchCounters(rdcarray<GPUCounter>());
+  const rdcarray<CounterResult> results = ctrl->FetchCounters(rdcarray<GPUCounter>());
 
-  if(!bPerPass)
+  if(bPerPass)
+    return WriteCounterPasses(ctrl, file, path, passesPath, topN, results);
+
+  PrintCaptureHeader(file, path);
+
+  // RenderDoc's own counter names live in its (unexported) stringise.cpp, so the enum value is
+  // what gets printed here; `GPUCounter`'s numbering is in the API headers.
+  //
+  // The value is read through the counter's own result type rather than through the union's `double`
+  // member: a `u64` counter read as a double is a table of nonsense, which is the mistake the fold's
+  // first cut made too (`fold-reads-a-u64-as-a-u64` is the selftest case that pins the arithmetic).
+  const std::map<GPUCounter, CounterDescription> descriptions = CounterDescriptions(ctrl);
+  ArrayOpen("counters");
+  for(size_t i = 0; i < results.size(); i++)
   {
-    PrintCaptureHeader(file, path);
-
-    // RenderDoc's own counter names live in its (unexported) stringise.cpp, so the enum value is
-    // what gets printed here; `GPUCounter`'s numbering is in the API headers.
-    ArrayOpen("counters");
-    for(size_t i = 0; i < results.size(); i++)
-      Row(Fmt("eid %-7u %-18s = %f", (unsigned)results[i].eventId,
-              CounterText(results[i].counter).c_str(), results[i].value.d));
-    ArrayClose(false);    // total follows
-    g_Indent = g_bJson ? 1 : 0;
-    Field("total", (long long)results.size(), true);
-    g_Indent = 0;
-    if(g_bJson)
-      printf("}\n");
-    return 0;
+    CompType type = CompType::Float;
+    const std::map<GPUCounter, CounterDescription>::const_iterator dit =
+        descriptions.find(results[i].counter);
+    if(dit != descriptions.end())
+      type = dit->second.resultType;
+    Row(Fmt("eid %-7u %-18s = %f", (unsigned)results[i].eventId,
+            CounterText(results[i].counter).c_str(), CounterValueAsDouble(results[i], type)));
   }
+  ArrayClose(false);    // total follows
+  g_Indent = g_bJson ? 1 : 0;
+  Field("total", (long long)results.size(), true);
+  g_Indent = 0;
+  if(g_bJson)
+    printf("}\n");
+  return 0;
+}
 
+int WriteCounterPasses(IReplayController *ctrl, ICaptureFile *file, const char *path,
+                       const char *passesPath, int topN, const rdcarray<CounterResult> &results)
+{
   // ---- one row per pass --------------------------------------------------------------------
   PrintCaptureHeader(file, path);
 
@@ -1094,40 +1151,16 @@ int CmdCounters(IReplayController *ctrl, ICaptureFile *file, const char *path, b
     passes = PassesFromActions(rows);
   }
 
-  // Which counters this replay even has: the descriptions name them and give the unit and the
-  // result type, all of which are the engine's answer and not ours.
+  // Which counters this replay even has, for the note below when it has none. *Which* of them the fold
+  // costs -- and its name, unit and result type -- is `CostCounterOf`'s answer, shared with the bundle's
+  // copy of this document so the command and the bundle cannot fold different counters.
   const rdcarray<GPUCounter> available = ctrl->EnumerateCounters();
-  std::map<GPUCounter, CounterDescription> descriptions;
-  for(size_t i = 0; i < available.size(); i++)
-    descriptions[available[i]] = ctrl->DescribeCounter(available[i]);
-
-  GPUCounter cost = GPUCounter::EventGPUDuration;
-  bool bHaveCost = false;
-  for(size_t i = 0; i < results.size() && !bHaveCost; i++)
-  {
-    if(results[i].counter == GPUCounter::EventGPUDuration)
-    {
-      cost = results[i].counter;
-      bHaveCost = true;
-    }
-  }
-  if(!bHaveCost && !results.empty())
-  {
-    cost = results[0].counter;
-    bHaveCost = true;
-  }
-
-  std::string costName = CounterText(cost);
-  std::string unit;
-  CompType resultType = CompType::Float;
-  const std::map<GPUCounter, CounterDescription>::const_iterator dit = descriptions.find(cost);
-  if(dit != descriptions.end())
-  {
-    if(!dit->second.name.empty())
-      costName = dit->second.name.c_str();
-    unit = CounterUnitText(dit->second.unit);
-    resultType = dit->second.resultType;
-  }
+  const CostCounter described = CostCounterOf(ctrl, results);
+  const GPUCounter cost = described.m_Counter;
+  const bool bHaveCost = described.m_bHave;
+  const std::string costName = described.m_Name;
+  const std::string unit = described.m_Unit;
+  const CompType resultType = described.m_ResultType;
 
   // Wrapped: `Field` has a `rdcstr` and a `string_view` overload and a bare literal is ambiguous
   // between them.

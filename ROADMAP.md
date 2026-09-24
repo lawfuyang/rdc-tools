@@ -12,10 +12,13 @@ same change.
 and the driver exe can do *here* — no replay server, no capture from another API, no DLL inside the captured
 application, no program of our own feeding the shaders. Those are not defects of this tool, and five items left
 the file on those grounds alone; each is named with its reason in "what is deliberately *not* on this list"
-below, so the reasoning survives the deletion. What is left is analysis, in three shapes: the **engine answer
-that is not extracted yet** (the replay API has it, no command asks for it, and the report has been carrying a
-caveat about its absence), the **offline rule whose input is not decoded yet**, and **presentation that puts
-two of them side by side** where a reader has to look at a picture or run one command and then another.
+below, so the reasoning survives the deletion.
+
+**Phase 1 landed on 2026-09-23 and left this file**: the five questions a person actually asks — a pass's cost,
+a target's statistics, a comparison over those costs, the frame's permutations, and what a dispatch writes —
+are in `README.md` (the command list) and `REFERENCE.md` (§9 for the driver commands, §4.23 for the offline
+ones and the documents they read). What is left here is the two probes: one session each, and the answer
+decides whether a bigger item exists at all.
 
 Legend: **P0** = do next / unblocks current work · **P1** = high value, moderate effort · **P2** = useful,
 opportunistic · **P3** = nice-to-have.
@@ -142,61 +145,7 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ---
 
-## 1. P1 — the extract the tool already knows how to do
-
-Two items, each one an *existing* answer that is not being asked for: the API call is in the header, or the
-offline decode is a sibling of one already written. Neither is blocked on anything.
-
-* **A picture's statistics: `histogram` and the min/max of a target** — `GetMinMax(textureId, sub, typeCast)`
-  and `GetHistogram(textureId, sub, typeCast, minval, maxval, channels)` are in the replay API
-  (`renderdoc_replay.h` 929/953) and no command calls either. *Why*: the report states "nothing here samples or
-  decodes a texture or a render target: formats are named, pixels are not read", and the picture commands
-  (`image`, `textures --save`, `cubemap`, `sheet`) make a person *look* at a PNG to answer "is this target
-  black? blown out? clipping?" — three questions with exact numeric answers, and the first thing anyone checks
-  when a frame renders wrong or a bloom looks flat. *How*: `--stats` on the picture commands, or a
-  `histogram <rdc> <resId|eid> [--mip] [--slice] [--sample] [--cast]`, reusing the `Subresource`/`CompType`
-  plumbing `textures --save` already has; min/max always, the buckets as bars in text and as numbers under
-  `--json`, so a bundle can carry them and the report can rank by exposure. *Blocks*: nothing. **~1 d.**
-
-* **The frame's time, per pass, in the report** — the counters folded into the pass table. *Why*: the caveat
-  "counters are not folded into the pass sections… no pass roll-up prints them", while `counters --per-pass`
-  folds them in the driver already: the number a reader wants first is "where does the frame's time go", and
-  today that means running `counters` beside the report and joining two documents by hand. *How*: the driver's
-  per-pass fold written into the bundle under `--with-counters`, and a report column for each pass's share and
-  its dearest event — with the counter that *is* the cost named, as `counters` already does. *Blocks*: nothing.
-  **~1 d.**
-
-## 2. P2 — new analysis on top of them
-
-* **`replaydiff` over counters** — "did my change help, and where". The project's own regression workflow is two
-  bundles of the same capture (`replaydiff`, `rdc_filediff.py`), and it compares states, shaders and resources
-  today; both bundles can carry counters (`--with-counters`), so the comparison can say which pass got cheaper
-  and which got dearer instead of leaving a person to diff two `counters` runs by eye. *Blocks*: none, though
-  the per-pass roll-up above makes it much more useful. **~0.5–1 d.**
-
-* **What a dispatch writes** — the UAV side of the state. *Why*: "what a dispatch *does* write (its UAVs) is not
-  in a bundle at all", which is why a compute pass has "targets and depth not applicable" and why the usage
-  chain has no write side for compute — the half of a mobile frame that is usually the interesting half.
-  *How*: `PipeState::GetReadWriteResources(stage)` exists and is unused (`GetConstantBlocks`,
-  `GetReadOnlyResources` and `GetSamplers` are the other three; the driver resolves bindings through
-  `GetDescriptorAccess` + `GetDescriptors` instead), so the read-write set is one call, or a filter of the
-  access list it already walks — `DescriptorAccess` carries the stage and the slot but no direction, and the
-  reflection's `readWriteResources` is what supplies it. Then the report can name a dispatch's targets and the
-  ledger gains compute writes. **~1 d.**
-
-* **A permutation table for the frame** — which shaders this frame actually uses: per stage, the hash, the
-  entry point, how many events bind it, the first and last eid, and the reflection summary. *Why*: feature
-  study on a UE capture is mostly "how many permutations does this frame really contain, and is the one I am
-  editing even in it?" — the bundles carry `states/<eid>.shaders.json` with a `hash` per stage already, so the
-  table is a dedup and a count, and `replaydiff` already compares two frames' shaders by that hash. *How*:
-  offline over a bundle (state events), presented as a report section or a `permutations <bundle>` command.
-  The **raw `.rdc` half is landed** (`psos`, REFERENCE §4.22): the pipelines, their stages, all three of a
-  container's identities and the `ILDB` answer, from the file — so what is left is the *bundle* half (the
-  per-stage event counts, entry point and reflection summary, which only a replay has) and the join, whose
-  key is measured: a bundle's `hash` is `sha256` of the container, which `psos` now keys on (3 of 3 stages of
-  `desktop-1`'s event 1003). **~0.5 d.**
-
-## 3. P3 — probes whose answer is not known yet
+## 1. P3 — probes whose answer is not known yet
 
 Both of these are one session long, and their value is in the answer rather than in the code: they decide
 whether a bigger item exists at all.
@@ -218,28 +167,17 @@ whether a bigger item exists at all.
   Then either build the link between the two commands, or write the one paragraph in REFERENCE that says a
   replacement carries none. **~0.5 d.**
 
-## 4. Suggested order
+## 2. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
 item of §1–§3 appears exactly once, so this is the whole list in one place rather than a selection of it; each
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**Phase 1 — the questions a person actually asks.** Each of these is a number a reader wants and cannot get
-without running two commands and joining them by hand:
-
-1. **The frame's time per pass (§1, ~1 d)** — then "the pass with the most triangles" has a cost beside it.
-2. **A picture's statistics (§1, ~1 d)** — the numeric form of "look at the PNG".
-3. **`replaydiff` over counters (§2, ~0.5–1 d)** — after 1, because the per-pass share is what a comparison
-   differs over.
-4. **A permutation table for the frame (§2, ~0.5 d)** — feature study; the file's half is `psos` now, and what
-   is left costs a dedup of what the bundles already carry.
-5. **What a dispatch writes (§2, ~1 d)** — the largest P2 item, and the one that opens compute.
-
-**Phase 2 — settle the two probes, then decide.** One session each, and the answer decides whether a bigger
+**Phase 1 — settle the two probes, then decide.** One session each, and the answer decides whether a bigger
 item exists:
 
-6. **Why the pixel path of `trace` produces nothing (§3, ~0.5 d)** — fix the message, or document the engine's
+1. **Why the pixel path of `trace` produces nothing (§1, ~0.5 d)** — fix the message, or document the engine's
    limit in the words of the measurement.
-7. **Does a patched shader carry debug info? (§3, ~0.5 d)** — if it does, "change the shader, then step it"
+2. **Does a patched shader carry debug info? (§1, ~0.5 d)** — if it does, "change the shader, then step it"
    is the next feature; if not, it is one paragraph in REFERENCE.

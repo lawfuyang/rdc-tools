@@ -193,6 +193,10 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     passes = reconstruct_passes(bundle['events'], bundle['resources'])
     for entry in passes:
         _state_rollup(bundle, entry)
+    # The frame's time, where the bundle can say it: one counter summed over each pass's events, its share
+    # of the frame's total and the dearest event in it. Zero everywhere in a bundle written without
+    # `--with-counters`, which `costRows` 0 says rather than a table of costs that are not measurements.
+    _cost_rollup(bundle, passes)
 
     # The engine's own vocabulary: the names the capture wrote, read against the tables in `engine-schemas/`.
     # It never guesses an engine and never invents a concept -- a bundle whose names match no table comes back

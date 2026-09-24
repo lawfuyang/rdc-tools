@@ -88,6 +88,13 @@ void Usage()
       "                                    picture of it\n"
       "  cubemap <rdc> <resId|name> [outDir=cross]   a cubemap as six faces plus the engine's "
       "cruciform\n"
+      "  histogram <rdc> <resId|name> [--eid N] [--mip N] [--slice N] [--sample N] [--cast TYPE]\n"
+      "                                    [--channels rgba] [--rows N]   a target's statistics: "
+      "the engine's\n"
+      "                                    min/max and its own histogram of it -- the numbers "
+      "behind \"is this\n"
+      "                                    black? blown out? clipping?\", instead of opening a PNG "
+      "and looking\n"
       "  mesh    <rdc> <eid> [instance] [max] [--stage vsin|vsout|gsout|taskout|meshout] [--obj "
       "<file>]\n"
       "                                    one instance's vertices at that stage, with the "
@@ -261,7 +268,12 @@ void Usage()
       "`--textures`\n"
       "decodes every texture to PNG (full size: the engine decodes but does not resize), "
       "`--with-counters`\n"
-      "fetches the counters. `--since`/`--until` pin the id range (the default scans until 256 ids "
+      "fetches the counters: `counters.json` per event, and `counters-passes.json` the engine's "
+      "own "
+      "fold over\n"
+      "its passes -- the same document `counters --per-pass` prints. `--since`/`--until` pin the "
+      "id "
+      "range (the default scans until 256 ids "
       "in a row\n"
       "have nothing bound), `--max-events` caps how many events are written, `--events 270,452` "
       "forces extra\n"
@@ -1051,6 +1063,23 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     // writes beside the tool as `cross/`.
     return CmdCubemap(ctrl, file, path, args[1].c_str(),
                       args.size() > 2 && !IsOption(args[2]) ? args[2].c_str() : NULL, opts);
+  }
+  if(!strcmp(cmd, "histogram") && args.size() > 1)
+  {
+    PictureOptions opts;
+    std::string why;
+    if(!PictureOptionsFromArgs(args, opts, why))
+      return Fail(2, "%s", why.c_str());
+    // Two ways to name the target, and the second is what `image` uses: a resource id or name, or
+    // the render target 0 bound at an event (`--eid`). They are exclusive because they answer the
+    // same question -- "which picture" -- and a command that silently preferred one would be a
+    // statistic of the other.
+    const int eid = ToInt(OptValue(args, "--eid", "0"), 0);
+    if(eid != 0 && !IsOption(args[1]))
+      return Fail(2, "histogram takes a resource or --eid, not both");
+    return CmdHistogram(ctrl, file, path, args[1].c_str(), eid, opts,
+                        ToInt(OptValue(args, "--rows", "32"), 32),
+                        OptValue(args, "--channels", NULL));
   }
   if(!strcmp(cmd, "textures"))
   {

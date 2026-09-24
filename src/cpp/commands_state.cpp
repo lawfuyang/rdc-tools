@@ -5,6 +5,38 @@
 
 #include "common.h"
 
+rdcarray<BoundUav> BoundUavs(IReplayController *ctrl)
+{
+  // One implementation for the two callers that need it: `state` prints these rows and `dump`
+  // hashes them into the state key that decides when a state document is rewritten -- a set that
+  // disagreed with itself there would be a document that misses a UAV change.
+  rdcarray<BoundUav> out;
+  const rdcarray<DescriptorAccess> &access = ctrl->GetDescriptorAccess();
+  for(size_t i = 0; i < access.size(); i++)
+  {
+    const DescriptorAccess &a = access[i];
+    if(CategoryForDescriptorType(a.type) != DescriptorCategory::ReadWriteResource)
+      continue;
+    if(a.descriptorStore == ResourceId::Null())
+      continue;
+
+    rdcarray<DescriptorRange> request;
+    DescriptorRange ask = DescriptorRange(a);
+    ask.count = 1;
+    request.push_back(ask);
+    const rdcarray<Descriptor> contents = ctrl->GetDescriptors(a.descriptorStore, request);
+    if(contents.empty() || contents[0].resource == ResourceId::Null())
+      continue;
+
+    BoundUav uav;
+    uav.m_Stage = a.stage;
+    uav.m_Index = a.index;
+    uav.m_Resource = contents[0].resource;
+    out.push_back(uav);
+  }
+  return out;
+}
+
 int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid)
 {
   MoveToEvent(ctrl, eid);
@@ -104,6 +136,24 @@ int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
         }
       }
     }
+    ArrayClose(false);    // the write bindings follow
+
+    // -----------------------------------------------------------------------
+    // What this state *writes*: the bound read-write resources, per stage.
+    //
+    // A dispatch does not set the output-merge state, so the render targets and depth target above
+    // are leftovers from an earlier draw -- the one thing a compute pass cannot be described by.
+    // What it does write is its UAVs, and until this array a bundle had nowhere to say so (the
+    // `shaders` document's `readWriteResources` rows are the *declarations* from the reflection:
+    // they name the bind points, not the resources bound to them).
+    //
+    // The *bound* set, not the engine's "only used" filter: a resource bound to a slot the shader
+    // never accesses is still a fact about the state, and this half cannot tell which of the two a
+    // finding wants. The rows say which is which by naming what is bound where.
+    ArrayOpen("uavs");
+    for(const BoundUav &uav : BoundUavs(ctrl))
+      Row(Fmt("%-3s u%-3d %s", StageName(uav.m_Stage), uav.m_Index,
+              Fmt("res%s", IdText(uav.m_Resource).c_str()).c_str()));
     ArrayClose(false);    // the pipeline-state blocks follow
 
     // -----------------------------------------------------------------------

@@ -405,6 +405,210 @@ int CmdImgDiff(ICaptureFile *file, const char *path, const char *aPath, const ch
 //: Reassembling one out of six bitmaps by hand is exactly where the rotations go wrong (the `+z`
 //: face is not the one a reader assumes), so the layout is the engine's and this command is the
 //: names, the summary and the options around it.
+bool ChannelFlags(const char *text, rdcfixedarray<bool, 4> &out, std::string &why)
+{
+  // `rgba` is the default and the letters are the four channels, in any order and any subset: "rgb"
+  // is what a person asks for when the alpha of an opaque target would swamp the bars, and "a" when
+  // only the alpha matters. A letter that is not one of the four is refused rather than ignored: a
+  // flag that is silently dropped is a chart of something other than what was asked. Every member
+  // is written on every path, including the default one: the caller hands in an uninitialised
+  // array, so a path that returned true without filling it would be four indeterminate booleans
+  // deciding what the chart counts.
+  out[0] = out[1] = out[2] = out[3] = (text == NULL || text[0] == '\0');
+  if(text == NULL || text[0] == '\0')
+    return true;
+  for(const char *p = text; *p != '\0'; p++)
+  {
+    const char c = (char)tolower((unsigned char)*p);
+    if(c == 'r')
+      out[0] = true;
+    else if(c == 'g')
+      out[1] = true;
+    else if(c == 'b')
+      out[2] = true;
+    else if(c == 'a')
+      out[3] = true;
+    else
+    {
+      why = Fmt("'%c' is not a channel (r, g, b, a)", c);
+      return false;
+    }
+  }
+  if(!out[0] && !out[1] && !out[2] && !out[3])
+  {
+    why = "--channels needs at least one of r, g, b, a";
+    return false;
+  }
+  return true;
+}
+
+std::vector<double> AggregateBuckets(const rdcarray<uint32_t> &buckets, int rows)
+{
+  // The engine's own bucket count is not a parameter (`GetHistogram` takes the range, not the
+  // count), so the bars are drawn from *its* buckets rather than from a resampled range: adjacent
+  // buckets are summed into `rows` groups for the terminal, and `--json` carries the engine's own
+  // numbers untouched. A count of buckets below the row limit is drawn as it is, so the bars never
+  // claim a resolution the engine did not give.
+  std::vector<double> out;
+  const int want = rows > 0 ? rows : (int)buckets.size();
+  if(buckets.empty() || want >= (int)buckets.size())
+  {
+    out.reserve(buckets.size());
+    for(size_t i = 0; i < buckets.size(); i++)
+      out.push_back((double)buckets[i]);
+    return out;
+  }
+  out.assign((size_t)want, 0.0);
+  for(size_t i = 0; i < buckets.size(); i++)
+  {
+    // Integer arithmetic on the index, so the groups partition the buckets exactly: the last one
+    // takes the remainder rather than dropping it.
+    const size_t group = (size_t)((uint64_t)i * (uint64_t)want / (uint64_t)buckets.size());
+    out[group] += (double)buckets[i];
+  }
+  return out;
+}
+
+int CmdHistogram(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
+                 int eid, const PictureOptions &opts, int rows, const char *channelText)
+{
+  // A picture's statistics: the numeric form of "is this target black, blown out, clipping?" -- the
+  // three questions a person answers today by opening a PNG and looking at it. `GetMinMax` and
+  // `GetHistogram` are the engine's own answers, and the range the buckets cover is the one the
+  // *caller* passes, so the min/max is asked for first and the histogram is asked over exactly it
+  // (REFERENCE §9).
+  std::string name;
+  std::string why;
+  ResourceId id;
+  if(eid != 0)
+  {
+    MoveToEvent(ctrl, eid);
+    const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
+    id = d3d12 && !d3d12->outputMerger.renderTargets.empty()
+             ? d3d12->outputMerger.renderTargets[0].resource
+             : ResourceId::Null();
+    if(id == ResourceId::Null())
+      return Fail(1, "nothing is bound to render target 0 at eid %d", eid);
+  }
+  else
+  {
+    id = ResolveResourceArg(ctrl, what, name, why);
+    if(id == ResourceId::Null())
+      return Fail(1, "%s", why.c_str());
+  }
+
+  const TextureDescription *found = NULL;
+  for(const TextureDescription &texture : ctrl->GetTextures())
+  {
+    if(texture.resourceId == id)
+    {
+      found = &texture;
+      break;
+    }
+  }
+  if(found == NULL)
+    return Fail(1, "res%s is not a texture this capture created", IdText(id).c_str());
+
+  rdcfixedarray<bool, 4> channels;
+  if(!ChannelFlags(channelText, channels, why))
+    return Fail(2, "%s", why.c_str());
+
+  // What the values are *read as*: the cast when one was asked for, and the resource's own
+  // component type otherwise. `Typeless` is a request ("use the target's type"), not a class -- and
+  // the two callers below need a class to know which member of `PixelValue`'s union holds the
+  // number, so passing `Typeless` straight through is how a float target's min/max comes back as
+  // the bit patterns of its floats (measured: a `R11G11B10_FLOAT` target answered `1055653888` for
+  // a maximum, which is a float read as a `uint`).
+  const CompType readAs = opts.m_bCastGiven ? opts.m_Cast : found->format.compType;
+  const rdcpair<PixelValue, PixelValue> minmax = ctrl->GetMinMax(id, opts.m_Sub, readAs);
+  const float lo = MinMaxComponent(minmax.first, readAs, 0);
+  const float hi = MinMaxComponent(minmax.second, readAs, 0);
+  const rdcarray<uint32_t> buckets = ctrl->GetHistogram(id, opts.m_Sub, readAs, lo, hi, channels);
+
+  const std::vector<double> bars = AggregateBuckets(buckets, rows);
+  double widest = 0.0;
+  double counted = 0.0;
+  for(size_t i = 0; i < buckets.size(); i++)
+    counted += (double)buckets[i];
+  for(size_t i = 0; i < bars.size(); i++)
+    widest = std::max(widest, bars[i]);
+
+  PrintCaptureHeader(file, path);
+  Field("eid", (long long)eid);
+  if(!name.empty())
+    Field("name", name);
+  Field("resource", Fmt("res%s", IdText(id).c_str()));
+  Field("description",
+        Fmt("%ux%ux%u %s", found->width, found->height, found->depth, found->format.Name().c_str()));
+  Field("mip", (long long)opts.m_Sub.mip);
+  Field("slice", (long long)opts.m_Sub.slice);
+  Field("sample", (long long)opts.m_Sub.sample);
+  Field("cast", std::string(CastText(readAs)));
+  Field("channels", std::string(channelText == NULL ? "rgba" : channelText));
+
+  if(g_bJson)
+  {
+    // The min and the max as the engine's own text for them (`PixelValueText`), the same string the
+    // terminal prints: the values are per-component and of whichever class the cast asked for, and
+    // the writer has no fractional field (`counters --per-pass` writes its costs as text for the
+    // same reason).
+    Field("min", PixelValueText(minmax.first, readAs));
+    Field("max", PixelValueText(minmax.second, readAs));
+    Field("bucketCount", (long long)buckets.size());
+    Field("low", Fmt("%g", lo));
+    Field("high", Fmt("%g", hi));
+    ArrayOpen("buckets");
+    for(size_t i = 0; i < buckets.size(); i++)
+      Row(Fmt("%u", (unsigned)buckets[i]));
+    ArrayClose(false);
+    Field("counted", (long long)counted, true);
+  }
+  else
+  {
+    Row(Fmt("values    : min %s  max %s", PixelValueText(minmax.first, readAs).c_str(),
+            PixelValueText(minmax.second, readAs).c_str()));
+    Row(Fmt("buckets   : %d over [%g, %g], channels %s, %lld value(s) counted", (int)buckets.size(),
+            lo, hi, channelText == NULL ? "rgba" : channelText, (long long)counted));
+    if(bars.empty())
+      Row(std::string("          no value fell inside the range the engine reports"));
+    for(size_t i = 0; i < bars.size(); i++)
+    {
+      const int width = widest > 0.0 ? (int)(bars[i] / widest * 40.0 + 0.5) : 0;
+      Row(Fmt("%4d %-10s %s %.4g", (int)i, BucketRangeText((int)i, (int)bars.size(), lo, hi).c_str(),
+              std::string((size_t)width, '#').c_str(), bars[i]));
+    }
+  }
+  g_Indent = 0;
+  if(g_bJson)
+    printf("}\n");
+  return 0;
+}
+
+std::string BucketRangeText(int index, int count, float low, float high)
+{
+  // The range a *display* row covers: the engine's buckets are grouped for the terminal, so the text says
+  // the span of the group rather than of one bucket, and `--json` carries the engine's own array.
+  const double span = (double)(high - low) / (double)(count > 0 ? count : 1);
+  const double from = low + span * (double)index;
+  const double to = from + span;
+  return Fmt("%.4g..%.4g", from, to);
+}
+
+float MinMaxComponent(const PixelValue &value, CompType type, int channel)
+{
+  // Which member of the union is meaningful is the counter's own business here too (`PixelValue` is
+  // one union and the cast says which member to read): reading `floatValue` for a `uint` target is
+  // the same mistake a counter's `.d` was, and it is what a cast of `uint` exists to avoid.
+  if(channel < 0 || channel > 3)
+    return 0.0f;
+  switch(ComponentClass(type))
+  {
+    case CompType::UInt: return (float)value.uintValue[(size_t)channel];
+    case CompType::SInt: return (float)value.intValue[(size_t)channel];
+    default: return value.floatValue[(size_t)channel];
+  }
+}
+
 int CmdCubemap(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
                const char *outDir, const PictureOptions &opts)
 {

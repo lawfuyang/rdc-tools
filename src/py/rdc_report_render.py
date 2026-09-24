@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rdc_bundle import *  # noqa: F401,F403
 
-from typing import List
+from typing import Any, Dict, List
 
 def report_caveats() -> List[str]:
     """What this report cannot say, in its own words. Fixed text, in a fixed order: it is part of the
@@ -16,10 +16,12 @@ def report_caveats() -> List[str]:
         '2026-09-22 on (`volume`, taken from the engine\'s action list); what is still missing is the finer '
         'kind -- copy against clear against marker -- and a call\'s own name, which `draws` prints and a '
         'bundle does not carry.',
-        'A compute pass is a run of dispatches with the same pipeline and shaders, and its targets and '
-        'depth are given as not applicable: a dispatch does not set the output-merge state, so what the '
-        'engine reports there is leftover from an earlier call. What a dispatch *does* write (its UAVs) '
-        'is not in a bundle at all.',
+        'A compute pass is a run of dispatches with the same pipeline and shaders, and it sets no '
+        'output-merge state: what the engine reports for its targets and depth is leftover from an earlier '
+        'call. What a dispatch *does* write is its bound UAVs, which every state document now carries '
+        '(`uavs`, one row per stage and slot): a pass names them where the bundle has them, and where it '
+        'does not -- a bundle written before that array existed -- it says not applicable rather than '
+        '"writes nothing".',
         'What a pass is *for* is claimed only where the engine\'s own names say so, and every such claim is '
         'marked name-based: the tables in `engine-schemas/` map a name the capture contains -- a constant '
         'block, a shader entry point, a resource name, a marker name, a pass structure string -- onto a '
@@ -70,9 +72,11 @@ def report_caveats() -> List[str]:
         'next frame or by the CPU afterwards looks exactly like nothing ever reading the resource. A resource '
         'whose only row is `eid 0, Unused` was not tracked by the engine and is never judged: what the engine '
         'did not record cannot be turned into either a use or an absence of one.',
-        'Counters are not folded into the pass sections (REFERENCE §9). A bundle written with --with-counters '
-        'carries the per-event results in counters.json, and the notable ranking sums them per pass, but no pass '
-        'roll-up prints them.',
+        'Counter costs are the engine\'s numbers, not a wall-clock measurement (REFERENCE §9). A bundle written '
+        'with --with-counters carries the per-event results (counters.json) and the engine\'s own fold over its '
+        'passes (counters-passes.json); the pass table costs *its* passes by summing those rows over its own '
+        'ranges, and the two groupings divide a frame differently -- a pass here need not be a pass there. '
+        'Without --with-counters there is no cost at all, and the table says that rather than printing zeroes.',
         'Blend, depth-test, stencil, viewport and scissor state are in the bundle per state change, and the '
         'state given per pass is still the bound shaders and their constant blocks: a pass is a run of events '
         'and the state can change inside one, so the state rules name the eid range they were read at. The '
@@ -289,6 +293,18 @@ def _recommendations_section(todo: Recommendations) -> List[str]:
         lines.append('')
     return lines
 
+def _cost_text(entry: ReportPass, frame: Dict[str, Any]) -> str:
+    """One pass's time as the table says it: `1.234 ms (12.0%)`, or `n/a` when nothing was measured here.
+
+    The unit is the engine's (`frame['costUnit']`) and the counter is named once above the table rather than in
+    every cell. `n/a` covers both honest cases -- a bundle written without `--with-counters`, and a pass whose
+    events the counter skipped -- because a zero would claim the pass is free, which is the one thing an
+    absent measurement does not say.
+    """
+    if not entry.get('costRows'):
+        return 'n/a'
+    return '%.3f%s (%.1f%%)' % (entry['cost'], str(frame.get('costUnit', '')), entry['share'] * 100.0)
+
 def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     """The report as Markdown. Deterministic: same bundle in, same bytes out."""
     manifest = doc['bundle']
@@ -365,8 +381,20 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
     lines.append('')
     lines.append('## Pipeline map')
     lines.append('')
-    lines.append('| # | eids | marker | kind | events | targets | depth | structure |')
-    lines.append('|---|---|---|---|---|---|---|---|')
+    # What the cost column is, said once here rather than in every cell: the engine's own name for the counter
+    # and how much of the frame it measured. A bundle without counters says that instead of a column of `n/a`
+    # that a reader would have to interpret.
+    frame = doc['frame']
+    if frame['costCounter'] or frame['costMeasured']:
+        lines.append('Costs are `%s` (unit `%s`), measured at %d of the frame\'s %d event(s); "cost" is that '
+                     'counter summed over each pass\'s events.'
+                     % (frame['costCounter'] or 'counter(%d)' % 0, frame['costUnit'] or 'absolute',
+                        frame['costMeasured'], frame['events']))
+    else:
+        lines.append('Costs are not measured: this bundle was written without `--with-counters`.')
+    lines.append('')
+    lines.append('| # | eids | marker | kind | events | cost | targets | depth | structure |')
+    lines.append('|---|---|---|---|---|---|---|---|---|')
     for entry in doc['passes']:
         # The depth column says the same thing the pass section does for a dispatch: not applicable,
         # for the same reason the targets do.
@@ -375,9 +403,10 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
         # The marker's *own* name, not the whole path: the column's job is to say which of the frame's
         # markers this pass opens under, and the nest is in the section below.
         leaf = str(entry.get('marker', '')).split(' > ')[-1] if entry.get('marker') else '—'
-        lines.append('| %d | %d–%d | %s | %s | %d | %s | %s | %s |'
+        lines.append('| %d | %d–%d | %s | %s | %d | %s | %s | %s | %s |'
                      % (entry['index'], entry['firstEid'], entry['lastEid'], _md(leaf), entry['kind'],
-                        entry['events'], _targets_text(entry, True), depth, entry['structure']))
+                        entry['events'], _cost_text(entry, frame), _targets_text(entry, True), depth,
+                        entry['structure']))
     lines.append('')
     lines.append('Passes and the targets they write:')
     lines.append('')
@@ -410,6 +439,11 @@ def render_report_markdown(doc: ReportDocument, rdc: str) -> str:
         lines.append('- work: %d event(s) (%d graphics, %d compute)%s'
                      % (entry['events'], entry['graphics'], entry['compute'],
                         ' — %s' % work if work else ' — the bundle carries no counts for these calls'))
+        if entry['costRows']:
+            lines.append('- cost: %.3f%s of `%s` (%.1f%% of the frame), dearest event %d'
+                         % (entry['cost'], str(frame.get('costUnit', '')),
+                            frame['costCounter'] or 'counter(%d)' % 0, entry['share'] * 100.0,
+                            entry['dearestEid']))
         lines.append('- targets: %s' % _targets_text(entry))
         if entry['kind'] != 'compute':
             lines.append('- depth: %s' % (entry['depth'] if _is_resource(entry['depth']) else 'none'))

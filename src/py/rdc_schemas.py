@@ -85,6 +85,12 @@ REPORT_SCHEMA: Dict[str, Any] = _obj({
         'vendor': {'type': 'integer'},
         'shaderDebugging': {'type': 'integer'},
         'pixelHistory': {'type': 'integer'},
+        #: The counter the pass costs are in, and how much of the frame it measured: empty and 0 in a bundle
+        #: written without `--with-counters`, which the caveats state rather than leaving a reader to guess
+        #: from a column of zeroes.
+        'costCounter': _text(),
+        'costUnit': _text(),
+        'costMeasured': {'type': 'integer'},
     }),
     'passes': _arr(_obj({
         'index': {'type': 'integer'},
@@ -111,6 +117,18 @@ REPORT_SCHEMA: Dict[str, Any] = _obj({
         'triangles': {'type': 'integer'},
         'threads': {'type': 'integer'},
         'volumeCalls': {'type': 'integer'},
+        #: The frame's time in this pass, from the bundle's counters: the counter the bundle names as the
+        #: cost, summed over the pass's events. All zero with `costRows` zero means the bundle carries no
+        #: counters (it was written without `--with-counters`) -- a fact the report prints rather than a pass
+        #: that cost nothing.
+        'cost': {'type': 'number'},
+        'share': {'type': 'number'},
+        'costRows': {'type': 'integer'},
+        'dearestEid': {'type': 'integer'},
+        #: What a pass writes when its outputs are not render targets: the state document's `uavs` rows,
+        #: verbatim. Empty for a graphics pass, and empty for a dispatch in a bundle whose state documents
+        #: predate the array -- which the renderer says as `n/a` rather than as "writes nothing".
+        'writes': _arr(_text()),
     })),
     'engine': _obj({
         'engine': _text(),
@@ -236,6 +254,9 @@ def _ab_side() -> Dict[str, Any]:
         'messages': {'type': 'integer'},
         'withImages': {'type': 'integer'},    # how many images the bundle carries, not the flag
         'renderdoc': _text(),
+        #: The counter this side's costs are in and its unit, empty when the bundle carries no counters.
+        'costCounter': _text(),
+        'costUnit': _text(),
     })
 
 #: The **A/B's** own schema, for the same reason as the report's: the document is written by the offline tool
@@ -304,6 +325,17 @@ AB_SCHEMA: Dict[str, Any] = _obj({
             'heatMap': _text(),
             'note': _text(),
         })),
+        'counters': _obj({
+            'costA': {'type': 'number'},
+            'costB': {'type': 'number'},
+            'rowsA': {'type': 'integer'},
+            'rowsB': {'type': 'integer'},
+            'percentChange': {'type': 'number'},
+            # `cheaper`/`dearer`/`same` when both sides measured the pass, `not compared` when one did not
+            # (or the pass is on one side only), with `note` saying which case it was.
+            'verdict': _text(),
+            'note': _text(),
+        }),
     })),
     'summary': _obj({
         'same': {'type': 'integer'},
@@ -315,6 +347,10 @@ AB_SCHEMA: Dict[str, Any] = _obj({
         'shadersDifferent': {'type': 'integer'},
         'imagesCompared': {'type': 'integer'},
         'imagesNotCompared': {'type': 'integer'},
+        #: The counter comparison in counts: passes with a cost on both sides, and which way they moved.
+        'countersCompared': {'type': 'integer'},
+        'cheaper': {'type': 'integer'},
+        'dearer': {'type': 'integer'},
     }),
     'caveats': _arr(_text()),
 })

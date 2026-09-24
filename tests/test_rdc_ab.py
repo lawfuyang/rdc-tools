@@ -26,7 +26,7 @@ import sys
 import tempfile
 import unittest
 import zlib
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -639,6 +639,76 @@ class TestReplayDiffSections(BundleCase):
                    for change in R.structure_changes(a.passes[0], b.passes[0], a.names, b.names)}
         self.assertIn('depth', changes)
         self.assertEqual(changes['depth'], ('0', 'res22'))
+
+
+class TestReplayDiffCounters(BundleCase):
+    """The counter side of the comparison: which pass got cheaper, and what it refuses to say.
+
+    A pass's cost is the bundle's own counter summed over that side's *events*, and the two sides are different
+    recordings -- so what is compared is the counter's answer, and a side with no rows over the pass is `not
+    compared` rather than cheaper by the whole amount.
+    """
+
+    def sides(self, rows_a: Sequence[Tuple[int, float]], rows_b: Sequence[Tuple[int, float]],
+              name: str = 'GPU Duration', unit: str = 'ms') -> Tuple[Any, Any]:
+        events = [event(100, targets=['10 SceneColour 1000x1000 B8G8R8A8_UNORM'])]
+        sides = []
+        for label, rows in (('a', rows_a), ('b', rows_b)):
+            root = self.bundle(label, events=events, manifest={'withCounters': 1},
+                               counters=[{'eid': eid, 'counter': 1, 'value': value} for eid, value in rows],
+                               cost_name=name, cost_unit=unit)
+            sides.append(R.load_side(root))
+        return sides[0], sides[1]
+
+    def compare(self, a: Any, b: Any) -> Any:
+        return R.compare_counters(a, b, a.passes[0], b.passes[0])
+
+    def test_a_pass_that_costs_less_on_b_is_cheaper_and_more_is_dearer(self):
+        row = self.compare(*self.sides([(100, 4.0)], [(100, 3.0)]))
+        self.assertEqual((row['verdict'], row['costA'], row['costB'], row['rowsA'], row['rowsB']),
+                         ('cheaper', 4.0, 3.0, 1, 1))
+        self.assertAlmostEqual(row['percentChange'], -25.0, places=6)
+        self.assertEqual(self.compare(*self.sides([(100, 1.0)], [(100, 2.5)]))['verdict'], 'dearer')
+        self.assertEqual(self.compare(*self.sides([(100, 2.0)], [(100, 2.0)]))['verdict'], 'same')
+
+    def test_a_side_the_counter_did_not_measure_is_not_compared(self):
+        """Not "cheaper by everything": a cost against nothing is not a comparison, and the note says which."""
+        row = self.compare(*self.sides([], [(100, 3.0)]))
+        self.assertEqual((row['verdict'], row['rowsA'], row['rowsB'], row['percentChange']),
+                         ('not compared', 0, 1, 0.0))
+        self.assertIn('not measured on A', row['note'])
+        self.assertIn('not measured on B', self.compare(*self.sides([(100, 3.0)], []))['note'])
+        self.assertIn('no counter rows', self.compare(*self.sides([], []))['note'])
+
+    def test_a_pass_on_one_side_only_has_no_counter_to_compare(self):
+        row = R.compare_counters(self.sides([(100, 1.0)], [(100, 1.0)])[0],
+                                 self.sides([(100, 1.0)], [(100, 1.0)])[1], None, None)
+        self.assertEqual(row['verdict'], 'not compared')
+        self.assertIn('only on one side', row['note'])
+
+    def test_the_document_counts_the_moves_and_the_caveat_names_the_counter(self):
+        a, b = self.sides([(100, 4.0)], [(100, 3.0)])
+        out = self.path('out')
+        self.assertEqual(R.cmd_replaydiff(a.directory, b.directory, ['--out', out]), 0)
+        with open(os.path.join(out, 'replaydiff.json'), encoding='utf-8') as handle:
+            document = json.load(handle)
+        self.assertEqual((document['summary']['countersCompared'], document['summary']['cheaper'],
+                          document['summary']['dearer']), (1, 1, 0))
+        self.assertEqual((document['a']['costCounter'], document['a']['costUnit']), ('GPU Duration', 'ms'))
+        with open(os.path.join(out, 'replaydiff.md'), encoding='utf-8') as handle:
+            markdown = handle.read()
+        self.assertIn('## Counters', markdown)
+        self.assertIn('**cheaper**', markdown)
+        self.assertIn('A pass cost is the counter summed over each side\'s *own* events', markdown)
+
+    def test_neither_bundle_with_counters_says_so_instead_of_printing_zeroes(self):
+        a, b = self.sides([], [])
+        out = self.path('out2')
+        self.assertEqual(R.cmd_replaydiff(a.directory, b.directory, ['--out', out]), 0)
+        with open(os.path.join(out, 'replaydiff.md'), encoding='utf-8') as handle:
+            markdown = handle.read()
+        self.assertIn('Counter costs are not compared: no pass has a counter row on either side', markdown)
+        self.assertIn('Not compared: neither bundle was written with `--with-counters`', markdown)
 
 
 class TestReplayDiffImages(BundleCase):

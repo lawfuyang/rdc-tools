@@ -4,6 +4,8 @@
     "bundle": "build/goldens/desktop-1",
     "capture": "<capture>",
     "captureSha256": "a9906c184dd9a599198ea3d9b1cc5dd222655a48d3c84e8187d93d7cc69a735a",
+    "costCounter": "",
+    "costUnit": "",
     "events": 6994,
     "messages": 0,
     "passes": 104,
@@ -16,6 +18,8 @@
     "bundle": "build/goldens/desktop-1",
     "capture": "<capture>",
     "captureSha256": "a9906c184dd9a599198ea3d9b1cc5dd222655a48d3c84e8187d93d7cc69a735a",
+    "costCounter": "",
+    "costUnit": "",
     "events": 6994,
     "messages": 0,
     "passes": 104,
@@ -29,7 +33,8 @@
     "A bundle holds no shader source: a shader that differs only in its body is caught by its hash, but nothing here can say what it does.",
     "Passes are compared at their first state event: a constant buffer rebound later inside a pass is not compared (the bundle writes one cbuffer document per state event, and this reads the pass's first).",
     "A pass only one side has is reported as added or removed, not as changed: two frames need not contain the same passes at all.",
-    "The renders themselves are not compared: pass --with-images (and write the bundles with it) to compare each pass's readback."
+    "The renders themselves are not compared: pass --with-images (and write the bundles with it) to compare each pass's readback.",
+    "Counter costs are not compared: no pass has a counter row on either side. A bundle written without --with-counters has no counters at all, and a driver that publishes none for a frame leaves a file with none either."
   ],
   "imageDetail": 8,
   "imagesFound": false,
@@ -39,6 +44,15 @@
       "bFirstEid": 715,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 1 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 1 of A",
@@ -63,6 +77,15 @@
       "bFirstEid": 719,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > ClearGPUMessageBuffer",
@@ -77,6 +100,15 @@
       "bFirstEid": 726,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > ShaderPrint::UploadParameters",
@@ -113,6 +145,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > GPUScene.UploadDynamicPrimitiveShaderDataForView > GPUScene::SetInstancePrimitiveIdCS",
@@ -149,6 +190,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > GPUScene.UploadDynamicPrimitiveShaderDataForView > UpdateGPUScene NumPrimitiveDataUploads 1 > ScatterUpload[0] (Resource: GPUScene.PrimitiveData, Offset: 0)",
@@ -207,6 +257,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > GPUScene.UploadDynamicPrimitiveShaderDataForView > GPU Writer Delegates > Niagara.UpdateMeshParticleInstances (22 Instances)",
@@ -243,6 +302,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > BuildRenderingCommandsDeferred(Culling=On) > ClearIndirectArgInstanceCount",
@@ -279,6 +347,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > BuildRenderingCommandsDeferred(Culling=On) > CullInstances(Generic)",
@@ -315,6 +392,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > BuildRenderingCommandsDeferred(Culling=On) > CullInstances(UnCulled)",
@@ -351,6 +437,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel",
@@ -431,6 +526,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 11 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 11 of A",
@@ -464,6 +568,15 @@
       "bFirstEid": 889,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Prop_Balloon_C_01 SM_HappyLand_MusicBalloon_PropMerge",
@@ -556,6 +669,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 13 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 13 of A",
@@ -676,6 +798,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DepthPassParallel > Scene > MI_HappyLand_Island_Common_Grass_01_vista SM_HappyLand_Island_Common_Grass_01 > ExecuteIndirect(maxCount 1, count <1>)",
@@ -807,6 +938,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 15 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 15 of A",
@@ -938,6 +1078,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > VelocityParallel > MI_fx_Bubble NS_fx_Bubble 20 instances",
@@ -980,6 +1129,15 @@
       "bFirstEid": 2237,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ComputeLightGrid > CullLights 22x14x8 NumLights 0 NumCaptures 0 > LightGridInject:LinkedList",
@@ -1050,6 +1208,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ComputeLightGrid > CullLights 22x14x8 NumLights 0 NumCaptures 0 > CompactLinks",
@@ -1148,6 +1315,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BuildHZB(ViewId=0) > BuildHZB > ReduceHZB(mips=[0;3] Furthest) 1024x512",
@@ -1246,6 +1422,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BuildHZB(ViewId=0) > BuildHZB > ReduceHZB(mips=[8;9] Furthest) 4x2",
@@ -1344,6 +1529,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BuildTLASInstanceBuffer",
@@ -1442,6 +1636,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BuildTLASInstanceBuffer",
@@ -1595,6 +1798,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > RayTracingDynamicUpdate > RayTracingDynamicGeometryUpdate",
@@ -1737,6 +1949,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > RayTracingDynamicUpdate > RayTracingDynamicGeometryUpdate",
@@ -1879,6 +2100,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > RayTracingEndUpdate",
@@ -1977,6 +2207,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 26 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 26 of A",
@@ -2019,6 +2258,15 @@
       "bFirstEid": 2440,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SkyAtmosphereEditor > SkyAtmosphereEditor",
@@ -2166,6 +2414,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 28 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 28 of A",
@@ -2341,6 +2598,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BasePass > BasePassParallel > MI_HappyLand_Island_Tree_Cordyline_01 SM_HappyLand_Island_Tree_Cordyline_01 > ExecuteIndirect(maxCount 1, count <1>)",
@@ -2516,6 +2782,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 30 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 30 of A",
@@ -2691,6 +2966,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BasePass > BasePassParallel > MI_HappyLand_Island_Tree_Cordyline_01_Opaque SM_HappyLand_Island_Tree_Cordyline_01 > ExecuteIndirect(maxCount 1, count <1>)",
@@ -2855,6 +3139,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 32 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 32 of A",
@@ -3019,6 +3312,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > BasePass > SkyPassParallel > MI_HappyLand_Sky_Day SM_HappyLand_Sky",
@@ -3117,6 +3419,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 34 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 34 of A",
@@ -3215,6 +3526,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWaterDepthPrepass > SLW::DepthBufferCopy",
@@ -3257,6 +3577,15 @@
       "bFirstEid": 4320,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWaterDepthPrepass > ClearBuffer(SLW.WaterIndirectDrawParameters Size=16bytes)",
@@ -3327,6 +3656,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWaterDepthPrepass > SLW::TileCategorisationMarkTiles",
@@ -3405,6 +3743,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWaterDepthPrepass > SLW::TileCategorisationBuildList",
@@ -3483,6 +3830,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > BuildRenderingCommandsDeferred(Culling=On) > ClearIndirectArgInstanceCount",
@@ -3561,6 +3917,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > BuildRenderingCommandsDeferred(Culling=On) > CullInstances(Generic)",
@@ -3639,6 +4004,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > BuildRenderingCommandsDeferred(Culling=On) > CullInstances(UnCulled)",
@@ -3717,6 +4091,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > Atlas0 6144x2048 > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split0 2040x2040 > ShadowDepthPassParallel",
@@ -3795,6 +4178,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 43 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 43 of A",
@@ -3828,6 +4220,15 @@
       "bFirstEid": 4431,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > Atlas0 6144x2048 > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split0 2040x2040 > ShadowDepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Wharf_01",
@@ -3887,6 +4288,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 45 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 45 of A",
@@ -3965,6 +4375,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > Atlas0 6144x2048 > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split1 2040x2040 > ShadowDepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Building_Wharf_01",
@@ -4043,6 +4462,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 47 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 47 of A",
@@ -4121,6 +4549,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ShadowDepths > Atlas0 6144x2048 > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split2 2040x2040 > ShadowDepthPassParallel > /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial SM_HappyLand_Cliff_S_01",
@@ -4199,6 +4636,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 49 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 49 of A",
@@ -4286,6 +4732,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > LightCompositionTasks_PreLighting > AmbientOcclusionSetup 684x428",
@@ -4373,6 +4828,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > LightCompositionTasks_PreLighting > AmbientOcclusionPS 684x428 SetupAsInput=1 Upsample=0 ShaderQuality=2",
@@ -4460,6 +4924,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > LightCompositionTasks_PreLighting > AmbientOcclusionPS 1368x856 SetupAsInput=0 Upsample=1 ShaderQuality=2",
@@ -4536,6 +5009,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > DiffuseIndirectAndAO > DiffuseIndirectComposite(DiffuseIndirect=Disabled ApplyAOToSceneColor) 1368x856",
@@ -4578,6 +5060,15 @@
       "bFirstEid": 6627,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ClearTranslucencyLightingVolumeCompute 64",
@@ -4637,6 +5128,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 55 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 55 of A",
@@ -4688,6 +5188,15 @@
       "bFirstEid": 6653,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > Lights > DirectLighting > InjectTranslucencyLightingVolume > InjectTranslucencyLightingVolume(View=0) > InjectTranslucencyLightingVolume(VolumeCascade=0,ShadowMap)",
@@ -4747,6 +5256,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > Lights > DirectLighting > InjectTranslucencyLightingVolume > InjectTranslucencyLightingVolume(View=0) > InjectTranslucencyLightingVolume(VolumeCascade=1,ShadowMap)",
@@ -4821,6 +5339,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > Lights > DirectLighting > UnbatchedLights > L_m_MainWorld_New.DirectionalLight_Sun > ShadowProjectionOnOpaque > Shadows > L_m_MainWorld_New.DirectionalLight_Sun > WholeScene split2",
@@ -4919,6 +5446,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > Lights > DirectLighting > UnbatchedLights > L_m_MainWorld_New.DirectionalLight_Sun > LightFunction Material=PreviewShadowIndicatorMaterial",
@@ -5006,6 +5542,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > Lights > DirectLighting > UnbatchedLights > L_m_MainWorld_New.DirectionalLight_Sun > Light::StandardDeferred",
@@ -5071,6 +5616,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > FilterTranslucentVolume 64x64x64 Cascades:2 > Cascade0",
@@ -5145,6 +5699,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > FilterTranslucentVolume 64x64x64 Cascades:2 > Cascade1",
@@ -5252,6 +5815,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ReflectionIndirect > ReflectionEnvironmentAndSky(1368x856,SubstrateMat=Off)",
@@ -5306,6 +5878,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWater > SLW::CopySceneWithoutWater",
@@ -5459,6 +6040,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWater > SLW::Draw > SingleLayerWaterParallel > WaterRenderActorOceanMID_3 None 6 instances",
@@ -5568,6 +6158,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > SingleLayerWater > SLW::Composite 1368x856 > ExecuteIndirect(maxCount 1, count <1>)",
@@ -5655,6 +6254,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > ExponentialHeightFog > Fog",
@@ -5797,6 +6405,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 68 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 68 of A",
@@ -5939,6 +6556,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > Translucency > Translucency(AfterDOF Parallel) 1368x856 > MI_WaterPool_Translucent SM_fx_Water_Cistern_Test_01",
@@ -5993,6 +6619,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > ComposeTranslucencyToNewSceneColor(AfterDOF) 1368x856 -> 1368x856",
@@ -6047,6 +6682,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Downsample(PostProcessing.SceneColor.HalfRes Quality=Bilinear PS) 1368x856 -> 684x428",
@@ -6101,6 +6745,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/4) Quality=High PS) 684x428 -> 342x214",
@@ -6177,6 +6830,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > BasicEyeAdaptationSetup (PS) 342x214",
@@ -6231,6 +6893,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/8) Quality=High PS) 342x214 -> 171x107",
@@ -6285,6 +6956,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/16) Quality=High PS) 171x107 -> 86x54",
@@ -6339,6 +7019,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/32) Quality=High PS) 86x54 -> 43x27",
@@ -6393,6 +7082,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/64) Quality=High PS) 43x27 -> 22x14",
@@ -6435,6 +7133,15 @@
       "bFirstEid": 7221,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > BasicEyeAdaptation (CS)",
@@ -6461,6 +7168,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > CopyEyeAdaptationToTexture (CS)",
@@ -6515,6 +7231,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > EnqueueCopy(EyeAdaptationBuffer)",
@@ -6580,6 +7305,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "aligned by call order (pass 81 of each) and the call kind: neither pass sits in a marker",
       "path": "pass 81 of A",
@@ -6622,6 +7356,15 @@
       "bFirstEid": 7273,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > BloomSetup 684x428 (PS)",
@@ -6648,6 +7391,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/4) Quality=High PS) 684x428 -> 342x214",
@@ -6702,6 +7454,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/8) Quality=High PS) 342x214 -> 171x107",
@@ -6756,6 +7517,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/16) Quality=High PS) 171x107 -> 86x54",
@@ -6810,6 +7580,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/32) Quality=High PS) 86x54 -> 43x27",
@@ -6864,6 +7643,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > SceneDownsample > Downsample(Scene(1/64) Quality=High PS) 43x27 -> 22x14",
@@ -6929,6 +7717,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomX 22x14 (PS, Static)",
@@ -6994,6 +7791,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomY 22x14 (PS, Static)",
@@ -7059,6 +7865,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomX 43x27 (PS, Static)",
@@ -7124,6 +7939,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomY 43x27 (PS, Static)",
@@ -7189,6 +8013,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomX 86x54 (PS, Static)",
@@ -7254,6 +8087,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomY 86x54 (PS, Static)",
@@ -7319,6 +8161,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomX 171x107 (PS, Static)",
@@ -7384,6 +8235,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomY 171x107 (PS, Static)",
@@ -7449,6 +8309,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomX 342x214 (PS, Static)",
@@ -7514,6 +8383,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomY 342x214 (PS, Static)",
@@ -7579,6 +8457,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomX 684x428 (PS, Static)",
@@ -7644,6 +8531,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Bloom > GaussianBlur.BloomY 684x428 (PS, Static)",
@@ -7698,6 +8594,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > LensFlares > LensFlareBlur 342x214",
@@ -7740,6 +8645,15 @@
       "bFirstEid": 7494,
       "cbuffers": [],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > LensFlares > LensFlareCopyBloom 684x428",
@@ -7827,6 +8741,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Tonemap 1368x856 (PS GammaOnly=0)",
@@ -7881,6 +8804,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > FXAA(Quality=4) 1368x856 PS",
@@ -7946,6 +8878,15 @@
         }
       ],
       "changes": [],
+      "counters": {
+        "costA": 0,
+        "costB": 0,
+        "note": "not measured on either side: no counter rows over these events (a bundle written without --with-counters has none)",
+        "percentChange": 0.0,
+        "rowsA": 0,
+        "rowsB": 0,
+        "verdict": "not compared"
+      },
       "images": [],
       "note": "",
       "path": "FRDGBuilder::Execute > Scene > PrePass DDM_AllOpaqueNoVelocity (Forced by Nanite) > PostProcessing > Upscale(PrimaryToOutput Method=3) 1368x856 -> 2003x1254",
@@ -7988,7 +8929,10 @@
   "schemaVersion": 1,
   "summary": {
     "added": 0,
+    "cheaper": 0,
     "constantsChanged": 0,
+    "countersCompared": 0,
+    "dearer": 0,
     "imagesCompared": 0,
     "imagesNotCompared": 0,
     "removed": 0,

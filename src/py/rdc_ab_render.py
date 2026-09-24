@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 #: runs for a thousand sections is not a document anyone reads, so the rest are counted.
 DETAIL_LIMIT = 40
 
+#: The biggest number of pass costs the counters section ranks. The rows are sorted by how far the cost moved,
+#: so the ones left out are the ones that barely moved -- and every one of them is in `replaydiff.json`.
+COUNTER_LIMIT = 10
+
 
 def render_replaydiff(document: ReplayDiffDocument, threshold: float = 0.0) -> str:
     """The comparison as Markdown. `threshold` is the percentage below which an image is counted, not
@@ -37,6 +41,7 @@ def render_replaydiff(document: ReplayDiffDocument, threshold: float = 0.0) -> s
     lines.extend(_pass_tables(document))
     lines.append('')
     lines.extend(_details(document, threshold))
+    lines.extend(_counters(document))
     lines.extend(_images(document, threshold))
     lines.append('')
     lines.extend(_summary(document, threshold))
@@ -109,7 +114,8 @@ def _details(document: ReplayDiffDocument, threshold: float) -> List[str]:
     changed = 0
     for entry in document['passes']:
         interesting = bool(entry['changes'] or entry['stateRemoved'] or entry['stateAdded']
-                           or entry['shaders'] or entry['cbuffers'] or entry['images'])
+                           or entry['shaders'] or entry['cbuffers'] or entry['images']
+                           or entry['counters']['verdict'] != 'not compared')
         if not interesting:
             continue
         changed += 1
@@ -130,11 +136,59 @@ def _details(document: ReplayDiffDocument, threshold: float) -> List[str]:
         for block in entry['cbuffers']:
             out.extend(_cbuffer_lines(block))
         out.extend(_image_lines(entry, threshold))
+        out.extend(_counter_lines(entry, document['a']['costUnit'] or document['b']['costUnit']))
         out.append('')
     if changed > detailed:
         out.append('%d further pass(es) differ; every one of them is in `replaydiff.json`.'
                    % (changed - detailed))
         out.append('')
+    return out
+
+
+def _counter_lines(entry: AbPassMember, unit: str) -> List[str]:
+    """One pass's cost on each side, when the counters measured it: the verdict and both numbers.
+
+    Nothing is printed for a pass the counters did not compare -- the `not compared` reasons are on the row in
+    `replaydiff.json`, and repeating them under every pass would bury the passes that did move.
+    """
+    counters = entry['counters']
+    if counters['verdict'] == 'not compared':
+        return []
+    return ['* cost **%s**: %.3f%s → %.3f%s (%+.1f%%), measured at %d event(s) in A and %d in B'
+            % (counters['verdict'], counters['costA'], unit, counters['costB'], unit,
+               counters['percentChange'], counters['rowsA'], counters['rowsB'])]
+
+
+def _counters(document: ReplayDiffDocument) -> List[str]:
+    """Which pass got cheaper and which got dearer: the question the command exists for, in the document.
+
+    The rows are ranked by how far the cost moved rather than by size, because a pass that doubled from 1 ms
+    is the one a change was made for, and a pass that is simply half the frame is not. The counter is named
+    once, here: two sides that folded different counters are a caveat, not a table.
+    """
+    out = ['', '## Counters', '']
+    unit = document['a']['costUnit'] or document['b']['costUnit']
+    if not any(entry['counters']['rowsA'] or entry['counters']['rowsB'] for entry in document['passes']):
+        out.append('Not compared: neither bundle was written with `--with-counters`, so neither side says what '
+                   'a pass cost. Write both with `dump --with-counters` and this section fills in.')
+        return out
+    rows = [entry for entry in document['passes'] if entry['counters']['verdict'] != 'not compared']
+    rows.sort(key=lambda entry: abs(entry['counters']['percentChange']), reverse=True)
+    out.append('Ranked by how far the cost moved (counter `%s`%s):'
+               % (document['a']['costCounter'] or document['b']['costCounter'] or 'unnamed',
+                  ', unit `%s`' % unit if unit else ''))
+    out.append('')
+    out.append('| pass | verdict | A | B | change | measured |')
+    out.append('|---|---|---|---|---|---|')
+    for entry in rows[:COUNTER_LIMIT]:
+        counters = entry['counters']
+        out.append('| %s | **%s** | %.3f%s | %.3f%s | %+.1f%% | %d/%d event(s) |'
+                   % (_md(_path(entry)), counters['verdict'], counters['costA'], unit, counters['costB'],
+                      unit, counters['percentChange'], counters['rowsA'], counters['rowsB']))
+    if len(rows) > COUNTER_LIMIT:
+        out.append('')
+        out.append('%d further pass(es) have a cost on both sides; every one of them is in `replaydiff.json`.'
+                   % (len(rows) - COUNTER_LIMIT))
     return out
 
 
@@ -288,6 +342,7 @@ def _summary(document: ReplayDiffDocument, threshold: float) -> List[str]:
 
 
 __all__ = [
+    'COUNTER_LIMIT',
     'DETAIL_LIMIT',
     'render_replaydiff',
 ]

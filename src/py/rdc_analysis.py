@@ -41,6 +41,11 @@ python rdc_analysis.py formats  <rdc>          # which formats the file holds, a
   python rdc_analysis.py hex      <rdc> <start> <length>
   python rdc_analysis.py dxbc     <rdc> [verbose]
   python rdc_analysis.py psos     <rdc> [maxRows] [--hash <hash>] [--format table|csv|markdown]
+  python rdc_analysis.py permutations <bundle> [maxRows] [--hash <prefix>] [--capture <rdc>]
+                                                         [--format table|csv|markdown]
+                                                         # which shaders the frame binds, per stage and
+                                                         #   hash: events, eids, entry point, reflection,
+                                                         #   and with --capture the container and its ILDB
                                                          # the pipeline state objects and the shaders
                                                          #   each one holds, by hash; --hash answers one
                                                          #   hash (either flavour) from the cached index
@@ -173,6 +178,7 @@ from rdc_payloads import *  # noqa: F401,F403  (re-exported for the CLI and test
 from rdc_resources import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_dxbc import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_psos import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_permutations import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_commands import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_formats import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_table import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -302,24 +308,30 @@ def _take_driver(cmd: str, argv: Sequence[str]) -> List[str]:
         del rest[index:index + 2]
     return rest
 
-def _take_hash(cmd: str, argv: Sequence[str]) -> Tuple[List[str], Optional[str]]:
-    """`(argv without --hash <hash>, the hash it named)`, taken out before the positionals are read.
+def _take_value(cmd: str, argv: Sequence[str], flag: str, usage: str) -> Tuple[List[str], Optional[str]]:
+    """`(argv without <flag> <value>, the value it named)`, taken out before the positionals are read.
 
     The same rule as `--format` and `--drop`, for the same reason: written as `psos <rdc> --hash abc 8`, the
-    hash would otherwise be read as the row limit. One hash only -- a lookup is one question -- and a
-    `--hash` with nothing after it, or with nothing in it, is a usage error rather than an empty answer.
+    value would otherwise be read as the row limit. One value only -- a lookup is one question, and `--capture`
+    names one file -- and a flag with nothing after it, or with nothing in it, is a usage error rather than an
+    empty answer.
     """
     rest = list(argv)
     want: Optional[str] = None
-    if '--hash' in rest:
-        index = rest.index('--hash')
+    if flag in rest:
+        index = rest.index(flag)
         if index + 1 >= len(rest) or not rest[index + 1]:
-            print('usage: rdc_analysis.py %s <rdc> [maxRows] [--hash <hash>] [--format %s]'
-                  % (cmd, '|'.join(rdc_table.FORMATS)))
+            print(usage)
             sys.exit(2)
         want = rest[index + 1]
         del rest[index:index + 2]
     return rest, want
+
+def _take_hash(cmd: str, argv: Sequence[str]) -> Tuple[List[str], Optional[str]]:
+    """`--hash <hash>`: which hash a `psos` or `permutations` lookup is about (see `_take_value`)."""
+    return _take_value(cmd, argv, '--hash',
+                       'usage: rdc_analysis.py %s <rdc> [maxRows] [--hash <hash>] [--format %s]'
+                       % (cmd, '|'.join(rdc_table.FORMATS)))
 
 def _take_drops(cmd: str, argv: Sequence[str]) -> Tuple[List[str], List[str]]:
     """`(argv without the --drop pairs, the filters they named)`, in the order they were written.
@@ -444,6 +456,14 @@ def _dispatch() -> None:
         rest, fmt = _take_format('psos', argv)
         rest, want_hash = _take_hash('psos', rest)
         sys.exit(cmd_psos(path, _arg(rest, 3, 40), fmt, want_hash))
+    elif cmd == 'permutations':
+        rest, fmt = _take_format('permutations', argv)
+        rest, want_hash = _take_hash('permutations', rest)
+        rest, capture = _take_value('permutations', rest, '--capture',
+                                    'usage: rdc_analysis.py permutations <bundle> [maxRows] '
+                                    '[--hash <hash>] [--capture <rdc>] [--format %s]'
+                                    % '|'.join(rdc_table.FORMATS))
+        sys.exit(cmd_permutations(path, _arg(rest, 3, 40), fmt, want_hash, capture or ''))
     elif cmd == 'dump-chunk':
         cmd_dump_chunk(path, int(argv[3]), argv[4])
     elif cmd == 'dump-shaders':

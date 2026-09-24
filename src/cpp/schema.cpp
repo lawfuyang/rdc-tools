@@ -185,7 +185,7 @@ const SchemaDoc kSchemas[] = {
   "description": "One event's bound state: the capture header, then that event. The arrays are the driver's own rows, which are text by design -- they carry the engine's names verbatim.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid", "marker",
-               "api", "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters"],
+               "api", "shaders", "renderTargets", "depthTarget", "rootSignature", "rootParameters", "uavs"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -202,6 +202,8 @@ const SchemaDoc kSchemas[] = {
     "depthTarget": {"type": "string", "description": "a resource id, `0` for none"},
     "rootSignature": {"type": "string"},
     "rootParameters": {"type": "array", "items": {"type": "string"}},
+    "uavs": {"type": "array", "items": {"type": "string"},
+             "description": "`cs  u0   res6979`, one row per bound read-write resource per stage: what this state *writes*. A dispatch sets no output-merge state, so its `renderTargets` are leftover from an earlier draw and this array is the one that names its targets. The reflection's own `readWriteResources` rows (in the `shaders` document) are the *declarations* -- which bind points the shader has -- and these are the resources bound to them."},
     "viewports": {"type": "array", "items": {
       "type": "object",
       "required": ["x", "y", "width", "height", "minDepth", "maxDepth", "enabled"],
@@ -294,9 +296,9 @@ const SchemaDoc kSchemas[] = {
 
     {"counters", "counters, dump (counters.json)", R"sc({
   "title": "counters",
-  "description": "The driver's counter results, one row each (`eid <n>  <name> = <value>`), plus the header. Only written when the bundle was asked for them and the driver supports them.",
+  "description": "The driver's per-event counter results, one object each, plus the header and the counter the fold costs. A row carries the counter's *enum* and not its name: the engine's names live in its own stringise.cpp, which neither this document nor the command can reach, so `costCounterName` is the one name here and `counter` is what a filter matches on. The value is read through that counter's own result type -- a `u64` through the union's `double` member is a number no consumer can use.",
   "type": "object",
-  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "counters", "total"],
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "counters", "total", "costCounter", "costCounterName", "unit"],
   "properties": {
     "schemaVersion": {"const": 1},
     "capture": {"type": "string"},
@@ -304,15 +306,27 @@ const SchemaDoc kSchemas[] = {
     "driver": {"type": "string"},
     "localReplay": {"type": "integer"},
     "machine": {"type": "string"},
-    "counters": {"type": "array", "items": {"type": "string"}},
-    "total": {"type": "integer"}
+    "counters": {"type": "array", "items": {
+      "type": "object",
+      "required": ["eid", "counter", "value"],
+      "properties": {
+        "eid": {"type": "integer"},
+        "counter": {"type": "integer", "description": "the `GPUCounter` enum value; the shipped header numbers them"},
+        "value": {"type": "number", "description": "read through this counter's own result type"}
+      },
+      "additionalProperties": false
+    }},
+    "total": {"type": "integer"},
+    "costCounter": {"type": "integer", "description": "the enum of the counter `counters-passes.json` folds, so a reader can filter these rows to it"},
+    "costCounterName": {"type": "string", "description": "the engine's name for it, or `counter(<enum>)` when it named none"},
+    "unit": {"type": "string", "description": "the engine's own unit for that counter, empty when the value is absolute"}
   },
   "additionalProperties": false
 })sc"},
 
-    {"counters-passes", "counters --per-pass", R"sc({
+    {"counters-passes", "counters --per-pass, dump (counters-passes.json)", R"sc({
   "title": "counters-passes",
-  "description": "One counter folded over each pass. `FetchCounters` answers per event and takes no range, so the per-event results are summed here between a pass's first and last event id; `measured` is how many of the pass's events the counter produced a value for, and `peak` is the largest single one. Which counter is the cost is the engine's choice (`EventGPUDuration` when this replay produced one) and it is named in `costCounter` with its `unit`, because a column headed `counter(7)` says nothing. A replay with no counter results carries `available` 0 and a `note` instead of a table of zeros: GPU counters are a driver feature and are not available everywhere.",
+  "description": "One counter folded over each pass, written by `counters --per-pass` and, as `counters-passes.json`, by a bundle dumped with `--with-counters` -- one document and one implementation (`WriteCounterPasses`), because two copies of a fold could disagree about which counter they folded. `FetchCounters` answers per event and takes no range, so the per-event results are summed here between a pass's first and last event id; `measured` is how many of the pass's events the counter produced a value for, and `peak` is the largest single one. Which counter is the cost is the engine's choice (`EventGPUDuration` when this replay produced one) and it is named in `costCounter` with its `unit`, because a column headed `counter(7)` says nothing. A replay with no counter results carries `available` 0 and a `note` instead of a table of zeros: GPU counters are a driver feature and are not available everywhere.",
   "type": "object",
   "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "mode",
                "costCounter", "unit", "passesFrom", "available", "passes", "top", "topCount"],
@@ -654,6 +668,41 @@ const SchemaDoc kSchemas[] = {
     "formatCount": {"type": "integer"},
     "needCast": {"type": "integer"},
     "noLayout": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"histogram", "histogram", R"sc({
+  "title": "histogram",
+  "description": "A target's statistics: the engine's `GetMinMax` and then `GetHistogram` over exactly the range min/max reports. `buckets` is unnormalised counts, one per bucket, spread over `low`..`high` -- the ends the *caller* passed, which is what min/max gave, so the range is the target's own and a band of values inside it is not clipped away. Read exposure from it: a min of 0 with everything in the first bucket is a black frame, and counts piled at either end are clipping.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid",
+               "resource", "description", "mip", "slice", "sample", "cast", "channels", "min", "max",
+               "bucketCount", "low", "high", "buckets", "counted"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer", "description": "the event the target was taken from; 0 when it was named by resource"},
+    "name": {"type": "string", "description": "the resource's own name, when the capture gives it one"},
+    "resource": {"type": "string"},
+    "description": {"type": "string", "description": "size and format, spelled as `textures` spells them"},
+    "mip": {"type": "integer"},
+    "slice": {"type": "integer"},
+    "sample": {"type": "integer"},
+    "cast": {"type": "string", "description": "the component type the values were read as: the cast asked for, or the resource's own component type when none was given (`--cast` is a request, and reading a float target as `uint` is how a min/max comes back as the bit patterns of its values)"},
+    "channels": {"type": "string", "description": "which of r, g, b, a the histogram counted"},
+    "min": {"type": "string", "description": "the smallest value per component, as the engine formats it (channel order)"},
+    "max": {"type": "string", "description": "the largest value per component"},
+    "bucketCount": {"type": "integer", "description": "how many buckets the engine returned: the count is its choice, not a parameter"},
+    "low": {"type": "string", "description": "the range's lower end, as text (the writer has no fractional field)"},
+    "high": {"type": "string", "description": "the range's upper end"},
+    "buckets": {"type": "array", "items": {"type": "integer"},
+                "description": "unnormalised counts, one per bucket: the engine's own array, grouped only for the terminal"},
+    "counted": {"type": "integer", "description": "how many values fell inside the range -- a bucket does not count what is outside it"}
   },
   "additionalProperties": false
 })sc"},

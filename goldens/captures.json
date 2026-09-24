@@ -17,20 +17,24 @@
     "what": "the mobile-vs-desktop pair this project was started for: the same scene captured on a phone and on the desktop, which is what replaydiff and passdiff were built to compare",
     "precondition": "both bundles dumped with `--with-images` (the check runs replaydiff --with-images, so a bundle written without images fails the image counts -- which is a true statement about that bundle rather than a bug in the check)",
     "expect": {
-      "same": 10,
-      "removed": 18,
-      "added": 94,
-      "structureChanges": 10,
-      "stateChanges": 10,
-      "constantsChanged": 51,
-      "shadersDifferent": 26,
-      "imagesCompared": 3,
-      "imagesNotCompared": 2
+      "same": 11,
+      "removed": 17,
+      "added": 93,
+      "structureChanges": 11,
+      "stateChanges": 11,
+      "constantsChanged": 53,
+      "shadersDifferent": 27,
+      "imagesCompared": 2,
+      "imagesNotCompared": 2,
+      "countersCompared": 0,
+      "cheaper": 0,
+      "dearer": 0
     },
     "why": [
-      "10 passes align by marker path or by the innermost name, and 18 mobile-only and 94 desktop-only passes are the work each renderer does on its own. The aligned ones are the mobile post chain -- `SceneColorRendering`, `SLW::CopySceneWithoutWater > View0`, `SingleLayerWater > SingleLayerWaterRendering > WaterRenderActorOcea`, `LensFlareBlur 126x79`, `LensFlareCopyBloom 251x157`, `Tonemap 2003x1254 (PS GammaOnly=0)` and `FXAA(Quality=0) 2003x1254 PS` -- plus three that carry no name on the mobile side. The 94 are mostly the desktop renderer's own prepass chain (its markers name a Nanite-forced depth prepass the mobile renderer does not run).",
-      "51 constant blocks have a member whose value moved, and 26 shader hashes differ -- counted over every row the comparison has, added and removed passes included. Those are the numbers to watch: they move when the alignment moves, so a change in the alignment rule shows up here rather than only in a per-pass row.",
-      "the images are three numbers pretending to be two: 3 pairs are compared and 2 are counted as not compared, and the same two pairs are in both because one count is over *verdicts* (`identical`/`different`) and the other over *notes* (`not compared pixel by pixel: --image-detail is used up`). One pair was decoded and it differs: 99.900% of its 2,511,762 pixels, mean delta 13.695, worst 239, hash distance 2 -- the first aligned pass's readback, 2003x1254 on both sides. 7 further slots hold a readback on both sides at *different sizes* (2004x1256 against 1368x856, smaller still for the lens-flare blurs), which is counted in neither number because a pixel difference is not defined across sizes, and 3 slots hold one on the desktop side only."
+      "11 passes align by marker path or by the innermost name, and 17 mobile-only and 93 desktop-only passes are the work each renderer does on its own. The aligned ones are the mobile post chain -- `SceneColorRendering`, `SLW::CopySceneWithoutWater > View0`, `SingleLayerWater > SingleLayerWaterRendering > WaterRenderActorOcea`, `LensFlareBlur 126x79`, `LensFlareCopyBloom 251x157`, `Tonemap 2003x1254 (PS GammaOnly=0)` and `FXAA(Quality=0) 2003x1254 PS` -- plus four that carry no name on the mobile side. The 93 are mostly the desktop renderer's own prepass chain (its markers name a Nanite-forced depth prepass the mobile renderer does not run).",
+      "53 constant blocks have a member whose value moved, and 27 shader hashes differ -- counted over every row the comparison has, added and removed passes included. Those are the numbers to watch: they move when the alignment moves, so a change in the alignment rule shows up here rather than only in a per-pass row. They also moved when both bundles were re-dumped on 2026-09-23 (51/26 -> 53/27): a state document is written per state *change*, and the state hash gained the bound UAVs that day, so more events have a document and more per-pass state is compared at the pass's first event.",
+      "the images are numbers pretending to be one: 2 pairs are compared and 2 are counted as not compared, and they are the *same* two pairs, because one count is over *verdicts* (`identical`/`different`) and the other over *notes* (`not compared pixel by pixel: --image-detail is used up`). So no pair was decoded in this run and this pair's image facts are counts rather than percentages -- a re-dump changes which slots differ, and the decoded fraction is only there when `--image-detail` has budget left for it. 8 further slots hold a readback on both sides at *different sizes* (2004x1256 against 1368x856, smaller still for the lens-flare blurs), which is counted in neither number because a pixel difference is not defined across sizes, and 3 slots hold one on the desktop side only.",
+      "the counters are pinned at zero *because this machine cannot do better*: neither bundle carries counter rows (this replay publishes 16 counters and produces results for none of them, REFERENCE §9), so no pass has a cost on both sides, nothing is cheaper or dearer, and the counters caveat says so in words. A machine whose driver produces counter results would move all three numbers, which is exactly why they are pinned: the comparison's counter section is checked as present-and-empty here rather than never exercised."
     ]
   },
   "captures": [

@@ -5,7 +5,7 @@ from __future__ import annotations
 from rdc_bundle import *  # noqa: F401,F403
 from rdc_detect_common import *  # noqa: F401,F403
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 def reconstruct_passes(events: Sequence[BundleEvent],
                        resources: Sequence[BundleResource]) -> List[ReportPass]:
@@ -58,7 +58,8 @@ def reconstruct_passes(events: Sequence[BundleEvent],
                            'events': 0, 'graphics': 0, 'compute': 0, 'targets': targets,
                            'depth': depth, 'structure': _pass_structure(kind, targets, depth),
                            'shaders': [], 'otherShaders': [], 'blocks': [], 'firstTouched': [],
-                           'vertices': 0, 'instances': 0, 'triangles': 0, 'threads': 0, 'volumeCalls': 0})
+                           'vertices': 0, 'instances': 0, 'triangles': 0, 'threads': 0, 'volumeCalls': 0,
+                           'cost': 0.0, 'share': 0.0, 'costRows': 0, 'dearestEid': 0, 'writes': []})
 
         current = passes[-1]
         current['lastEid'] = int(event['eid'])
@@ -159,6 +160,55 @@ def _state_rollup(bundle: BundleData, entry: ReportPass) -> None:
             label = '%s %s' % (str(stage.get('stage', '?')), _res_id(str(stage.get('resource', ''))))
             for block in stage.get('constantBlocks', []):
                 entry['blocks'].append('%s: %s' % (label, _md(str(block))))
+    # What the pass writes, where its outputs are not render targets: a dispatch's UAVs. The state document
+    # is written at every state change, so the pass's *first* event carries the set the pass starts with --
+    # the same reason the shaders and blocks above come from there. A bundle from before the driver wrote
+    # this array has none, which the renderer says as `n/a` (the targets column) rather than as a dispatch
+    # that writes nothing.
+    if isinstance(state, dict):
+        entry['writes'] = [' '.join(str(row).split()) for row in state.get('uavs', []) if str(row).strip()]
+
+def cost_rows(bundle: BundleData) -> List[BundleCounter]:
+    """The rows of the counter this bundle costs by: `costCounter`'s, or every row when it names none.
+
+    One counter, because a bundle holds a row per event *per counter* and adding a byte count to a duration
+    would be a number with no meaning. Two callers ask this -- the pass table's roll-up and `replaydiff`'s
+    comparison -- so it is written once.
+    """
+    want = int(bundle.get('costCounter', 0) or 0)
+    return [row for row in bundle['counters'] if not want or int(row['counter']) == want]
+
+def pass_cost(bundle: BundleData, first: int, last: int) -> Tuple[float, int, int]:
+    """One range of events costed by a bundle's counters: `(sum, how many rows, the dearest eid)`.
+
+    `0` rows is "not measured", which is a different answer from a range that cost nothing, and `dearest` is 0
+    when there was no row to be dearest.
+    """
+    inside = [row for row in cost_rows(bundle) if first <= int(row['eid']) <= last]
+    cost = sum(float(row['value']) for row in inside)
+    dearest = int(max(inside, key=lambda row: float(row['value']))['eid']) if inside else 0
+    return cost, len(inside), dearest
+
+def _cost_rollup(bundle: BundleData, passes: Sequence[ReportPass]) -> None:
+    """Fill each pass's cost, its share of the frame and its dearest event, from the bundle's counters.
+
+    One counter is summed -- the one the bundle names as the cost (`costCounter`, which is the engine's own
+    choice: `EventGPUDuration` when the replay produced one) -- because a bundle holds a row per event *per
+    counter*, and adding a byte count to a duration would be a number with no meaning. The pass ranges are
+    this module's own, from the state documents, and not the engine's fold over its own passes: the two
+    groupings divide a frame differently, so what is comparable is each pass's *events* summed here, which is
+    what this does. `share` is against the sum over every event that has a value, so a bundle whose counter
+    measured only part of the frame says so (the shares do not add to 1) rather than scaling the missing half
+    to zero. Every field stays 0 in a bundle with no counters, and `costRows` is what tells "no counter" from
+    "a pass that cost nothing".
+    """
+    total = sum(float(row['value']) for row in cost_rows(bundle))
+    for entry in passes:
+        cost, measured, dearest = pass_cost(bundle, int(entry['firstEid']), int(entry['lastEid']))
+        entry['cost'] = cost
+        entry['costRows'] = measured
+        entry['share'] = (cost / total) if total else 0.0
+        entry['dearestEid'] = dearest
 
 def _row_severity(text: str) -> str:
     """The severity out of a `messages.json` row: `eid %-6u %-8s %s` is the driver's format."""
@@ -224,6 +274,15 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
         'vendor': int(capture.get('vendor', 0) or 0),
         'shaderDebugging': int(capture.get('shaderDebugging', 0) or 0),
         'pixelHistory': int(capture.get('pixelHistory', 0) or 0),
+        # The counter the pass table costs by, and whether the bundle had one to cost with: the engine's own
+        # choice and its own name for it (`counters.json`), so a reader knows what the pass costs *are*
+        # -- "12.4 ms of EventGPUDuration" -- without opening another document. `costMeasured` is how many
+        # events the counter gave a value for, which is the number that says how much of the frame the shares
+        # cover (a driver that measured a third of it is a different claim from one that measured all of it).
+        'costCounter': str(bundle['costCounterName']),
+        'costUnit': str(bundle['counterUnit']),
+        'costMeasured': sum(1 for row in bundle['counters']
+                            if not bundle['costCounter'] or int(row['counter']) == bundle['costCounter']),
     }
 
 # ---------------------------------------------------------------------------
@@ -238,10 +297,13 @@ def frame_facts(bundle: BundleData) -> Dict[str, Any]:
 __all__ = [
     'COMPUTE_STAGES',
     'GRAPHICS_APIS',
+    '_cost_rollup',
     '_describe',
     '_pass_structure',
     '_row_severity',
     '_state_rollup',
+    'cost_rows',
     'frame_facts',
+    'pass_cost',
     'reconstruct_passes',
 ]

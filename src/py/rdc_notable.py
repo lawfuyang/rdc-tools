@@ -17,7 +17,6 @@ from __future__ import annotations
 from rdc_bundle import *  # noqa: F401,F403
 from rdc_detect_common import *  # noqa: F401,F403
 
-import re
 from typing import Dict, List, Sequence, Tuple
 
 #: How many passes and resources the ranking lists. Stated rather than tuned: a report whose notable list is
@@ -182,24 +181,24 @@ def _touched_after(resource: BundleResource, eid: int) -> bool:
     return any(read > eid for read in _read_eids(resource) + _rw_eids(resource))
 
 def _counter_cost(bundle: BundleData, first: int, last: int) -> Tuple[float, int]:
-    """The counters a bundle holds for one pass's events: their sum, and how many rows that was.
+    """The *cost* counter summed over one pass's events, and how many rows that was.
 
-    A row is the driver's own text (`eid 12  <name> = <value>`, and a counter can report a vector), so what is
-    summed is the numbers to the right of the `=`. A bundle with no counters returns `(0.0, 0)` and the ranking
-    table says the input was not there, rather than reporting the cost as zero.
+    One counter, named by the bundle (`costCounter`, the same choice the engine's own fold makes): a bundle
+    holds a row per event per counter, and summing all of them would add a byte count to a duration. A row is
+    `{eid, counter, value}` -- the object `dump --with-counters` writes and `schema/counters` describes. A
+    bundle with no counters returns `(0.0, 0)` and the ranking table says the input was not there, rather
+    than reporting the cost as zero.
     """
+    want = bundle['costCounter']
     total = 0.0
     rows = 0
-    number = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
     for row in bundle['counters']:
-        text = str(row)
-        match = re.search(r'\beid\s+(\d+)', text)
-        if not match or '=' not in text:
+        if want and int(row['counter']) != want:
             continue
-        eid = int(match.group(1))
+        eid = int(row['eid'])
         if not first <= eid <= last:
             continue
-        total += sum(float(token) for token in number.findall(text.split('=', 1)[1]))
+        total += float(row['value'])
         rows += 1
     return total, rows
 

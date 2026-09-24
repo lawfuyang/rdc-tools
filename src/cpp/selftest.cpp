@@ -385,6 +385,39 @@ int CmdSelftest()
             "the selftest left its scratch folder behind");
   }
 
+  // ------------------------------------------------------------------ the histogram's arithmetic
+  //
+  // `GetMinMax` and `GetHistogram` need a device and a capture, but the two pieces around them do
+  // not: which channels were asked for, and how the engine's own buckets become display rows. The
+  // second is where a bucket could be *dropped* -- an aggregation that loses one is a chart that
+  // does not add up -- so the grouping is checked on numbers where each bucket is distinguishable.
+  {
+    rdcfixedarray<bool, 4> channels;
+    std::string why;
+    t.Check(ChannelFlags(NULL, channels, why) && channels[0] && channels[3],
+            "histogram-default-channels",
+            "an absent --channels must mean all four, and must fill the array it was handed");
+    t.Check(ChannelFlags("rgb", channels, why) && channels[0] && channels[1] && channels[2] &&
+                !channels[3],
+            "histogram-channels-subset", "a subset must clear the channels it does not name");
+    t.Check(ChannelFlags("agbr", channels, why) && channels[0] && channels[1] && channels[3],
+            "histogram-channels-order", "the order of the letters is not the point");
+    t.Check(!ChannelFlags("rgbx", channels, why) && why.find("is not a channel") != std::string::npos,
+            "histogram-channels-refused",
+            "a letter that is not a channel must be refused rather than ignored");
+
+    const rdcarray<uint32_t> buckets = {1, 2, 3, 4};
+    const std::vector<double> bars = AggregateBuckets(buckets, 2);
+    t.Check(bars.size() == 2 && bars[0] == 3.0 && bars[1] == 7.0, "histogram-bars-group",
+            "two rows over four buckets must sum pairs, with no bucket dropped");
+    const std::vector<double> same = AggregateBuckets(buckets, 8);
+    t.Check(same.size() == 4 && same[3] == 4.0, "histogram-bars-do-not-invent",
+            "more rows than buckets must be the buckets themselves");
+    t.Check(BucketRangeText(0, 2, 0.0f, 1.0f) == "0..0.5" &&
+                BucketRangeText(1, 2, 0.0f, 1.0f) == "0.5..1",
+            "histogram-range-text", "a row must say the span of the group it covers");
+  }
+
   // ------------------------------------------------------------------ the image helpers
   //
   // A contact sheet and a difference map are pictures nobody can check by reading the code, so the
@@ -1247,6 +1280,8 @@ int CmdSelftest()
             "the usage text omits crosscheck");
     t.Check(usage.find("--per-pass") != std::string::npos, "usage-lists-per-pass",
             "the usage text omits counters --per-pass");
+    t.Check(usage.find("histogram") != std::string::npos, "usage-lists-histogram",
+            "the usage text omits histogram");
 
     HMODULE dll = LoadReplayDLL();
     if(dll == NULL)

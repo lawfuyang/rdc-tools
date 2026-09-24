@@ -311,7 +311,7 @@ fixtures build synthetic `.rdc` containers, SDChunk streams, D3D12 payloads and 
 | `python tests/test_rdc_chunks.py` | the chunk stream, the payloads and the shader containers (112) |
 | `python tests/test_rdc_resources.py` | the resource table, descriptor heaps and the enum parsing (93) |
 | `python tests/test_rdc_commands.py` | commands and CLI dispatch (151) |
-| `python tests/test_rdc_report.py` | the report, its notables, its recommendations, its detectors and the report schema (70) |
+| `python tests/test_rdc_report.py` | the report document, its recommendations and the evidence it states (39); its fixtures are `rdc_report_fixtures.py`, and the notables and the detectors have their own files |
 | `python tests/test_rdc_engine_schema.py` | the engine table: recognition, concepts, markers, values, no match (21) |
 | `python tests/test_rdc_validate.py` | the schema validator (17) |
 | `python -m unittest discover -s tests -t tests` | the same suite through unittest |
@@ -521,7 +521,7 @@ they say a resource was reachable for reading *and* writing and not which happen
 
 It is **deterministic** — byte-stable for a fixed bundle (sorted tables, no timestamps, no paths in the prose),
 so two runs diff cleanly and an analysis change shows up as a reviewable diff. It reads only the bundle's own
-files: no capture, no GPU, no device, no `renderdoc-src`. `tests/test_rdc_report.py` tests it from fixture
+files: no capture, no GPU, no device, no `renderdoc-src`. `tests/rdc_report_fixtures.py` builds it from fixture
 bundles written by hand, which is what keeps the analysis honest without a capture to hand.
 
 ### The engine's vocabulary (`engine-schemas/*.json`)

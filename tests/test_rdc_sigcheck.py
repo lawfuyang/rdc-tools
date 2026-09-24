@@ -2,7 +2,7 @@
 
 Two halves, tested separately: the *file* half walks a hand-built stream built from the payload
 builders in `rdc_fixtures` (so a layout change breaks these tests), and the *bundle* half writes a real
-bundle with `test_rdc_report.write_bundle` and compares the engine's rows with the same stream's facts.
+bundle with `rdc_report_fixtures.write_bundle` and compares the engine's rows with the same stream's facts.
 
 What the tests pin, beyond each check firing at all: that a descriptor table is resolved through
 `D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND` rather than through the sentinel as if it were an offset, that a
@@ -35,7 +35,7 @@ import rdc_analysis as R          # noqa: E402
 import rdc_chunkmap               # noqa: E402  (patched: the loader is called from inside functions)
 import rdc_fixtures as F          # noqa: E402
 from rdc_testcase import CmdCase as _CmdCase   # noqa: E402
-from test_rdc_report import event, write_bundle   # noqa: E402  (the bundle fixture the report tests use)
+from rdc_report_fixtures import event, write_bundle   # noqa: E402  (the bundle fixture the report tests use)
 
 #: A signature with one descriptor table: `rp0` serves `t0..t3` from an SRV range.
 TABLE_PARAMS: Sequence[Any] = (('table', 0, 0, 0, 0, [('srv', 0, 4, 0, 0)]),)

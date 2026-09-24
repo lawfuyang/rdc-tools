@@ -60,8 +60,8 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
 - Other entry points, one file per area (`tests/rdc_testcase.py` holds what they share, and is not a test
   file — `discover` only collects `test_*.py`): `test_rdc_analysis.py` (container/compression/cache),
   `test_rdc_chunks.py` (chunk stream/payloads/shader containers), `test_rdc_resources.py` (resource
-  table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py` (report, notables,
-  recommendations, detectors),   `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
+  table/heaps/enums), `test_rdc_commands.py` (commands/CLI), `test_rdc_report.py`, `test_rdc_notable.py`, `test_rdc_report_detectors.py`, `test_rdc_detect_state.py`, `test_rdc_detect_stream.py` (the report and its detectors, whose shared fixtures are
+  `rdc_report_fixtures.py`),   `test_rdc_renderdoc_src.py` (the source-tree fetch), `test_rdc_validate.py`
   (schemas),   `test_rdc_scan.py` (the slice scan and the phase/progress instrumentation), `test_rdc_ab.py`
   (the marker trees, the bundle A/B and the PNG/pixel maths), `test_rdc_goldens.py` (the corpus harness:
   transcripts, labels, the bundle half — it runs the CLI as a subprocess, which is most of the 11 s), or all
@@ -82,7 +82,7 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   sweep that produced 16,857 also collected the clamped tail past it, which is gone since REFERENCE §9's
   sweep bound.)
 - New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix. A new **detector**
-  needs a fixture bundle in `tests/test_rdc_report.py` that makes it fire (and one that makes it not fire),
+  needs a fixture bundle from `tests/rdc_report_fixtures.py` that makes it fire (and one that makes it not fire),
   because a detector that is only ever exercised by a real capture is a detector nobody can falsify.
 - Never weaken, skip or delete an assertion to make a run pass. Tests pinning behaviour that looks wrong
   are marked `CHARACTERIZATION` — change code and test together, and say so.

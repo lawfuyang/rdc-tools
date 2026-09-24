@@ -5,7 +5,7 @@ Three areas, one file, because they are one feature: the marker tree the two cap
 
 The `.rdc` side is built chunk by chunk through `CmdCase`'s fake chunk-name tree -- a real capture's
 markers are a stream of `PushMarker`/`PopMarker` chunks, so a fixture that writes them is the same shape
-the tool reads. The bundle side reuses `test_rdc_report`'s bundle writer rather than a second copy of it:
+the tool reads. The bundle side reuses `rdc_report_fixtures`'s bundle writer rather than a second copy of it:
 the two files would otherwise be two answers to "what does `dump` write", and only one of them is checked
 against the driver.
 
@@ -40,7 +40,7 @@ import rdc_chunkmap as chunkmap   # noqa: E402
 import rdc_fixtures as F          # noqa: E402
 import rdc_image                  # noqa: E402
 from rdc_testcase import CmdCase as _CmdCase, remove_tree   # noqa: E402
-from test_rdc_report import cbuffer, event, resource, write_bundle   # noqa: E402
+from rdc_report_fixtures import cbuffer, event, resource, write_bundle   # noqa: E402
 
 
 def capture_text(func: Any, *args: Any, **kwargs: Any) -> str:

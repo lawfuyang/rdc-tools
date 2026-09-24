@@ -24,7 +24,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
 
 import rdc_analysis as R          # noqa: E402
 from rdc_testcase import TempDirCase, capture_text   # noqa: E402
-from test_rdc_report import event, write_bundle      # noqa: E402
+from rdc_report_fixtures import event, write_bundle      # noqa: E402
 
 HASH_A = 'aa' * 32
 HASH_B = 'bb' * 32

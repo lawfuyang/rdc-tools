@@ -1,6 +1,6 @@
 """The engine schema table: recognition, the concepts a frame's names claim, and what happens without a match.
 
-The tests build bundles whose *names* are the fixture (`tests/test_rdc_report.py`'s writers), point
+The tests build bundles whose *names* are the fixture (`tests/rdc_report_fixtures.py`'s writers), point
 `RDC_ENGINE_SCHEMAS` at a scratch table so the shipped one cannot leak into a synthetic case, and check the
 report that comes out. The one test that reads the repository's own table is the one that pins it: a table that
 does not parse, or that names a match kind the interpreter does not know, would otherwise fail silently at run
@@ -26,7 +26,7 @@ for _p in (HERE, ROOT, os.path.join(ROOT, 'src', 'py')):
 import rdc_analysis as R            # noqa: E402
 import rdc_engine_schema as E       # noqa: E402
 from rdc_testcase import remove_tree   # noqa: E402
-from test_rdc_report import cbuffer, event, resource, write_bundle   # noqa: E402
+from rdc_report_fixtures import cbuffer, event, resource, write_bundle   # noqa: E402
 
 RDC = 'C:\\captures\\test.rdc'
 

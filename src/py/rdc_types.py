@@ -100,6 +100,50 @@ class ResourceInfo(TypedDict):
     format: int
     gpuAddress: int
 
+class StaticSampler(TypedDict):
+    """One static sampler a root signature carries: its values, not just its count.
+
+    The fields are `D3D12_STATIC_SAMPLER_DESC`'s, decoded from the serialised signature's own static-sampler
+    array. `minLod`/`maxLod` are the LOD range the sampler may read (`maxLod` at `FLT_MAX` means the whole
+    chain), `register`/`space` are where the signature binds it, and `visibility` is the stage that may use
+    it. `filterText` is the decoded filter in words -- the raw `filter` word is kept beside it because the
+    text is this tool's reading of the enum, and a reader comparing two captures should be able to check it.
+    """
+    filter: int
+    filterText: str
+    addressU: str
+    addressV: str
+    addressW: str
+    mipLodBias: float
+    maxAnisotropy: int
+    comparison: str
+    border: str
+    minLod: float
+    maxLod: float
+    register: int
+    space: int
+    visibility: str
+
+class SamplerDesc(TypedDict):
+    """One sampler a `Device_CreateSampler` wrote into a descriptor heap: the same values as a static one.
+
+    A heap sampler has no register or visibility of its own -- the descriptor table that binds the slot
+    supplies those -- and its border colour is four floats rather than a `D3D12_STATIC_BORDER_COLOR` word,
+    which is what `border` holds for it.
+    """
+    filter: int
+    filterText: str
+    addressU: str
+    addressV: str
+    addressW: str
+    mipLodBias: float
+    maxAnisotropy: int
+    comparison: str
+    border: str
+    minLod: float
+    maxLod: float
+    flags: int
+
 class DescriptorInfo(TypedDict):
     """One written descriptor-heap slot: what kind of view it holds, which resource it names, and the
     format the view declares.
@@ -354,8 +398,10 @@ __all__ = [
     'RootRange',
     'RootSignature',
     'STR_RE',
+    'SamplerDesc',
     'SectionInfo',
     'ShaderBind',
+    'StaticSampler',
     'UseInfo',
     'UseLedger',
     'ZSTD_MAGIC',

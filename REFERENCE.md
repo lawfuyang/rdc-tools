@@ -1442,6 +1442,92 @@ change was made for, and a pass that is simply half the frame is not); and the c
 carried counters, or when the two sides folded *different* counters (two measurements that are not the same
 quantity).
 
+### 4.24 The conflicts a frame commits, and the samplers it reads through: `hazards` and `samplers`
+
+Both are **offline** -- they read the chunk stream and the heaps and ask the engine nothing -- and both exist
+because the tools that answer these questions in the industry answer them with a *debug layer*, which reports
+only when the application ran with one. Measured on this corpus, none did: `debug --group` reports 0 messages
+on `desktop-1`, and the `d3d12sdklayers` section a capture carries is a copy of the SDK's own DLL (stored so
+*replay* can load a layer), not a log. What a capture does carry is the frame's own barriers and bindings.
+
+**`hazards <rdc> [maxRows] [--format table|csv|markdown]`** -- exit 1 when a `certain` finding exists.
+
+A **state conflict** is a use whose resource the frame leaves in a state that forbids it. The permission
+table, which is the D3D12 documentation's rules rather than anything the capture says:
+
+| use | state it needs | leniency |
+|---|---|---|
+| `vb`, `cbv` | `VertexAndConstantBuffer` | any read-only state serves it |
+| `ib` | `IndexBuffer` | any read-only state serves it |
+| `srv` | `NonPixelShaderResource` or `PixelShaderResource` | any read-only state serves it, `DepthRead` included |
+| `uav` | `UnorderedAccess` | none -- a write needs its state |
+| `rtv` | `RenderTarget` | none |
+| `dsv` | `DepthWrite` **or** `DepthRead` | none, and see below |
+| `copy-dst`, `resolve-dst` | `CopyDest`, `ResolveDest` | none |
+| `copy-src`, `resolve-src` | `CopySource`, `ResolveSource` | any read-only state serves it |
+| `clear` | `RenderTarget` / `DepthWrite` / `UnorderedAccess`, by the call's own chunk name | none |
+
+`Common` (0) is permitted for every use, because D3D12 promotes it to whatever a use needs. A depth view is
+permitted by **either** depth state on purpose: `D3D12_DSV_FLAG_READ_ONLY_DEPTH` binds the depth buffer for
+testing without writing it -- the normal way a frame samples what it is also testing against -- and the flag
+lives in the view's descriptor, which this tool does not decode. So a depth view is reported only when the
+resource carries neither depth state (measured before the rule was written: every DSV-in-`DepthRead` row on
+`desktop-1` was this, and none of them was a defect).
+
+**State tracking is per command list, and that is not a detail.** A barrier is recorded into the list it is
+recorded in, so a transition in one list says nothing about what another list sees -- and UE records dozens of
+command lists from worker threads, so the stream's order is the *record* order rather than the order the GPU
+runs them in. A single global state model makes that assumption silently; measured, it produced 797 false
+"vertex buffer in `CopyDest`" rows on `desktop-1`, on four long-lived buffers whose transitions are recorded
+elsewhere. A use whose list recorded no transition for its resource is counted in `unknown` instead, and the
+summary prints that count beside the findings.
+
+Both barrier forms feed one track. The legacy form names `before`/`after` states; the enhanced `List_Barrier`
+names a layout and an access bitmask, which `ACCESS_STATES` and `LAYOUT_STATES` translate into the same state
+words (the access values are `dx/official/d3d12.h`'s, the mapping is this tool's). That is coverage rather
+than elegance: `desktop-2` transitions 91 times through the enhanced form and 12 through the legacy one, so a
+check that read only one would be answering about a tenth of the frame.
+
+The second class is a **same-event conflict**: a resource bound as a render or depth target at an event while
+the same event's signature reaches it as an SRV or a UAV (the read-write loop -- `certain`), or a resource
+bound as both an SRV and a UAV at one event (`likely`: the two views can address different subresources and
+the stream does not say which). The target half is asked only of *graphics* draws -- a dispatch neither sets
+nor clears the output-merger slots, and a `DrawState` still holds whatever the last graphics call bound, so
+reading it at a dispatch reported a target the dispatch never had (measured, and fixed).
+
+Rows **fold per distinct conflict** with their count and eid range, the way `debug --group` folds validation
+messages: a frame that fights one barrier repeats it at every draw. Measured on the corpus, `desktop-1`
+reports 167 findings in **1** distinct conflict (instance-culling buffers left in `CopyDest` and bound as
+vertex buffers 167 times), `desktop-2` 10 findings in **8** (an HZB read as an SRV while in `UnorderedAccess`,
+and three RTXDI buffers the same way -- the loop this check was written for), and `mobile-1` **0** in 4,082
+uses.
+
+**`samplers <rdc> [maxRows] [--eid N] [--format …]`** -- exit 1 when a pair has a `certain` verdict.
+
+A **static sampler** is decoded out of the signature's own array: the count at +12 and the array's offset at
++16 of the `RTS0` header (the two fields the parameter walk never needed, which is why `rootsig` could print
+`samplers=6` without knowing one value behind it), in `D3D12_STATIC_SAMPLER_DESC`'s field order -- 52 bytes,
+56 for the 1.2 form with its `Flags` word -- which is `d3d12.h`'s order because RenderDoc casts the D3D12
+runtime's own struct. A **heap sampler** is the `D3D12_SAMPLER_DESC2` after the 16-byte descriptor of a
+`Device_CreateSampler` (56 bytes with its `Flags`; the border is four floats here, where a static sampler
+carries a `D3D12_STATIC_BORDER_COLOR` word). Both are reported in the same words, which is what lets a row of
+one be read beside a row of the other.
+
+The pairing is printed as a **basis**, because only one of the two is a fact in the file: a descriptor table
+that binds an SRV range and a sampler range together says which sampler goes with which view (`table rpN`),
+while a static sampler is bound by the signature, so the textures printed against it are the SRVs whose range
+shares its register space (`space N`) -- the D3D12 convention, not a statement the capture makes.
+
+The arithmetic (`rdc_samplers.sampler_verdict`): `maxLod < minLod`, a range D3D12 forbids, and a `minLod` at
+or past the texture's mip count, where the levels it asks for do not exist and every fetch is clamped to the
+smallest one (both `certain`); then, as observations, mip mapping switched off (`maxLod` 0) for a texture
+that has a chain, and a comparison filter reading a format that is neither a depth format nor typeless
+(`likely`). Measured: `desktop-2` creates 26 samplers -- all static -- and pairs 28 of them with textures
+(`GBufferMotion_RG`, `DepthBuffer_RG` and their like) with no arithmetic verdict; `desktop-1` creates no heap
+sampler at all (`CreateSampler` appears zero times in its stream and no heap holds a sampler slot), so the
+heap half of the decode is exercised by the fixtures in `tests/test_rdc_samplers.py` rather than by the
+corpus.
+
 ## 5. Worked examples
 
 **Find the two sphere groups in a mobile base pass and see how they differ**

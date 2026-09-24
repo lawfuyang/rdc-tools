@@ -24,9 +24,14 @@ Nsight Graphics (its feature list, Aftermath, and the shader-debugger/pixel-hist
 anything is public at all, and the Khronos Vulkan tutorial's AI-assisted debugging chapter —
 `docs.vulkan.org/tutorial/latest/AI_Assisted_Vulkan/06_debugging/03_renderdoc_ai_integration.html` is the page
 of it that is reachable; its siblings answer 403/404 — each checked against what this tool already answers.
-What came out of
-it is §1–§3 below: six items on the *debugging* side rather than the performance side, each one an answer to a
+Six items came out of it on the *debugging* side rather than the performance side, each one an answer to a
 question a person asks while chasing a bug or a crash.
+
+**Phase 2a landed on 2026-09-24 and left this file**: the two audits §1 used to hold are `hazards` and
+`samplers` in `README.md` (the command list) and REFERENCE §4.24 (the permission table, the two barrier forms,
+the sampler layouts, the pairing bases and the measurements). What is left here is the memory questions (§1)
+and the smaller answers with the two probes (§2), plus the three candidates the survey killed — their reasons
+are worth more where they are, under "what is deliberately *not* on this list".
 
 The survey also cut three candidates, and the reasons are kept in "what is deliberately *not* on this list"
 below, because a measurement that removes an item is worth as much as one that adds it. Half of what the
@@ -107,8 +112,8 @@ They were looked at, and the reasons they are not items are worth more than the 
   *removed* device inside the faulting process, and the replay API exposes none of it (`DRED` appears nowhere
   in `api/replay` in 1.46). A capture is a healthy frame; the crash that follows it belongs to another tool in
   another process, and no analysis of this file recovers it. What this tool can do about crashes is the
-  arithmetic of §1–§2 — catching the defects that cause them — plus the messages `debug` prints when a capture
-  has any.
+  arithmetic `hazards` and `samplers` now do (REFERENCE §4.24) plus the items in §1–§2 below — catching the
+  defects that cause them — and the messages `debug` prints when a capture has any.
 * **Asking the engine to replay with the debug layer on, so that a capture whose application ran clean gets
   validation anyway.** The engine keeps the SDK's DLL in the capture precisely for debugging at replay time,
   but nothing in the public replay API asks for the layer to be enabled — that is a request to RenderDoc
@@ -182,49 +187,7 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ---
 
-## 1. P1 — the frame's own hazards
-
-The two items that answer "why is this wrong" rather than "why is this slow", and both are **offline**: they
-are arithmetic over what the parser already decodes, so they run with no GPU, no driver and no replay, and they
-work on a capture whose application ran without the debug layer — which is every capture here, as
-"what is deliberately *not* on this list" below now records with numbers.
-
-* **`hazards` — the state and binding conflicts the frame commits, from its own arithmetic.** *What*: for
-  every use the ledger already records, the state the resource was last transitioned into checked against what
-  that use requires (a read of a resource left in a `*_WRITE` or `COPY_DEST` state, a write with no transition
-  in front of it, a resource used as a depth target while it is already bound as one), plus the conflicts at a
-  single event (a resource bound as RTV/DSV at an event and reachable as SRV/UAV through a table at the same
-  event — the read-write loop). Each finding names the two eids it became true between and the chunk that set
-  the state; the report gains a count and `sweep` prints it per capture, so a folder of frames can be ranked by
-  how much it fights its own barriers. *Why*: this is the class that shows as "fine on my GPU, wrong on the
-  phone", as an intermittent frame, or as a hang — and the engine can only report it when the application ran
-  with the D3D12 debug layer at capture time. Measured on this corpus: `debug --group` reports **0 messages**
-  on `desktop-1`, and its `d3d12sdklayers` section is not a log at all but a copy of `d3d12sdklayers.dll`
-  (`d3d12_device.cpp`, stored so *replay* can load a debug layer). So nothing recorded the hazards for any
-  capture here, and the file is the only witness. *How*: over the barrier decode, the RT/DS bindings, the
-  clears/discards/copies/resolves and the use ledger (`deps`, REFERENCE §4.15), with the binding half joined
-  the way `rootsig-check` already joins declared against bound. The permit table — which state each use
-  requires — is written from the D3D12 documentation and cited in REFERENCE, and gets the treatment the
-  report's other detectors get: a finding is an observation until a corpus `known` verdict confirms or refutes
-  it (REFERENCE §4.17). *Blocks*: nothing; every input decodes today. **~2 d.**
-
-* **`samplers` — every sampler the frame reads a texture through, and the mip range it can reach.** *What*:
-  one row per (sampler, texture) pair actually bound at an event: where the sampler comes from (a static
-  sampler in a root signature — `rootsig` counts them today, six per signature in `desktop-1`, and does not
-  decode their values — or a heap slot), its filter, address mode and mip range, the texture's format and
-  `mips=N` beside them (already in the resource table), and the mismatches that are *arithmetic*: `minLod` at
-  or past the mip count (the level it asks for does not exist — sampling black), a `maxLod` that never reaches
-  the base level, a bias that spends the whole range. *Why*: it is the Vulkan tutorial's own worked example, a
-  black texture explained by `minLod = 10` on a five-level texture, and it is the same arithmetic in D3D12.
-  Unlike "wrong address mode for this target", these are not heuristics: a level either exists or it does not.
-  *How*: extend the root-signature decode past counting static samplers (the blob is parsed already;
-  `D3D12_SAMPLER_DESC`'s layout comes from `renderdoc-src`, the source of truth for every "how is this
-  serialised" question), decode sampler heap slots, and join to the textures bound through each table — the
-  path `rootsig-check` walks. The first step is a measurement rather than code: `descriptors` prints **no
-  sampler rows** for `desktop-1`, so settle whether that frame has none or the decode skips them.
-  *Blocks*: nothing. **~1.5 d.**
-
-## 2. P2 — the memory questions behind a wrong pixel
+## 1. P2 — the memory questions behind a wrong pixel
 
 * **`alias` — the placed resources living in each other's memory.** *What*: from the placement rows the memory
   ledger already carries — `memory` reports **776 placed resources in 33 heaps** for `desktop-1` — plus the
@@ -250,7 +213,7 @@ work on a capture whose application ran without the debug layer — which is eve
   a predecessor map over the writes it already records, and the walk terminates with the honesty the report
   uses elsewhere ("the writer is outside this frame"). *Blocks*: nothing. **~1.5 d.**
 
-## 3. P3 — the smaller answers, and the two probes
+## 2. P3 — the smaller answers, and the two probes
 
 * **`mesh --bounds` — is this instance's geometry even on screen.** *What*: the post-VS bounds the driver
   already extracts (`mesh` prints `boundsMin`/`boundsMax`, with the vertex and primitive counts) checked
@@ -296,33 +259,26 @@ work on a capture whose application ran without the debug layer — which is eve
   the link between the two commands, or write the one paragraph in REFERENCE that says a replacement carries
   none. **~0.5 d.**
 
-## 4. Suggested order
+## 3. Suggested order
 
 Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
-item of §1–§3 appears exactly once, so this is the whole list in one place rather than a selection of it; each
+item of §1–§2 appears exactly once, so this is the whole list in one place rather than a selection of it; each
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**First — the two audits (§1, ~3.5 d)**, which are the bug-hunters: `hazards` first, because it is what
-catches a defect before it becomes a crash, it needs no new extraction, and its findings are the ones a corpus
-verdict can confirm; `samplers` next, opening with a measurement rather than code.
-
-1. **`hazards` (§1, ~2 d)** — the state and binding conflicts, offline, with the permit table cited.
-2. **`samplers` (§1, ~1.5 d)** — the mip-range arithmetic, and the sampler decode it needs first.
-
-**Then — the memory questions (§2, ~2.5 d)**, in this order because `alias` is shorter and its numbers are
+**First — the memory questions (§1, ~2.5 d)**, in this order because `alias` is shorter and its numbers are
 already printed:
 
-3. **`alias` (§2, ~1 d)** — carry the heap offset into the row, then the overlap test.
-4. **`provenance` (§2, ~1.5 d)** — the multi-hop walk behind `read-before-write`.
+1. **`alias` (§1, ~1 d)** — carry the heap offset into the row, then the overlap test.
+2. **`provenance` (§1, ~1.5 d)** — the multi-hop walk behind `read-before-write`.
 
-**Then — the smaller answers and the probes (§3, ~2 d)**, where the bounds check is the one that pays per
+**Then — the smaller answers and the probes (§2, ~2 d)**, where the bounds check is the one that pays per
 line of code and each probe ends in a sentence either way:
 
-5. **`mesh --bounds` (§3, ~0.5 d)** — settle the space first, then the verdict.
-6. **`callstack <eid>` (§3, ~0.5 d)** — with `info` reporting availability; useful from the first capture
+3. **`mesh --bounds` (§2, ~0.5 d)** — settle the space first, then the verdict.
+4. **`callstack <eid>` (§2, ~0.5 d)** — with `info` reporting availability; useful from the first capture
    that carries one.
-7. **Why the pixel path of `trace` produces nothing (§3, ~0.5 d)** — fix the message, or document the
+5. **Why the pixel path of `trace` produces nothing (§2, ~0.5 d)** — fix the message, or document the
    engine's limit in the words of the measurement.
-8. **Does a patched shader carry debug info? (§3, ~0.5 d)** — if it does, "change the shader, then step it"
+6. **Does a patched shader carry debug info? (§2, ~0.5 d)** — if it does, "change the shader, then step it"
    is the next feature; if not, it is one paragraph in REFERENCE.

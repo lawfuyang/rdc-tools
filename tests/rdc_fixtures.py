@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import struct
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import rdc_analysis as R
 
@@ -538,13 +538,62 @@ RootRangeSpec = Tuple[str, int, int, int, int]
 RootParamSpec = Tuple[str, int, int, int, int, Sequence[RootRangeSpec]]
 
 
+def f32b(value: float) -> bytes:
+    """The little-endian bytes of a `float` (a sampler's LOD fields and bias are floats)."""
+    import struct
+    return struct.pack('<f', value)
+
+
+def static_sampler(filter_: int = 0x15, address: Tuple[int, int, int] = (3, 3, 3),
+                   mip_bias: float = 0.0, max_aniso: int = 1, comparison: int = 0, border: int = 0,
+                   min_lod: float = 0.0, max_lod: float = 3.4028234663852886e38, register: int = 0,
+                   space: int = 0, visibility: int = 0) -> bytes:
+    """One `D3D12_STATIC_SAMPLER_DESC` (52 bytes, `d3d12.h`'s field order).
+
+    The order is the header's rather than this project's, because the blob RenderDoc reads is the D3D12
+    runtime's own serialisation (`(const D3D12_STATIC_SAMPLER_DESC *)(base + StaticSamplerOffset)`).
+    """
+    return (u32b(filter_) + u32b(address[0]) + u32b(address[1]) + u32b(address[2])
+            + f32b(mip_bias) + u32b(max_aniso) + u32b(comparison) + u32b(border)
+            + f32b(min_lod) + f32b(max_lod) + u32b(register) + u32b(space) + u32b(visibility))
+
+
+def sampler_desc(filter_: int = 0x15, address: Tuple[int, int, int] = (3, 3, 3),
+                 mip_bias: float = 0.0, max_aniso: int = 1, comparison: int = 0,
+                 border: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+                 min_lod: float = 0.0, max_lod: float = 3.4028234663852886e38,
+                 flags: int = 0) -> bytes:
+    """A `D3D12_SAMPLER_DESC2` (56 bytes: the descriptor with four border floats and a `Flags` word).
+
+    A heap sampler carries the border as four floats where a static one carries a
+    `D3D12_STATIC_BORDER_COLOR` word, which is the difference between the two decoders.
+    """
+    return (u32b(filter_) + u32b(address[0]) + u32b(address[1]) + u32b(address[2]) + f32b(mip_bias)
+            + u32b(max_aniso) + u32b(comparison)
+            + b''.join(f32b(part) for part in border) + f32b(min_lod) + f32b(max_lod) + u32b(flags))
+
+
+def pl_create_sampler(heap: int, index: int, desc: Optional[bytes] = None) -> bytes:
+    """A `Device_CreateSampler` payload: the 16-byte descriptor, the `D3D12_SAMPLER_DESC2`, the handle.
+
+    The same framing a view write has -- a `D3D12Descriptor` (type, heap, index) then the description then
+    the destination `PortableHandle` -- except that a sampler names no resource, so the word a view write
+    puts a resource id in is part of the description here.
+    """
+    return b'\x00' * 16 + (sampler_desc() if desc is None else desc) + u64b(heap) + u32b(index)
+
+
 def root_signature(params: Sequence[RootParamSpec], version: int = 2, flags: int = 0,
-                   samplers: int = 0) -> bytes:
+                   samplers: Union[int, Sequence[bytes]] = 0) -> bytes:
     """The `RTS0` part's data: a serialised D3D12 root signature (`DecodeRootSig` layout).
 
-    Header(24) | param array (12 bytes each) | each parameter's out-of-line data. Every offset is
-    from the start of this buffer, and a 1.0 signature's descriptor ranges are 20 bytes instead of
-    24 -- the difference the tool has to get right to walk them.
+    Header(24) | param array (12 bytes each) | each parameter's out-of-line data | the static samplers.
+    Every offset is from the start of this buffer, and a 1.0 signature's descriptor ranges are 20 bytes
+    instead of 24 -- the difference the tool has to get right to walk them.
+
+    `samplers` is either the header's *count* with no array at all (`6`, which is what a capture whose
+    array this fixture does not build looks like) or a sequence of `static_sampler` records, which are
+    written after the parameter bodies and pointed at by the header's fifth word.
     """
     array_len = 24 + 12 * len(params)
     bodies: List[Tuple[int, bytes]] = []
@@ -562,10 +611,13 @@ def root_signature(params: Sequence[RootParamSpec], version: int = 2, flags: int
             body = u32b(reg) + u32b(space) + (u32b(0) if version >= 2 else b'')
         bodies.append((array_len + len(data), body))
         data += body
-    head = u32b(version) + u32b(len(params)) + u32b(24) + u32b(samplers) + u32b(0) + u32b(flags)
+    sampler_bytes = b'' if isinstance(samplers, int) else b''.join(samplers)
+    count = samplers if isinstance(samplers, int) else len(samplers)
+    head = (u32b(version) + u32b(len(params)) + u32b(24) + u32b(count)
+            + u32b(array_len + len(data) if sampler_bytes else 0) + u32b(flags))
     array = b''.join(u32b(PARAM_KIND_CODES[param[0]]) + u32b(param[1]) + u32b(off)
                      for param, (off, _body) in zip(params, bodies))
-    return head + array + data
+    return head + array + data + sampler_bytes
 
 
 def pl_create_root_sig(resid: int, sig: bytes, node_mask: int = 0, gap: int = 16) -> bytes:

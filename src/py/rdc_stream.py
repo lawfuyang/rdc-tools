@@ -56,6 +56,14 @@ def u64(b: BufferLike, o: int) -> int:
     """Read a little-endian unsigned 64-bit value at offset `o`."""
     return struct.unpack_from('<Q', b, o)[0]
 
+def f32(b: BufferLike, o: int) -> float:
+    """Read a little-endian `float` at offset `o`.
+
+    A `D3D12_SAMPLER_DESC`'s LOD fields and its border colour are floats rather than words, so the word
+    readers are not enough for the sampler decode; nothing else in the stream is read this way.
+    """
+    return struct.unpack_from('<f', b, o)[0]
+
 def _read_container(path: str) -> Buffer:
     """The container's bytes: a read-only `mmap` when the file can be mapped, else a plain read.
 
@@ -507,6 +515,7 @@ __all__ = [
     'chunk_payload',
     'chunk_strings',
     'decompress_lz4',
+    'f32',
     'decompress_zstd',
     'iter_chunks',
     'parse_container',

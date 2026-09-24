@@ -31,6 +31,19 @@ python rdc_analysis.py formats  <rdc>          # which formats the file holds, a
                                                          # who writes what, who reads it (offline)
   python rdc_analysis.py memory   <rdc> [maxRows]        # placement, capture-relative lifetimes,
                                                          #   aliasing pairs and never-read bytes
+  python rdc_analysis.py hazards  <rdc> [maxRows] [--format table|csv|markdown]
+                                                         # the conflicts a frame commits against its own
+                                                         #   resource states and bindings: a read while
+                                                         #   the resource is left in a write state, a
+                                                         #   write while it is left in a read one, and a
+                                                         #   target read through the same signature.
+                                                         #   exit 1 on any `certain` finding
+  python rdc_analysis.py samplers <rdc> [maxRows] [--eid N] [--format table|csv|markdown]
+                                                         # every sampler the frame creates -- static
+                                                         #   ones with their values decoded, and heap
+                                                         #   slots -- and the pairs bound to a texture
+                                                         #   whose mip range they cannot reach.
+                                                         #   exit 1 on a `certain` verdict
   python rdc_analysis.py rootsig  <rdc> [maxSigs]        # decoded root signatures: parameter types,
                                                          #   registers, spaces, descriptor ranges
   python rdc_analysis.py strings  <rdc> [minlen] [maxlines]
@@ -184,6 +197,8 @@ from rdc_formats import *  # noqa: F401,F403  (re-exported for the CLI and tests
 from rdc_table import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 import rdc_table  # noqa: F401  (used qualified: the format the entry point parsed and checked)
 from rdc_uses import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_hazards import *  # noqa: F401,F403  (re-exported for the CLI and tests)
+from rdc_samplers import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_profile import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_scan import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_driver import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -485,6 +500,16 @@ def _dispatch() -> None:
     elif cmd == 'rootsig-check':
         rest, fmt = _take_format('rootsig-check', argv)
         sys.exit(cmd_rootsig_check(path, rest[3] if len(rest) > 3 else None, fmt))
+    elif cmd == 'hazards':
+        rest, fmt = _take_format('hazards', argv)
+        sys.exit(cmd_hazards(path, _arg(rest, 3, 40), fmt))
+    elif cmd == 'samplers':
+        rest, fmt = _take_format('samplers', argv)
+        rest, want_eid = _take_value('samplers', rest, '--eid',
+                                     'usage: rdc_analysis.py samplers <rdc> [maxRows] [--eid N] '
+                                     '[--format %s]' % '|'.join(rdc_table.FORMATS))
+        sys.exit(cmd_samplers(path, _arg(rest, 3, 40), fmt,
+                              int(want_eid) if want_eid is not None else None))
     elif cmd == 'vram':
         rest, drops = _take_drops('vram', argv)
         rest, fmt = _take_format('vram', rest)

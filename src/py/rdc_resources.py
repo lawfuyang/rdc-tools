@@ -13,7 +13,7 @@ import rdc_profile
 
 import os
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 def load_format_names(src_root: Optional[str] = None) -> Dict[int, str]:
     """DXGI format id -> short name (`R8G8B8A8_UNORM`): the tree's copy of the enum, else the bundled table.
@@ -399,19 +399,17 @@ def _parse_root_signature(data: Buffer) -> Optional[RootSignature]:
     return RootSignature(id=0, version=ROOT_VERSIONS[version], flags=u32(data, 20), dwords=dwords,
                          params=params, samplers=num_samplers)
 
-@rdc_profile.timed('root signatures')
-def parse_root_signatures(stream: Buffer,
-                          names: Optional[Dict[int, str]] = None) -> Dict[int, RootSignature]:
-    """Every root signature the capture creates, by the resource id that binds it.
+def _root_sig_parts(stream: Buffer, names: Dict[int, str]) -> Iterator[Tuple[int, Buffer]]:
+    """Yield `(resource id, the RTS0 part's data)` for every root signature the capture creates.
 
     The payload is the serialiser's own framing around the blob, so the container is located by its
     `DXBC` magic rather than at a fixed offset, and cross-checked against the length field at +4 of
     the payload (they agree in every capture seen). The id is the last 8 bytes of the payload --
     not `length - 16` like a resource creation, because there is no GPU address after it.
+
+    One walk, so `parse_root_signatures` and the sampler decode cannot disagree about which part of a
+    payload a signature is.
     """
-    if names is None:
-        names = rdc_chunkmap.load_chunk_names()
-    sigs: Dict[int, RootSignature] = {}
     for ch in iter_chunks(stream):
         if names.get(ch['id'], '') != 'Device_CreateRootSignature':
             continue
@@ -422,18 +420,186 @@ def parse_root_signatures(stream: Buffer,
         size = u32(blob, i + 24)                       # the container's own declared size
         if i + size > len(blob) or u64(blob, 4) != size:
             continue
-        part_count = u32(blob, i + 28)
-        if part_count != 1:
+        if u32(blob, i + 28) != 1:
             continue
         po = i + u32(blob, i + 32)
         if blob[po:po + 4] != b'RTS0':
             continue
-        sig = _parse_root_signature(blob[po + 8:po + 8 + u32(blob, po + 4)])
+        yield u64(blob, len(blob) - 8), blob[po + 8:po + 8 + u32(blob, po + 4)]
+
+@rdc_profile.timed('root signatures')
+def parse_root_signatures(stream: Buffer,
+                          names: Optional[Dict[int, str]] = None) -> Dict[int, RootSignature]:
+    """Every root signature the capture creates, by the resource id that binds it."""
+    if names is None:
+        names = rdc_chunkmap.load_chunk_names()
+    sigs: Dict[int, RootSignature] = {}
+    for rid, data in _root_sig_parts(stream, names):
+        sig = _parse_root_signature(data)
         if sig is None:
             continue
-        sig['id'] = u64(blob, len(blob) - 8)
-        sigs[sig['id']] = sig
+        sig['id'] = rid
+        sigs[rid] = sig
     return sigs
+
+# ---------------------------------------------------------------------------
+# Samplers: the values behind the count `rootsig` prints.
+#
+# A static sampler lives in the signature and a heap sampler in a descriptor slot, and the two are written
+# differently -- the static one holds a `D3D12_STATIC_BORDER_COLOR` word where the heap one holds four floats
+# -- so the decodes are separate, but the *words* they print are the same, because `samplers` has to be able
+# to read a row of either beside a row of the other.
+# ---------------------------------------------------------------------------
+#: `D3D12_TEXTURE_ADDRESS_MODE` (0 is not a valid mode).
+ADDRESS_MODES: Dict[int, str] = {1: 'wrap', 2: 'mirror', 3: 'clamp', 4: 'border', 5: 'mirror-once'}
+
+#: `D3D12_COMPARISON_FUNC`.
+COMPARISON_FUNCS: Dict[int, str] = {0: 'none', 1: 'never', 2: 'less', 3: 'equal', 4: 'less-equal',
+                                    5: 'greater', 6: 'not-equal', 7: 'greater-equal', 8: 'always'}
+
+#: `D3D12_STATIC_BORDER_COLOR`.
+BORDER_COLORS: Dict[int, str] = {0: 'transparent-black', 1: 'opaque-black', 2: 'opaque-white'}
+
+#: The seven min/mag/mip bits of a `D3D12_FILTER`, which is what the low byte of its enum names.
+FILTER_MODES: Dict[int, Tuple[str, str, str]] = {
+    0x0: ('point', 'point', 'point'), 0x1: ('linear', 'point', 'point'),
+    0x4: ('point', 'linear', 'point'), 0x5: ('linear', 'linear', 'point'),
+    0x10: ('point', 'point', 'linear'), 0x11: ('linear', 'point', 'linear'),
+    0x14: ('point', 'linear', 'linear'), 0x15: ('linear', 'linear', 'linear'),
+}
+
+def filter_text(value: int, anisotropy: int = 0) -> str:
+    """`linear/linear/point`, `comparison linear/point/point` or `anisotropic x8` for a `D3D12_FILTER`.
+
+    The family is in the bits above the low seven -- `0x80` comparison, `0x100` minimum, `0x180` maximum,
+    the ranges RenderDoc's `MakeFilter` tests (`driver/d3d12/d3d12_common.cpp`) -- and an anisotropic filter
+    is `0x55` in each of them. A mode the table does not have prints as its own hex, because a name this
+    tool invented would read like a decode.
+    """
+    family = ''
+    base = value
+    if value & 0x180 == 0x180:
+        family, base = 'maximum ', value & 0x7f
+    elif value & 0x100:
+        family, base = 'minimum ', value & 0x7f
+    elif value & 0x80:
+        family, base = 'comparison ', value & 0x7f
+    if base == 0x55:
+        return '%sanisotropic x%d' % (family, anisotropy)
+    parts = FILTER_MODES.get(base)
+    if parts is None:
+        return 'filter 0x%x' % value
+    return '%s%s/%s/%s' % (family, parts[0], parts[1], parts[2])
+
+def _address_mode(blob: Buffer, at: int) -> str:
+    """One `D3D12_TEXTURE_ADDRESS_MODE` word, or its own number when it is not a valid mode."""
+    value = u32(blob, at)
+    return ADDRESS_MODES.get(value, 'mode %d' % value)
+
+def _comparison(blob: Buffer, at: int) -> str:
+    """One `D3D12_COMPARISON_FUNC` word, or its own number when it is not a valid function."""
+    value = u32(blob, at)
+    return COMPARISON_FUNCS.get(value, 'func %d' % value)
+
+#: The serialised `D3D12_STATIC_SAMPLER_DESC` -- `d3d12.h`'s field order, 52 bytes -- and the 1.2 form that
+#: appends `Flags` (56). RenderDoc reads them as the D3D12 runtime's own structs, `(const
+#: D3D12_STATIC_SAMPLER_DESC *)(base + header->StaticSamplerOffset)` in `driver/d3d12/d3d12_rootsig.cpp`,
+#: which is why the order here is the header's rather than one this project chose.
+STATIC_SAMPLER_SIZE = 52
+STATIC_SAMPLER_SIZE_1_2 = 56
+
+def _parse_static_samplers(data: Buffer, version: int) -> List[StaticSampler]:
+    """The static-sampler array of one `RTS0` part, or [] when it does not fit inside the blob.
+
+    The count is at +12 and the array's own offset at +16: the two header fields the parameter walk never
+    needed, which is why `rootsig` could print `samplers=6` without knowing one value behind it. An array
+    that would run past the blob is refused rather than truncated -- a short answer here would look like a
+    signature with fewer samplers.
+    """
+    count, offset = u32(data, 12), u32(data, 16)
+    stride = STATIC_SAMPLER_SIZE_1_2 if version >= 3 else STATIC_SAMPLER_SIZE
+    if count > 64 or offset + count * stride > len(data):
+        return []
+    out: List[StaticSampler] = []
+    for i in range(count):
+        b = offset + i * stride
+        anisotropy = u32(data, b + 20)
+        out.append(StaticSampler(
+            filter=u32(data, b), filterText=filter_text(u32(data, b), anisotropy),
+            addressU=_address_mode(data, b + 4), addressV=_address_mode(data, b + 8),
+            addressW=_address_mode(data, b + 12), mipLodBias=f32(data, b + 16),
+            maxAnisotropy=anisotropy, comparison=_comparison(data, b + 24),
+            border=BORDER_COLORS.get(u32(data, b + 28), 'colour %d' % u32(data, b + 28)),
+            minLod=f32(data, b + 32), maxLod=f32(data, b + 36), register=u32(data, b + 40),
+            space=u32(data, b + 44),
+            visibility=VISIBILITIES.get(u32(data, b + 48), 'vis %d' % u32(data, b + 48))))
+    return out
+
+def parse_static_samplers(stream: Buffer, names: Optional[Dict[int, str]] = None
+                          ) -> Dict[int, List[StaticSampler]]:
+    """Every root signature's static samplers, by the id that binds the signature.
+
+    A signature whose array does not fit its own blob gets an empty list rather than a guess: the count
+    `rootsig` prints and the rows here then disagree visibly instead of quietly.
+    """
+    if names is None:
+        names = rdc_chunkmap.load_chunk_names()
+    out: Dict[int, List[StaticSampler]] = {}
+    for rid, data in _root_sig_parts(stream, names):
+        out[rid] = _parse_static_samplers(data, u32(data, 0) if len(data) >= 24 else 0)
+    return out
+
+#: Where a `Device_CreateSampler` payload puts its description and how long it is. The payload opens with the
+#: same 16-byte `D3D12Descriptor` (type, heap, index) the view-writing chunks open with -- which is why the
+#: resource id sits at +16 for those and there is none for a sampler -- and what follows is
+#: `D3D12_SAMPLER_DESC2`: `d3d12_serialise.cpp` serialises that struct deliberately ("deliberately do not
+#: serialise D3D12_SAMPLER_DESC ... we serialise D3D12_SAMPLER_DESC2 here ... unconditionally"), 56 bytes
+#: with the trailing `Flags` word that newer serialise versions write and 52 without it.
+SAMPLER_DESC_AT = 16
+SAMPLER_DESC_SIZE = 52
+SAMPLER_DESC_SIZE_FLAGS = 56
+
+def _sampler_desc(blob: Buffer) -> Optional[SamplerDesc]:
+    """The `D3D12_SAMPLER_DESC2` of one `Device_CreateSampler`, or None when the payload is too short."""
+    if len(blob) < SAMPLER_DESC_AT + SAMPLER_DESC_SIZE:
+        return None
+    b = SAMPLER_DESC_AT
+    anisotropy = u32(blob, b + 20)
+    flags = (u32(blob, b + 52)
+             if len(blob) >= SAMPLER_DESC_AT + SAMPLER_DESC_SIZE_FLAGS else 0)
+    return SamplerDesc(
+        filter=u32(blob, b), filterText=filter_text(u32(blob, b), anisotropy),
+        addressU=_address_mode(blob, b + 4), addressV=_address_mode(blob, b + 8),
+        addressW=_address_mode(blob, b + 12), mipLodBias=f32(blob, b + 16), maxAnisotropy=anisotropy,
+        comparison=_comparison(blob, b + 24),
+        border=', '.join('%.3g' % f32(blob, b + 28 + 4 * i) for i in range(4)),
+        minLod=f32(blob, b + 44), maxLod=f32(blob, b + 48), flags=flags)
+
+@rdc_profile.timed('sampler slots')
+def parse_sampler_slots(stream: Buffer, names: Optional[Dict[int, str]] = None
+                        ) -> Dict[int, Dict[int, SamplerDesc]]:
+    """Every sampler a `Device_CreateSampler` writes into a heap: `heap -> {slot: values}`.
+
+    Only written slots are listed, which is the rule `parse_descriptor_heaps` follows for every other kind:
+    a heap is created with far more slots than any frame fills, and a slot nobody wrote holds an undefined
+    sampler rather than a default one.
+    """
+    if names is None:
+        names = rdc_chunkmap.load_chunk_names()
+    out: Dict[int, Dict[int, SamplerDesc]] = {}
+    for ch in iter_chunks(stream):
+        name = names.get(ch['id'], '')
+        if name not in DESCRIPTOR_KINDS or DESCRIPTOR_KINDS[name] != 'sampler':
+            continue
+        blob = chunk_payload(stream, ch)
+        if len(blob) < _DESCRIPTOR_WRITE_MIN:
+            continue
+        dst = _portable_handle(blob, len(blob) - 12)
+        desc = _sampler_desc(blob)
+        if dst is None or desc is None:
+            continue
+        out.setdefault(dst[0], {})[dst[1]] = desc
+    return out
 
 def parse_rdef(data: Buffer) -> List[ShaderBind]:
     """Decode the resource bindings of one `RDEF` part (`dxbc_container.cpp` `RDEFHeader`).
@@ -646,9 +812,13 @@ def _name_suffix(table: Dict[int, ResourceInfo], rid: int, width: int = 24) -> s
     return '[%s]' % entry['name'][:width]
 
 __all__ = [
+    'ADDRESS_MODES',
     'BIND_NAMES_SAMPLE',
     'BIND_NAMES_SUFFIX',
     'BIND_NAMES_VERSION',
+    'BORDER_COLORS',
+    'COMPARISON_FUNCS',
+    'FILTER_MODES',
     'PARAM_KINDS',
     'RANGE_KINDS',
     'RDEF_KINDS',
@@ -656,6 +826,8 @@ __all__ = [
     'REGISTER_LETTERS',
     'ROOT_FLAGS',
     'ROOT_VERSIONS',
+    'STATIC_SAMPLER_SIZE',
+    'STATIC_SAMPLER_SIZE_1_2',
     'VISIBILITIES',
     '_bind_name',
     '_descriptor_label',
@@ -668,10 +840,13 @@ __all__ = [
     '_root_param_label',
     '_root_param_what',
     'apply_descriptor_chunk',
+    'filter_text',
     'load_format_names',
     'parse_descriptor_heaps',
     'parse_rdef',
     'parse_resource_table',
     'parse_root_signatures',
+    'parse_sampler_slots',
+    'parse_static_samplers',
     'shader_bind_names',
 ]

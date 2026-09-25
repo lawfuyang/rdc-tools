@@ -43,12 +43,12 @@
       "bytes": 759784792,
       "sha256": "a9906c184dd9a599198ea3d9b1cc5dd222655a48d3c84e8187d93d7cc69a735a",
       "api": "D3D12",
-      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 16,564 chunks, 599 draw/dispatch calls, 704 markers, a 1.54 GB stream): the desktop half of the pair, the capture the report's pinned numbers come from (6994 events / 104 passes / 4843 resources / 115 findings from 21 detectors, AGENTS.md), and the first in this corpus whose shaders carry their own debug data",
+      "what": "an Unreal Engine desktop frame (RenderDoc 1.46, 16,564 chunks, 599 draw/dispatch calls, 704 markers, a 1.54 GB stream): the desktop half of the pair, the capture the report's pinned numbers come from (6994 events / 104 passes / 4843 resources / 121 findings from 22 detectors, AGENTS.md), and the first in this corpus whose shaders carry their own debug data",
       "known": [
         "its markers balance, every draw and dispatch sits inside one, and no call is zero-work: the three file-side detectors fire nowhere in this frame",
         "every shader it binds carries its own debug data -- 258 of 258 shader bindings have the `ILDB` part, where the two captures this key and `mobile-1` held before had none -- so `trace` **steps** here instead of refusing: `trace 2731 --vertex 0` runs 200 steps and names the source it is in (`BasePassVertexShader.dxil:3437`, `[Main > GetVertexFactoryIntermediates > GetSceneDataIntermediates > GetInstanceSceneData]`)",
         "a *pixel* step at the same event is refused, and the refusal is the engine's own reason: `no trace for pixel 640,360 at eid 2731 (ps, res166972): sourceDebugInfo is 1 / its shader loading log says: Found debug data in the shader` -- the debug data is there and it is the *invocation* the engine cannot run, because no fragment at that coordinate passed the depth test. The batch's exit code is **1** with a working trace inside it (the code is the worst line's, not the last one's), and both texts are pinned",
-        "the report over its bundle finds 115 things; one of them has had its cause followed to the frame and written down here, which is what turns that one from an observation into a verdict -- the other 114 stay unproven (REFERENCE §4.17)",
+        "the report over its bundle finds 121 things; one of them has had its cause followed to the frame and written down here, which is what turns that one from an observation into a verdict -- the other 120 stay unproven (REFERENCE §4.17)",
         {
           "detector": "dead-allocation",
           "what": "created and never used by any call",
@@ -96,7 +96,7 @@
         "its markers balance, every draw and dispatch sits inside one, and no call is zero-work: the three file-side detectors fire nowhere in this frame either",
         "its marker tree nests six deep and its pass names are the mobile renderer's own (MobileSceneRender, MobileBasePass, the sky-atmosphere LUT chain)",
         "every shader it binds carries its own debug data (196 of 196 shader bindings, the `ILDB` part), so a step succeeds here too; the pixel step is refused for the reason given in `desktop-1`'s third note, with this frame's own ids in it (`no trace for pixel 640,360 at eid 692 (ps, res1149844)`, `Found debug data in the shader`)",
-        "the report over its bundle finds 87 things, and **none of them has had its cause followed on these bytes yet**: the cause this key used to carry (`unbound-root-parameter`, the reflection-and-root-parameters namespace question) was established on the file it held before, and identity here is the SHA-256, so it does not carry over -- `desktop-1`'s `dead-allocation` verdict is the one verdict in this corpus re-established on the current bytes (REFERENCE §4.17)",
+        "the report over its bundle finds 88 things, and **none of them has had its cause followed on these bytes yet**: the cause this key used to carry (`unbound-root-parameter`, the reflection-and-root-parameters namespace question) was established on the file it held before, and identity here is the SHA-256, so it does not carry over -- `desktop-1`'s `dead-allocation` verdict is the one verdict in this corpus re-established on the current bytes (REFERENCE §4.17)",
         "2972 ids carry bound state, which is every id up to the frame's last event -- not a claim about how many are draws",
         "it is the *larger* file of the pair (809.4 MB against 759.8 MB) while doing the smaller amount of work (238 calls against 599), and its stream is the longest in this corpus"
       ],

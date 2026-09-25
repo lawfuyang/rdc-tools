@@ -600,9 +600,14 @@ target at all — an HDR frame, not a gap in the rules. That is the difference b
 the finding names what it keys off, so its silence is checkable too. The 601 MB `desktop-2` is dumped as a
 600-event window (`--max-events`), which the report's provenance states. From
 the capture's chunk stream: marker imbalance,
-unattributed draws, calls that can only draw nothing (0 vertices/indices/instances/groups), and a texture
+unattributed draws, calls that can only draw nothing (0 vertices/indices/instances/groups), a texture
 declared with a linear format read through its sRGB form — the resource table's `format` against the view
-formats the descriptor writes declare, which is the half of the format rule a bundle cannot answer. A detector
+formats the descriptor writes declare, which is the half of the format rule a bundle cannot answer — and
+`aliased-write`: placed resources sharing bytes while both are live, one written while the other is still
+read, with no aliasing barrier declaring the handover (the overlap arithmetic of §4.15; its recipe is
+`memory`, the one severity-table recipe that is an offline command). The `read-before-write` findings gain
+the chunk stream's own verdict in their evidence — the writer chain behind the flagged read
+(`provenance`, §4.15), which is what tells a static asset from an ordering bug. A detector
 that could not look — no usage lists with `--no-usage`, no chunk-name map at all (no source tree *and* an
 empty bundled table), a capture that has moved — is reported as *skipped* with the reason, because "clean"
 and "not checked" are
@@ -925,6 +930,36 @@ bound). Two things it prints rather than hides: a lifetime here is **capture-rel
 to the stream, so it ends at the frame's last use, and a resource older than the capture has no creation event at
 all — and a heap's recorded size need not agree with the totals beside it, because a texture's real size is not
 in the file.
+
+The aliasing section's second half is the **overlap** the packing candidates are the mirror of
+(`rdc_uses.alias_conflicts`): placed resources in one heap whose byte ranges `[offset, offset + size)` overlap
+*while both are live*, and among them the pairs where one is **written while the other is still read** — with,
+per conflict, whether an **aliasing barrier names the pair between the write and the read** (a declared handover,
+i.e. deliberate aliasing) or not (an overlap with no statement behind it). The writer side is the same
+`WRITER_HOWS` discipline the provenance walk uses — a draw's or dispatch's own target/UAV write, a clear, a copy
+or resolve destination; a barrier transition into a write state is a declaration, not contents arriving, and
+counting one as a write made the rule fire on nearly every pair of the enhanced-barrier captures. Measured on
+the corpus: `desktop-1` reports 12 overlapping-live pairs, 6 of them a conflict (the first,
+`DeferredShadowMaskTexture` cleared at chunk #15439 while `ScreenSpaceAO` is read at #15455, with no aliasing
+barrier between); `desktop-2`, which packs one heap hardest, 59 pairs and 45 conflicts. The same arithmetic is
+the report's **`aliased-write`** detector (§4.11) — it fires on the undeclared conflicts and names `memory` as
+its recipe, the one severity-table recipe that is an offline command.
+
+`provenance <rdc> <resId> [chunkIndex]` — the chain of writers behind one use (`rdc_uses.walk_provenance`).
+Backwards from the use at the given chunk index (the resource's **last** use when the index is omitted), each hop
+takes the nearest earlier use that wrote the resource or discarded it, and a copy or resolve destination
+**continues into the source** that payload names — the only two calls that say where contents came from. The walk
+ends at, in its own words: a **clear**; a **discard** (the frame declared the earlier contents stale, so the
+chain behind them is no longer the story); a draw's or dispatch's **own write** (`rtv`/`dsv`/`uav` — what that
+call read to produce it is its own binding list, `draws #N`); the resource's **creation** inside this frame
+(nothing wrote between there and the read); or **no writer in the frame** — the producer ran before the capture
+started. A barrier transition is never a step: it declares, it does not produce. Event ids strictly decrease
+from hop to hop, so the walk terminates by construction; subresources are not tracked, and a hop through a
+resolve or copy carries the payload's own words for which slice it moved. Exit 1 when the resource is unknown,
+has no use at the given chunk index, or the capture cannot be read. The report's `read-before-write` findings
+carry the same walk as a one-line verdict in their evidence (`add_provenance_verdicts`) — what tells a static
+asset (no writer in this frame at all) from an ordering bug (the write comes later) — and the verdict line says
+its own numbering (`chunk`), because a finding's eids are the engine's and the walk's are the file's (§8).
 
 ### 4.16 The A/B pair: `passdiff` and `replaydiff`
 

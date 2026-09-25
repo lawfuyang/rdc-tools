@@ -1,4 +1,5 @@
-"""Offline: who writes what and who reads it (`deps`), and what the frame's memory amounts to (`memory`).
+"""Offline: who writes what and who reads it (`deps`), what the frame's memory amounts to (`memory`),
+and the chain of writers behind one use (`provenance`).
 
 `rdc_detect_usage` asks the same questions of a replay driver's *bundle* -- the engine's own record of
 which events touched each resource. This module is the file-side twin: one walk of the chunk stream,
@@ -32,7 +33,9 @@ import rdc_chunkmap  # noqa: F401  (used qualified: the loader is called from in
 import rdc_resources  # noqa: F401  (used qualified: the loader is called from inside functions)
 import rdc_profile
 
-from typing import Dict, List, Optional, Sequence, Tuple, TypedDict
+import re
+
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, TypedDict
 
 # ---------------------------------------------------------------------------
 # What a binding, a barrier or a copy means for the resource it names.
@@ -77,6 +80,15 @@ LAYOUT_READS = frozenset({1, 5, 6, 7, 9, 11})
 #: frame marking calls it a partial write (`d3d12_command_list_wrap.cpp`). A sampler names nothing.
 ACCESS_BY_KIND: Dict[str, str] = {'cbv': 'read', 'srv': 'read', 'uav': 'read+write', 'rtv': 'write',
                                   'dsv': 'write'}
+
+#: The `how` values that mean a use *put* contents into the resource: a target or UAV binding at the
+#: draw or dispatch that used it, a clear, and the two destinations a copy or resolve fills. A barrier
+#: transition into a write state is deliberately not among them: it is the frame *declaring* what the
+#: next use will be, not a write, so it neither produces contents nor ends the provenance walk -- the
+#: real write is the use after it (the `uav` draw a transition to `UNORDERED_ACCESS` precedes, say).
+#: A `discard` is not here either, but it *ends* the walk on its own: what is read after a discard with
+#: no write between is what the discard said would not be read.
+WRITER_HOWS = frozenset({'rtv', 'dsv', 'uav', 'clear', 'copy-dst', 'resolve-dst'})
 
 def _access_of(write_bits: int, read_bits: int, word: int) -> str:
     """`read` / `write` / `read+write` for one state or access word, or '' when it names neither."""
@@ -359,6 +371,218 @@ def dep_flags(count: UseTally) -> List[str]:
         flags.append('discarded' if dead[1] else 'write-never-read')
     return flags
 
+
+# ---------------------------------------------------------------------------
+# `provenance`: the chain of writers behind one use.
+#
+# `read-before-write` says *that* nothing wrote a resource before something read it, not *what* it was
+# supposed to hold. The walk answers the second question as far as the file can: backwards from the read
+# through the writes the ledger already records, following copies and resolves into their sources
+# (the only two calls that name where contents came from), and stopping at the first thing that either
+# produced the contents outright -- a clear, or a draw's or dispatch's own write -- or ends the story:
+# a discard (the frame declared the earlier contents stale), the resource's creation inside this frame,
+# or no writer at all before the read. Event ids strictly decrease from step to step, so the walk
+# terminates by construction; a subresource dimension is deliberately not tracked, and a step that goes
+# through a resolve or a copy carries the payload's own words for which slice it moved.
+# ---------------------------------------------------------------------------
+class ProvenanceStep(NamedTuple):
+    """One hop of the walk: a write whose contents came from somewhere the walk continues into.
+
+    `source` is the resource the next hop walks into -- a copy's or resolve's source -- and 0 for a
+    step the walk stops after. `use` is the ledger's own row, so a printer has the call, the access
+    and the payload's own detail without this module re-deriving any of them.
+    """
+
+    rid: int
+    use: UseInfo
+    source: int
+
+
+class Provenance(NamedTuple):
+    """A whole walk: the use it started from, the hops, and why it stopped.
+
+    `end` is one of `clear`, `discard`, `call` (a draw's or dispatch's own write), `created` (the
+    resource is created inside this frame and nothing wrote it between there and the read) and
+    `no-writer` (no writer in the frame before the read -- the producer is outside this capture).
+    `end_use` is the use the walk stopped at (the clear, the discard or the writing call; None when
+    the end is a creation or the absence of one) and `end_rid` the resource that end is on -- the
+    walk's last hop, which a copy or resolve can move to another id.
+    """
+
+    rid: int
+    start: UseInfo
+    steps: List[ProvenanceStep]
+    end: str
+    end_rid: int
+    end_use: Optional[UseInfo]
+    end_eid: int
+
+
+def _previous_writer(record: ResourceUse, before: int) -> Optional[UseInfo]:
+    """The latest use of a resource before an event that either wrote it or discarded it."""
+    best: Optional[UseInfo] = None
+    for use in record['uses']:
+        if use['eid'] >= before:
+            break                       # uses are in stream order (walk_uses sorts them)
+        if use['how'] == 'discard' or (use['how'] in WRITER_HOWS
+                                       and use['access'] in ('write', 'read+write')):
+            best = use
+    return best
+
+
+def _copy_source(use: UseInfo) -> int:
+    """The resource id a copy's or resolve's own detail names as its source, 0 when it names none."""
+    found = re.match(r'from res(\d+)', use['detail'])
+    return int(found.group(1)) if found else 0
+
+
+def walk_provenance(ledger: UseLedger, rid: int, eid: int) -> Optional[Provenance]:
+    """The chain of writers behind the use of `rid` at `eid`, or None when that resource has no such use.
+
+    Each hop finds the nearest earlier use that wrote the resource the walk is under (or discarded it)
+    and, when that write is a copy or a resolve destination, continues into the source that payload
+    names. The end is the first thing the walk meets that produced the contents outright or ended the
+    story -- the classes on `Provenance.end`.
+    """
+    record = ledger['resources'].get(rid)
+    if record is None:
+        return None
+    start = next((u for u in record['uses'] if u['eid'] == eid), None)
+    if start is None:
+        return None
+    steps: List[ProvenanceStep] = []
+    here_rid, before = rid, eid
+    while True:
+        write = _previous_writer(ledger['resources'][here_rid], before)
+        if write is None:
+            created = ledger['resources'][here_rid]['created']
+            if not created:
+                return Provenance(rid=rid, start=start, steps=steps, end='no-writer',
+                                  end_rid=here_rid, end_use=None, end_eid=0)
+            return Provenance(rid=rid, start=start, steps=steps, end='created',
+                              end_rid=here_rid, end_use=None, end_eid=created)
+        if write['how'] == 'discard':
+            return Provenance(rid=rid, start=start, steps=steps, end='discard',
+                              end_rid=here_rid, end_use=write, end_eid=write['eid'])
+        if write['how'] == 'clear':
+            return Provenance(rid=rid, start=start, steps=steps, end='clear',
+                              end_rid=here_rid, end_use=write, end_eid=write['eid'])
+        if write['how'] in ('copy-dst', 'resolve-dst'):
+            source = _copy_source(write)
+            if not source or source not in ledger['resources']:
+                steps.append(ProvenanceStep(rid=here_rid, use=write, source=0))
+                return Provenance(rid=rid, start=start, steps=steps, end='lost',
+                                  end_rid=here_rid, end_use=write, end_eid=write['eid'])
+            steps.append(ProvenanceStep(rid=here_rid, use=write, source=source))
+            here_rid, before = source, write['eid']
+            continue
+        return Provenance(rid=rid, start=start, steps=steps, end='call',
+                          end_rid=here_rid, end_use=write, end_eid=write['eid'])
+
+
+def _end_text(ledger: UseLedger, resources: Dict[int, ResourceInfo], walk: Provenance) -> str:
+    """Why the walk stopped, in the words the report and the command share."""
+    if walk.end == 'no-writer':
+        note = ''
+        created = ledger['resources'][walk.end_rid]['created']
+        if created and created > walk.start['eid']:
+            note = ' (the capture creates it later, at #%d)' % created
+        return 'no writer in the frame before the read%s (the producer is outside this capture)' % note
+    if walk.end == 'created':
+        placement = ledger['resources'][walk.end_rid]['placement']
+        label = '' if walk.end_rid == walk.rid else ' of %s' % _label(resources, walk.end_rid)
+        return ('the creation of %s at #%d (%s): created inside this frame, and nothing the stream '
+                'shows wrote it before the read' % (label or 'the resource', walk.end_eid, placement))
+    assert walk.end_use is not None
+    if walk.end == 'discard':
+        return ('a discard at #%d (%s): the frame declared the earlier contents stale, and nothing '
+                'wrote after it before the read' % (walk.end_eid, walk.end_use['call']))
+    if walk.end == 'call':
+        return ('a %s write by the call at #%d (%s): what that call read to produce it is its own '
+                'binding list (`draws #%d`)'
+                % (walk.end_use['how'], walk.end_eid, walk.end_use['call'], walk.end_eid))
+    if walk.end == 'clear':
+        return 'a clear at #%d (%s): the chain starts at this write' % (walk.end_eid,
+                                                                       walk.end_use['call'])
+    return 'a copy or resolve whose own detail (%s) named no source id' % walk.end_use['detail']
+
+
+def provenance_lines(ledger: UseLedger, resources: Dict[int, ResourceInfo],
+                     walk: Provenance) -> List[str]:
+    """The walk as the lines `provenance` prints: one per hop, then the end in its own words."""
+    label = _label(resources, walk.rid)
+    out = ['%s: %s at #%d (%s, %s)' % (label, walk.start['access'], walk.start['eid'],
+                                       walk.start['how'], walk.start['call'])]
+    for step in walk.steps:
+        if step.source:
+            out.append('  written by #%d %s (%s, %s): the walk continues into %s'
+                       % (step.use['eid'], step.use['call'], step.use['how'], step.use['detail'],
+                          _label(resources, step.source)))
+        else:
+            out.append('  written by #%d %s (%s, %s)' % (step.use['eid'], step.use['call'],
+                                                         step.use['how'], step.use['detail']))
+    out.append('ends at %s' % _end_text(ledger, resources, walk))
+    return out
+
+
+def provenance_summary(ledger: UseLedger, resources: Dict[int, ResourceInfo], rid: int,
+                       eid: int) -> Optional[str]:
+    """The walk as the one line the report appends to a `read-before-write` finding, or None.
+
+    `None` is for a resource the file-side ledger does not know (the bundle and the stream can
+    disagree about ids): the report keeps the finding as it was rather than printing a verdict about
+    something it could not see. Hops after the third are counted rather than listed -- the verdict is
+    one line, and the command prints the whole path.
+    """
+    walk = walk_provenance(ledger, rid, eid)
+    if walk is None:
+        return None
+    hops: List[str] = []
+    for step in walk.steps[:3]:
+        if step.source:
+            hops.append('a %s at #%d from %s' % (step.use['how'], step.use['eid'],
+                                                 _label(resources, step.source)))
+    if len(walk.steps) > 3:
+        hops.append('%d more hop(s)' % (len(walk.steps) - 3))
+    through = (' through ' + ', '.join(hops)) if hops else ''
+    return 'the chunk stream\'s chain behind that read%s ends at %s' % (through,
+                                                                       _end_text(ledger, resources,
+                                                                                 walk))
+
+
+def cmd_provenance(path: str, rid: int, eid: int = 0) -> int:
+    """Print the chain of writers behind one use of a resource: `provenance <rdc> <resId> [chunkIndex]`.
+
+    The walk is `walk_provenance` over the same ledger `deps` and `memory` read, and the chunk index
+    is that numbering (`draws` prints it). Without a chunk index the walk starts from the resource's
+    *last* use -- the end of its life in this frame. Exit 1 when the resource is unknown, has no use
+    at the given chunk index, or the capture could not be read, so a script can tell an empty chain
+    from no question asked.
+    """
+    try:
+        ledger, resources, _how = _deps_ledger(path)
+    except (FrameError, OSError) as exc:
+        print('error: %s' % exc)
+        return 1
+    record = ledger['resources'].get(rid)
+    if record is None or not record['uses']:
+        print('no use of res%d is recorded in this capture (the resource table names %d ids; only '
+              'ones the stream shows a use for are here)' % (rid, len(resources)))
+        return 1
+    if eid:
+        walk = walk_provenance(ledger, rid, eid)
+        if walk is None:
+            window = record['uses'][0]['eid'], record['uses'][-1]['eid']
+            print('res%d has no use at #%d (its uses run #%d..#%d)' % (rid, eid, window[0], window[1]))
+            return 1
+    else:
+        start = record['uses'][-1]
+        walk = walk_provenance(ledger, rid, start['eid'])
+        assert walk is not None            # the use exists by construction
+    for line in provenance_lines(ledger, resources, walk):
+        print(line)
+    return 0
+
 def resource_bytes(info: Optional[ResourceInfo]) -> Tuple[int, bool]:
     """`(bytes, estimated)` for a resource: a buffer's own size, a texture's pixels x 4.
 
@@ -560,6 +784,126 @@ def _peak_live(windows: Sequence[Tuple[int, int, int]], end: int) -> Tuple[int, 
             peak, at = live, eid
     return peak, at
 
+
+# ---------------------------------------------------------------------------
+# Aliased placements: the pairs the heap's own numbers say share bytes.
+#
+# The frame's aliasing barriers say where memory is *handed over*; the placement rows say where each
+# resource *lives*. The second question -- which resources' byte ranges overlap while both are live --
+# is the two joined, and it is the question the barriers alone cannot answer: an overlap is only a
+# hazard when one side is written while the other is still being read, and only deliberate when an
+# aliasing barrier names the pair between those two uses. The extents are the same pixels-x-4 estimate
+# every memory figure here uses (a capture records no texture byte count), so a pair is stated with its
+# `~` rather than claimed as exact bytes.
+# ---------------------------------------------------------------------------
+class AliasPair(NamedTuple):
+    """Two placed resources in one heap whose byte ranges overlap while both are live.
+
+    `overlap` is the shared span in bytes (`~` when `estimated`, because a texture's extent is the
+    pixels-x-4 figure), `first`/`last` the window both are live in, and `conflicts` the
+    `(writer, reader, write, read, barrier)` rows -- one resource written while the other is still
+    being read, with the aliasing barrier that declares the handover between the two (0 when none).
+    """
+
+    heap: int
+    a: int
+    b: int
+    offset_a: int
+    offset_b: int
+    overlap: int
+    estimated: bool
+    first: int
+    last: int
+    conflicts: List[Tuple[int, int, UseInfo, UseInfo, int]]
+
+
+def _write_while_read(one: UseTally, two: UseTally) -> Optional[Tuple[UseInfo, UseInfo]]:
+    """`(write of one, later read of two)` when one is written while two is still being read.
+
+    The write side is `WRITER_HOWS` only, the same discipline the provenance walk uses: a barrier
+    transition into a write state is the frame *declaring* the next use, not contents arriving, and
+    counting it as a write made this rule fire on nearly every pair of the enhanced-barrier captures
+    -- declarations are constant, writes are events. The read side keeps every read-classified use,
+    a transition to a read state included: it is the frame stating the resource is about to be
+    consumed, which is exactly the window a real write must not land in.
+    """
+    for write in one['writes']:
+        if write['how'] not in WRITER_HOWS:
+            continue
+        if not two['first'] <= write['eid'] <= two['last']:
+            continue
+        for read in two['reads']:
+            if read['eid'] >= write['eid']:
+                return write, read
+    return None
+
+
+def _pair_conflicts(a: int, b: int, tally_a: UseTally, tally_b: UseTally,
+                    barriers: Sequence[int]) -> List[Tuple[int, int, UseInfo, UseInfo, int]]:
+    """One row per direction a pair conflicts in, with the aliasing barrier between write and read.
+
+    The barrier qualifies the conflict rather than excusing it: a handover declared between the write
+    and the read is the frame doing deliberate aliasing, and one that is missing is the same overlap
+    with no statement behind it. The window searched is `[write, read]` -- a barrier *before* the write
+    handed the memory over too early to explain a later write.
+    """
+    out: List[Tuple[int, int, UseInfo, UseInfo, int]] = []
+    for writer, reader, one, two in ((a, b, tally_a, tally_b), (b, a, tally_b, tally_a)):
+        found = _write_while_read(one, two)
+        if found is None:
+            continue
+        write, read = found
+        declared = next((eid for eid in barriers if write['eid'] < eid <= read['eid']), 0)
+        out.append((writer, reader, write, read, declared))
+    return out
+
+
+def alias_conflicts(ledger: UseLedger, resources: Dict[int, ResourceInfo],
+                    rows: Dict[int, UseTally], limit: int = 0) -> List[AliasPair]:
+    """Every pair of placed resources whose byte ranges overlap while both are live, conflicted first.
+
+    Ranges are `[offset, offset + size)` inside the shared heap, with a sizeless resource counted at
+    one byte rather than skipped -- two resources at the same offset overlap however little is known
+    about them. Pairs whose use windows do not overlap are *not* returned: they are the packing
+    candidates `memory` already prints from the other side. The order is deterministic -- a pair with
+    conflicts first, then by the span they share, then by id.
+    """
+    barriers: Dict[Tuple[int, int], List[int]] = {}
+    for eid, before, after in ledger['aliases']:
+        barriers.setdefault((min(before, after), max(before, after)), []).append(eid)
+    created = {rid: record for rid, record in ledger['resources'].items()
+               if record['created'] and record['placement'] == 'placed'}
+    out: List[AliasPair] = []
+    seen: set = set()
+    for heap in sorted({record['heap'] for record in created.values()}):
+        in_heap = sorted(rid for rid, record in created.items() if record['heap'] == heap)
+        for i, a in enumerate(in_heap):
+            for b in in_heap[i + 1:]:
+                if (a, b) in seen:
+                    continue
+                seen.add((a, b))
+                row_a, row_b = rows.get(a), rows.get(b)
+                if row_a is None or row_b is None or not row_a['first'] or not row_b['first']:
+                    continue
+                first, last = max(row_a['first'], row_b['first']), min(row_a['last'], row_b['last'])
+                if first > last:
+                    continue                    # both live never: the packing side, not this one
+                offset_a = created[a]['offset']
+                offset_b = created[b]['offset']
+                size_a = max(resource_bytes(resources.get(a))[0], 1)
+                size_b = max(resource_bytes(resources.get(b))[0], 1)
+                overlap = min(offset_a + size_a, offset_b + size_b) - max(offset_a, offset_b)
+                if overlap <= 0:
+                    continue                    # ranges do not overlap: sub-allocated, not aliased
+                estimated = resource_bytes(resources.get(a))[1] or resource_bytes(resources.get(b))[1]
+                declared = barriers.get((a, b), [])
+                out.append(AliasPair(heap=heap, a=a, b=b, offset_a=offset_a, offset_b=offset_b,
+                                     overlap=overlap, estimated=estimated,
+                                     first=first, last=last,
+                                     conflicts=_pair_conflicts(a, b, row_a, row_b, declared)))
+    out.sort(key=lambda pair: (not pair.conflicts, -pair.overlap, pair.a, pair.b))
+    return out[:limit] if limit else out
+
 def cmd_memory(path: str, limit: int = 20) -> None:
     """The frame's memory: placement, capture-relative lifetimes, aliasing and what nothing reads.
 
@@ -641,6 +985,30 @@ def cmd_memory(path: str, limit: int = 20) -> None:
             print('    #%d %s -> %s' % (eid, _label(resources, before), _label(resources, after)))
     else:
         print('  no aliasing barrier in this capture')
+    pairs = alias_conflicts(ledger, resources, rows)
+    conflicted = [p for p in pairs if p.conflicts]
+    if pairs:
+        print('  overlapping placements: %d pair(s) whose byte ranges overlap while both are live '
+              '(%d of them a conflict: one is written while the other is still read)'
+              % (len(pairs), len(conflicted)))
+        for pair in pairs[:limit or len(pairs)]:
+            print('    %s at 0x%x and %s at 0x%x in heap%d: %s shared, both live #%d..#%d'
+                  % (_label(resources, pair.a), pair.offset_a, _label(resources, pair.b),
+                     pair.offset_b, pair.heap, _size_text(pair.overlap, pair.estimated),
+                     pair.first, pair.last))
+            for writer, reader, write, read, declared in pair.conflicts:
+                print('      %s written #%d (%s, %s) while %s read #%d (%s, %s) -- %s'
+                      % (_label(resources, writer), write['eid'], write['how'], write['call'],
+                         _label(resources, reader), read['eid'], read['how'], read['call'],
+                         'aliasing barrier #%d declares the handover' % declared if declared
+                         else 'no aliasing barrier declares the handover'))
+        if any(pair.estimated for pair in pairs[:limit or len(pairs)]):
+            print('  (pair extents use the pixels-x-4 estimate: a capture records no texture bytes)')
+        if len(pairs) > (limit or len(pairs)):
+            print('  ... %d more pair(s) (maxRows=0 shows all)' % (len(pairs) - (limit or len(pairs))))
+    else:
+        print('  overlapping placements: none -- no pair of placed resources has overlapping ranges '
+              'while both are live')
     placed = [rid for rid, record in created.items() if record['placement'] == 'placed']
     lonely: List[int] = []
     scored: List[Tuple[int, int, List[int], int, bool, int, int, List[Tuple[int, int, int]]]] = []
@@ -741,24 +1109,36 @@ __all__ = [
     'LAYOUT_WRITES',
     'STATE_READS',
     'STATE_WRITES',
+    'AliasPair',
+    'Provenance',
+    'ProvenanceStep',
     'UseTally',
+    'WRITER_HOWS',
     '_alias_candidates',
     '_bind_uses',
     '_deps_ledger',
     '_group_bytes',
     '_label',
+    '_pair_conflicts',
     '_peak_live',
+    '_previous_writer',
     '_rows',
     '_size_text',
     '_unattributed',
     '_use',
     '_va_resource',
+    '_write_while_read',
+    'alias_conflicts',
     'cmd_deps',
     'cmd_memory',
+    'cmd_provenance',
     'dep_flags',
+    'provenance_lines',
+    'provenance_summary',
     'read_before_write',
     'resource_bytes',
     'tally',
+    'walk_provenance',
     'walk_uses',
     'write_never_read',
 ]

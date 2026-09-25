@@ -472,6 +472,131 @@ class TestFindings(UsesCase):
         self.assertEqual(R._peak_live([(0, 0, 100), (1, 5, 200)], 50)[0], 300)
 
 
+# =========================================================================== provenance
+class TestProvenance(UsesCase):
+    """The writer chain behind one use: copies and resolves continue, everything else ends the walk."""
+
+    def copied_chain(self) -> R.UseLedger:
+        """A clear fills res400, a copy moves it into res401, a dispatch reads res401."""
+        return self.ledger(
+            self.buffer(400, size=1024),
+            self.buffer(401, size=1024),
+            self.ch('List_ClearRenderTargetView', F.pl_clear(7, 400)),
+            self.ch('List_CopyBufferRegion', F.pl_copy_buffer(7, 401, 0, 400, 0, 1024)),
+            self.ch('List_SetComputeRootShaderResourceView', F.pl_root_view(8, 0, 401, 0)),
+            self.ch('List_Dispatch', F.pl_dispatch(8, 1, 1, 1)))
+
+    def test_a_read_of_a_copied_buffer_walks_back_to_the_clear(self):
+        walk = R.walk_provenance(self.copied_chain(), 401, 6)
+        assert walk is not None
+        self.assertEqual(walk.end, 'clear')
+        self.assertEqual(walk.end_eid, 3)
+        self.assertEqual([step.source for step in walk.steps], [400])
+        self.assertEqual(walk.steps[0].use['eid'], 4)       # the copy is the one hop
+        self.assertEqual(walk.steps[0].use['how'], 'copy-dst')
+
+    def test_a_target_write_by_a_draw_ends_the_walk(self):
+        ledger = self.ledger(
+            self.ch('List_OMSetRenderTargets', F.pl_omset(7, [300])),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),
+            self.ch('List_ResourceBarrier',
+                    F.pl_resources_barrier(7, [('transition', 300, 0, 0x4, 0x80)])),
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 300, 0)),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)))
+        walk = R.walk_provenance(ledger, 300, 5)
+        assert walk is not None
+        self.assertEqual(walk.end, 'call')
+        self.assertEqual(walk.end_eid, 2)                   # the draw, not the barrier
+        assert walk.end_use is not None
+        self.assertEqual((walk.end_use['how'], walk.end_use['call']), ('rtv', 'List_DrawIndexedInstanced'))
+        self.assertEqual(walk.steps, [])
+
+    def test_a_barrier_transition_is_never_a_writer(self):
+        # the transition to RenderTarget at #3 declares what the *next* draw does; the walk keeps
+        # going back past it to the draw that wrote before it
+        ledger = self.ledger(
+            self.ch('List_OMSetRenderTargets', F.pl_omset(7, [300])),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),
+            self.ch('List_ResourceBarrier',
+                    F.pl_resources_barrier(7, [('transition', 300, 0, 0x80, 0x4)])))
+        walk = R.walk_provenance(ledger, 300, 3)
+        assert walk is not None
+        self.assertEqual((walk.end, walk.end_eid), ('call', 2))
+
+    def test_no_writer_before_the_read_is_its_own_end(self):
+        ledger = self.ledger(
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 100, 0)),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)))
+        walk = R.walk_provenance(ledger, 100, 2)
+        assert walk is not None
+        self.assertEqual(walk.end, 'no-writer')
+        self.assertEqual(walk.end_eid, 0)
+
+    def test_a_discard_between_the_write_and_the_read_ends_the_walk(self):
+        # what is read after a discard with no write between is what the discard said would not be
+        # read, so the chain behind the earlier write is not the story any more
+        ledger = self.ledger(
+            self.buffer(200, size=1024),
+            self.ch('List_SetComputeRootUnorderedAccessView', F.pl_root_view(7, 0, 200, 0)),
+            self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1)),
+            self.ch('List_DiscardResource', F.pl_discard(7, 200)),
+            self.ch('List_SetComputeRootShaderResourceView', F.pl_root_view(7, 0, 200, 0)),
+            self.ch('List_Dispatch', F.pl_dispatch(7, 1, 1, 1)))
+        walk = R.walk_provenance(ledger, 200, 6)
+        assert walk is not None
+        self.assertEqual(walk.end, 'discard')
+        self.assertEqual(walk.end_eid, 4)
+
+    def test_the_creation_ends_a_walk_that_finds_no_write(self):
+        # a placed resource the frame only transitions and reads: the walk stops at its creation,
+        # because contents before the first write are what the creation left there
+        ledger = self.ledger(
+            self.ch('Device_CreatePlacedResource',
+                    F.pl_placed_resource(300, F.pl_resource_desc(1, width=4096), heap=77,
+                                         heap_offset=0)),
+            self.ch('Device_CreateHeap', F.pl_create_heap(77, 1048576)),
+            self.ch('List_ResourceBarrier',
+                    F.pl_resources_barrier(7, [('transition', 300, 0, 0, 0x4)])),
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 300, 0)),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)))
+        walk = R.walk_provenance(ledger, 300, 5)
+        assert walk is not None
+        self.assertEqual((walk.end, walk.end_eid), ('created', 1))
+
+    def test_a_walk_through_a_resolve_continues_into_its_source(self):
+        ledger = self.ledger(
+            self.ch('List_ClearRenderTargetView', F.pl_clear(7, 500)),
+            self.ch('List_ResolveSubresource', F.pl_resolve(7, 501, 500, src_sub=2)),
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 501, 0)),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)))
+        walk = R.walk_provenance(ledger, 501, 4)
+        assert walk is not None
+        self.assertEqual([step.source for step in walk.steps], [500])
+        self.assertIn('subresource 2', walk.steps[0].use['detail'])
+
+    def test_an_unknown_resource_or_event_names_no_chain(self):
+        ledger = self.copied_chain()
+        self.assertIsNone(R.walk_provenance(ledger, 999, 1))
+        self.assertIsNone(R.walk_provenance(ledger, 401, 99))
+
+    def test_the_lines_and_the_summary_say_the_same_thing(self):
+        ledger = self.copied_chain()
+        resources = {}                          # no names: the ids print bare, which is the point
+        walk = R.walk_provenance(ledger, 401, 6)
+        assert walk is not None
+        lines = R.provenance_lines(ledger, resources, walk)
+        self.assertIn('res401: read at #6 (srv, List_Dispatch)', lines[0])
+        self.assertIn('written by #4 List_CopyBufferRegion (copy-dst, from res400 bytes=1024): '
+                      'the walk continues into res400', lines[1])
+        self.assertIn('ends at a clear at #3 (List_ClearRenderTargetView): the chain starts at this '
+                      'write', lines[-1])
+        summary = R.provenance_summary(ledger, resources, 401, 6)
+        assert summary is not None
+        self.assertEqual(summary, "the chunk stream's chain behind that read through a copy-dst at #4 "
+                                  "from res400 ends at a clear at #3 (List_ClearRenderTargetView): the "
+                                  "chain starts at this write")
+
+
 # =========================================================================== deps
 class TestCmdDeps(UsesCase):
     def frame(self) -> Sequence[bytes]:
@@ -631,6 +756,126 @@ class TestCmdMemory(UsesCase):
         out = self.out(R.cmd_memory, self.cap(*chunks), 5)
         self.assertIn('1 heap(s) hold one resource each', out)
         self.assertNotIn('heap88:', out)
+
+    def test_overlapping_placements_stay_quiet_when_the_ranges_do_not_overlap(self):
+        # the frame() fixtures' two placed resources sit side by side, not on top of each other:
+        # they are the packing section's candidates, and the overlap half says so once
+        out = self.out(R.cmd_memory, self.cap(*self.frame()), 5)
+        self.assertIn('overlapping placements: none -- no pair of placed resources has overlapping '
+                      'ranges while both are live', out)
+
+    def conflict_frame(self, with_barrier: bool = False) -> Sequence[bytes]:
+        """Two placed resources whose ranges overlap while both are live, and one written while the
+        other is still read: 101 at 0 (2 MB), 102 at 0x100000 (1 MB) -- 1 MB shared."""
+        chunks: list[bytes] = [
+            self.ch('Device_CreateHeap', F.pl_create_heap(77, 4194304)),                            # 1
+            self.ch('Device_CreatePlacedResource',
+                    F.pl_placed_resource(101, F.pl_resource_desc(1, width=2097152), heap=77,
+                                         heap_offset=0)),                                           # 2
+            self.ch('Device_CreatePlacedResource',
+                    F.pl_placed_resource(102, F.pl_resource_desc(1, width=1048576), heap=77,
+                                         heap_offset=0x100000)),                                    # 3
+            self.ch('List_OMSetRenderTargets', F.pl_omset(7, [101])),                               # 4
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),              # 5
+            self.ch('List_OMSetRenderTargets', F.pl_omset(8, [102])),                               # 6
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(8, 3, 1, 0, 0, 0)),              # 7
+        ]
+        if with_barrier:
+            chunks.append(self.ch('List_ResourceBarrier',
+                                  F.pl_resources_barrier(7, [('aliasing', 101, 102)])))             # 8
+        chunks += [
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 101, 0)),        # 8/9
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),              # 9/10
+        ]
+        return chunks
+
+    def test_an_overlap_written_while_the_other_is_read_is_reported(self):
+        out = self.out(R.cmd_memory, self.cap(*self.conflict_frame()), 5)
+        self.assertIn('overlapping placements: 1 pair(s) whose byte ranges overlap while both are '
+                      'live (1 of them a conflict: one is written while the other is still read)', out)
+        self.assertIn('res101 at 0x0 and res102 at 0x100000 in heap77: 1.0 MB shared, both live '
+                      '#7..#7', out)
+        self.assertIn('res102 written #7 (rtv, List_DrawIndexedInstanced) while res101 read #9 '
+                      '(srv, List_DrawIndexedInstanced) -- no aliasing barrier declares the handover', out)
+
+    def test_an_aliasing_barrier_between_the_uses_is_named(self):
+        out = self.out(R.cmd_memory, self.cap(*self.conflict_frame(with_barrier=True)), 5)
+        self.assertIn('res102 written #7 (rtv, List_DrawIndexedInstanced) while res101 read #10 '
+                      '(srv, List_DrawIndexedInstanced) -- aliasing barrier #8 declares the handover', out)
+
+    def test_the_conflicted_pairs_sort_first_and_the_cap_applies(self):
+        # a second, harmless pair shares bytes while both are read at the same event, and the cap of
+        # 1 keeps only the conflict
+        chunks = list(self.conflict_frame()) + [
+            self.ch('Device_CreatePlacedResource',
+                    F.pl_placed_resource(105, F.pl_resource_desc(1, width=512), heap=88,
+                                         heap_offset=0)),
+            self.ch('Device_CreateHeap', F.pl_create_heap(88, 1048576)),
+            self.ch('Device_CreatePlacedResource',
+                    F.pl_placed_resource(106, F.pl_resource_desc(1, width=512), heap=88,
+                                         heap_offset=0)),
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 105, 0)),
+            self.ch('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 1, 106, 0)),
+            self.ch('List_DrawIndexedInstanced', F.pl_draw_indexed(7, 3, 1, 0, 0, 0)),
+        ]
+        out = self.out(R.cmd_memory, self.cap(*chunks), 1)
+        self.assertIn('overlapping placements: 2 pair(s) whose byte ranges overlap while both are '
+                      'live (1 of them a conflict: one is written while the other is still read)', out)
+        self.assertIn('res101 at 0x0 and res102 at 0x100000', out)
+        self.assertNotIn('res105', out)
+        self.assertIn('... 1 more pair(s) (maxRows=0 shows all)', out)
+
+        unbounded = self.out(R.cmd_memory, self.cap(*chunks), 0)
+        self.assertIn('res105 at 0x0 and res106 at 0x0 in heap88', unbounded)
+        self.assertNotIn('... 1 more pair(s)', unbounded)
+
+
+# =========================================================================== provenance, as a command
+class TestCmdProvenance(UsesCase):
+    def frame(self) -> Sequence[bytes]:
+        return [
+            self.buffer(400, size=1024),                                               # 1
+            self.buffer(401, size=1024),                                               # 2
+            self.ch('List_ClearRenderTargetView', F.pl_clear(7, 400)),                 # 3
+            self.ch('List_CopyBufferRegion', F.pl_copy_buffer(7, 401, 0, 400, 0, 1024)),   # 4
+            self.ch('List_SetComputeRootShaderResourceView', F.pl_root_view(8, 0, 401, 0)),  # 5
+            self.ch('List_Dispatch', F.pl_dispatch(8, 1, 1, 1)),                       # 6
+        ]
+
+    def test_the_path_prints_from_the_given_chunk_index(self):
+        out = self.out(R.cmd_provenance, self.cap(*self.frame()), 401, 6)
+        self.assertIn('res401: read at #6 (srv, List_Dispatch)', out)
+        self.assertIn('written by #4 List_CopyBufferRegion (copy-dst, from res400 bytes=1024): '
+                      'the walk continues into res400', out)
+        self.assertIn('ends at a clear at #3 (List_ClearRenderTargetView)', out)
+
+    def test_without_a_chunk_index_the_walk_starts_at_the_last_use(self):
+        out = self.out(R.cmd_provenance, self.cap(*self.frame()), 401, 0)
+        self.assertIn('res401: read at #6 (srv, List_Dispatch)', out)
+
+    def test_an_unknown_resource_or_event_is_an_error_not_an_empty_chain(self):
+        self.assertEqual(R.cmd_provenance(self.cap(*self.frame()), 999), 1)
+        self.assertEqual(R.cmd_provenance(self.cap(*self.frame()), 401, 5), 1)
+        out = self.out(R.cmd_provenance, self.cap(*self.frame()), 401, 5)
+        self.assertIn('res401 has no use at #5 (its uses run #4..#6)', out)
+
+    def test_the_dispatch_accepts_the_res_prefix_and_exits_with_the_command(self):
+        import unittest.mock as mock
+        path = self.cap(*self.frame())
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'provenance', path, 'res401', '6']):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                with self.assertRaises(SystemExit) as caught:
+                    R.main()
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn('ends at a clear at #3', buf.getvalue())
+        with mock.patch.object(sys, 'argv', ['rdc_analysis.py', 'provenance', path, 'bogus']):
+            err = io.StringIO()
+            with contextlib.redirect_stdout(err):
+                with self.assertRaises(SystemExit) as caught:
+                    R.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn('usage: rdc_analysis.py provenance', err.getvalue())
 
 
 if __name__ == '__main__':

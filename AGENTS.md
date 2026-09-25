@@ -76,8 +76,8 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
   the entry module's copy while the code reads the owner's is how two stream-detector tests silently passed
   their setup and found nothing.
 - A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
-  `desktop-1` must still print `6994 events / 104 passes / 4843 resources / 115 findings from
-  21 detectors` and `engine   : Unreal Engine (108 concept(s) by name, 1 question(s))`, and the driver's text
+  `desktop-1` must still print `6994 events / 104 passes / 4843 resources / 121 findings from
+  22 detectors` and `engine   : Unreal Engine (108 concept(s) by name, 1 question(s))`, and the driver's text
   output must stay byte-identical. (6,994 is every id with bound state up to the frame's last event; the
   sweep that produced 16,857 also collected the clamped tail past it, which is gone since REFERENCE §9's
   sweep bound.)

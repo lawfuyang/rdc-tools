@@ -372,7 +372,7 @@ class TestReportDetectors(BundleCase):
                           'load-instead-of-clear', 'dead-compute', 'depth-logic', 'empty-scissor',
                           'stencil-without-writer', 'blend-in-opaque-pass', 'format-units-suspicion',
                           'mismatched-msaa', 'marker-imbalance', 'unattributed-draws', 'zero-work',
-                          'srgb-view-mismatch'],
+                          'srgb-view-mismatch', 'aliased-write'],
                           'every detector is listed, whether it ran or was skipped')
         runs = {run['detector']: run for run in self.document(bundle)['detectors']}
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):

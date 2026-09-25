@@ -9,10 +9,11 @@
     "events": 2972,
     "passes": 28,
     "resources": 4304,
-    "findings": 87,
-    "detectors": 21
+    "findings": 88,
+    "detectors": 22
   },
   "findings": {
+    "aliased-write": 1,
     "all-zero-constant-block": 39,
     "dead-allocation": 21,
     "depth-logic": 1,
@@ -34,9 +35,9 @@
   },
   "document": "selfab.json",
   "why": [
-    "the report counts are the ones this entry states (2972 events / 28 passes / 4304 resources / 87 findings from 21 detectors): the mobile frame is the smaller of the two in work done -- 11,923 chunks and 238 draw/dispatch calls against the desktop frame's 16,857 and 599 -- while holding nearly as many resources (4,304 against 4,843)",
-    "the file-side three fire nowhere: its markers balance, every draw and dispatch sits inside one, and no call is zero-work",
-    "the findings histogram is what turns \"87 findings\" into \"87 findings of these seven kinds\". Three detectors that fired on the file this key held before are absent rather than listed at 0 -- `binding-kind-mismatch` (was 1), `dead-compute` (was 4) and `load-instead-of-clear` (was 1) -- and three fire here that its label did not mention at all: `dead-allocation`, `depth-logic` and `unbound-table-slot`. A histogram row is a claim either way, which is why a detector that stops firing is a mismatch rather than a smaller total",
+    "the report counts are the ones this entry states (2972 events / 28 passes / 4304 resources / 88 findings from 22 detectors): the mobile frame is the smaller of the two in work done -- 11,923 chunks and 238 draw/dispatch calls against the desktop frame's 16,857 and 599 -- while holding nearly as many resources (4,304 against 4,843). The 22nd detector is `aliased-write` (landed 2026-09-25, the report half of `memory`'s overlapping placements, REFERENCE 4.15) and it fires once here, like it does on `desktop-1`",
+    "the file-side rules that can fire silently stay at zero where they must: its markers balance, every draw and dispatch sits inside one, and no call is zero-work",
+    "the findings histogram is what turns \"88 findings\" into \"88 findings of these eight kinds\". Three detectors that fired on the file this key held before are absent rather than listed at 0 -- `binding-kind-mismatch` (was 1), `dead-compute` (was 4) and `load-instead-of-clear` (was 1) -- and three fire here that its label did not mention at all: `dead-allocation`, `depth-logic` and `unbound-table-slot`. A histogram row is a claim either way, which is why a detector that stops firing is a mismatch rather than a smaller total",
     "the self-A/B compares this bundle with itself, so every one of its nine numbers must be 0 (or `same` = 28 for the pass count): it is the net for the analyser, and the only check here that would catch `replaydiff` itself drifting"
   ]
 }

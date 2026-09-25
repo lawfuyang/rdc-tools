@@ -29,6 +29,10 @@ python rdc_analysis.py formats  <rdc>          # which formats the file holds, a
   python rdc_analysis.py draws    <rdc> [maxDraws]
   python rdc_analysis.py deps     <rdc> [maxResources] [table|dot|mermaid]
                                                          # who writes what, who reads it (offline)
+  python rdc_analysis.py provenance <rdc> <resId> [chunkIndex]
+                                                         # the chain of writers behind one use, back
+                                                         #   through copies and resolves to the clear,
+                                                         #   the creating call or no writer at all
   python rdc_analysis.py memory   <rdc> [maxRows]        # placement, capture-relative lifetimes,
                                                          #   aliasing pairs and never-read bytes
   python rdc_analysis.py hazards  <rdc> [maxRows] [--format table|csv|markdown]
@@ -137,8 +141,10 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         BundleError as BundleError, DetectorRun as DetectorRun,
                         RedFlag as RedFlag, ReportDocument as ReportDocument, ReportPass as ReportPass,
                         _command as _command, _refs as _refs,
+                        add_provenance_verdicts as add_provenance_verdicts,
                         apply_known as apply_known,
                         cmd_report as cmd_report, detect_all as detect_all,
+                        detect_aliased_writes as detect_aliased_writes,
                         detect_dead_allocations as detect_dead_allocations,
                         detect_marker_balance as detect_marker_balance,
                         detect_messages as detect_messages,
@@ -450,6 +456,14 @@ def _dispatch() -> None:
             print('usage: rdc_analysis.py deps <rdc> [maxResources] [table|dot|mermaid]')
             sys.exit(2)
         cmd_deps(path, _arg(argv, 3, 40), deps_fmt)
+    elif cmd == 'provenance':
+        try:
+            rid_text = argv[3]
+            rid = int(rid_text[3:] if rid_text[:3].lower() == 'res' else rid_text)
+        except (IndexError, ValueError):
+            print('usage: rdc_analysis.py provenance <rdc> <resId> [chunkIndex]')
+            sys.exit(2)
+        sys.exit(cmd_provenance(path, rid, _arg(argv, 4, 0)))
     elif cmd == 'memory':
         cmd_memory(path, _arg(argv, 3, 20))
     elif cmd == 'formats':

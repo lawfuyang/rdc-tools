@@ -43,6 +43,25 @@ aliasing
     #11282 res1195306[SLW.SceneDepthWithout] -> res1195311[BloomDown]
     #11282 res1195306[SLW.SceneDepthWithout] -> res1195313[BloomDown]
     #11282 res1195306[SLW.SceneDepthWithout] -> res1195314[BloomUp]
+  overlapping placements: 12 pair(s) whose byte ranges overlap while both are live (12 of them a conflict: one is written while the other is still read)
+    res1195304[SceneColor] at 0x11f0000 and res1195322[SelectionOutlineColor] at 0x11f0000 in heap2259: ~9.6 MB shared, both live #11610..#11904
+      res1195322[SelectionOutlineColor] written #11626 (rtv, List_DrawIndexedInstanced) while res1195304[SceneColor] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195323[Editor.PrimitivesColor] at 0x2830000 in heap2259: ~9.6 MB shared, both live #11609..#11904
+      res1195323[Editor.PrimitivesColor] written #11647 (rtv, List_DrawIndexedInstanced) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195319[Tonemap] at 0x29f0000 in heap2259: ~7.9 MB shared, both live #11530..#11608
+      res1195319[Tonemap] written #11547 (rtv, List_DrawIndexedInstanced) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195309[BloomSetup_Bloom] at 0x2830000 in heap2259: ~0.6 MB shared, both live #11283..#11529
+      res1195309[BloomSetup_Bloom] written #11330 (rtv, List_DrawIndexedInstanced) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195318[SunMerge] at 0x2950000 in heap2259: ~0.6 MB shared, both live #11289..#11559
+      res1195318[SunMerge] written #11513 (clear, List_ClearRenderTargetView) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195316[BloomUp] at 0x28f0000 in heap2259: ~0.2 MB shared, both live #11417..#11512
+      res1195316[BloomUp] written #11418 (clear, List_ClearRenderTargetView) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195317[LensFlareTexture] at 0x2920000 in heap2259: ~0.2 MB shared, both live #11288..#11529
+      res1195317[LensFlareTexture] written #11461 (rtv, List_DrawIndexedInstanced) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res1195306[SLW.SceneDepthWithout] at 0x2830000 and res1195310[BloomDown] at 0x28d0000 in heap2259: ~0.0 MB shared, both live #11284..#11460
+      res1195310[BloomDown] written #11347 (clear, List_ClearRenderTargetView) while res1195306[SLW.SceneDepthWithout] read #11910 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+  (pair extents use the pixels-x-4 estimate: a capture records no texture bytes)
+  ... 4 more pair(s) (maxRows=0 shows all)
   heap2259: 87 resource(s), ~202.1 MB in it, ~154.7 MB live at once (peak at #11610), so up to ~47.4 MB of it could be shared
     disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
       res1195305[SceneDepthZ] #8739..#11214 and res1195319[Tonemap] #11530..#11608: ~9.6 MB

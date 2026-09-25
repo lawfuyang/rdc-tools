@@ -148,7 +148,8 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     for detector, function in (('marker-imbalance', detect_marker_balance),
                                ('unattributed-draws', detect_unattributed_draws),
                                ('zero-work', detect_zero_work),
-                               ('srgb-view-mismatch', detect_srgb_view_mismatch)):
+                               ('srgb-view-mismatch', detect_srgb_view_mismatch),
+                               ('aliased-write', detect_aliased_writes)):
         if not rdc_path:
             runs.append({'detector': detector, 'ran': False, 'why': 'no capture path given'})
             continue
@@ -168,6 +169,12 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
             continue
         runs.append({'detector': detector, 'ran': True, 'why': ''})
         flags.extend(found)
+
+    # The provenance verdicts: every `read-before-write` finding gains the chunk stream's own answer to
+    # "what was this supposed to hold" -- the writer chain behind the flagged read (REFERENCE §4.15),
+    # which is what tells a static asset from an ordering bug. It reads the same file the detectors
+    # above did and fails the same way: silently, with the run list already carrying the reason.
+    add_provenance_verdicts(rdc_path, flags)
 
     # The findings keep the order their detector gave them -- "biggest first" is information, and a final
     # sort by evidence would throw it away (each detector sorts its own findings, so this is deterministic).

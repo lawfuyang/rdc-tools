@@ -141,6 +141,103 @@ class TestStreamDetectors(StreamCase):
         path = self.rdc(self.texture(2210, self.format_id('R8G8B8A8_UNORM')))
         self.assertEqual(R.detect_srgb_view_mismatch(path), [])
 
+    def aliased_frame(self, with_barrier: bool = False) -> str:
+        """Two placed resources sharing bytes while both are live, one written while the other read.
+
+        res101 sits at 0 (2 MB), res102 at 0x100000 (1 MB): 1 MB of overlap. 101 is written by the
+        first draw, 102 by the second, and 101 is read again after that -- the write the pair
+        conflicts on. The optional aliasing barrier sits between 102's write and 101's read.
+        """
+        chunks = [
+            self.chunk('Device_CreateHeap', F.pl_create_heap(77, 4194304)),
+            self.chunk('Device_CreatePlacedResource',
+                       F.pl_placed_resource(101, F.pl_resource_desc(1, width=2097152), heap=77,
+                                            heap_offset=0)),
+            self.chunk('Device_CreatePlacedResource',
+                       F.pl_placed_resource(102, F.pl_resource_desc(1, width=1048576), heap=77,
+                                            heap_offset=0x100000)),
+            self.chunk('List_OMSetRenderTargets', F.pl_omset(7, [101])),
+            self.chunk('List_DrawInstanced',
+                       F.u64b(7) + F.u32b(3) + F.u32b(1) + F.u32b(0) + F.u32b(0)),
+            self.chunk('List_OMSetRenderTargets', F.pl_omset(8, [102])),
+            self.chunk('List_DrawInstanced',
+                       F.u64b(8) + F.u32b(3) + F.u32b(1) + F.u32b(0) + F.u32b(0)),
+        ]
+        if with_barrier:
+            chunks.append(self.chunk('List_ResourceBarrier',
+                                     F.pl_resources_barrier(7, [('aliasing', 101, 102)])))
+        chunks += [
+            self.chunk('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 101, 0)),
+            self.chunk('List_DrawInstanced',
+                       F.u64b(7) + F.u32b(3) + F.u32b(1) + F.u32b(0) + F.u32b(0)),
+        ]
+        return self.rdc(*chunks)
+
+    def test_an_aliased_pair_written_while_the_other_is_read_fires(self):
+        flags = R.detect_aliased_writes(self.aliased_frame())
+        assert flags is not None
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0]['detector'], 'aliased-write')
+        self.assertEqual(flags[0]['certainty'], 'question')
+        self.assertIn('1 pair(s) of placed resources share bytes while both are live', flags[0]['what'])
+        self.assertIn('res101/res102 in heap77: res102 written at chunk #7 (rtv) while res101 read '
+                      'at chunk #9 (srv); no aliasing barrier declares the handover',
+                      flags[0]['evidence'][0])
+
+    def test_a_pair_an_aliasing_barrier_declares_is_not_a_finding(self):
+        """Deliberate aliasing is `memory`'s story, not this detector's: the barrier between the write
+        and the read is the frame declaring the handover, and the rule stays quiet about it."""
+        self.assertEqual(R.detect_aliased_writes(self.aliased_frame(with_barrier=True)), [])
+
+    def test_overlaps_that_never_collide_in_time_are_not_findings(self):
+        """The two shapes that must stay quiet: ranges that do not overlap at all, and an overlap
+        whose uses never meet -- the packing candidates `memory` prints from the other side."""
+        disjoint = self.rdc(
+            self.chunk('Device_CreateHeap', F.pl_create_heap(77, 4194304)),
+            self.chunk('Device_CreatePlacedResource',
+                       F.pl_placed_resource(101, F.pl_resource_desc(1, width=1048576), heap=77,
+                                            heap_offset=0)),
+            self.chunk('Device_CreatePlacedResource',
+                       F.pl_placed_resource(102, F.pl_resource_desc(1, width=1048576), heap=77,
+                                            heap_offset=1048576)),
+            self.chunk('List_OMSetRenderTargets', F.pl_omset(7, [101])),
+            self.chunk('List_DrawInstanced',
+                       F.u64b(7) + F.u32b(3) + F.u32b(1) + F.u32b(0) + F.u32b(0)),
+            self.chunk('List_OMSetRenderTargets', F.pl_omset(8, [102])),
+            self.chunk('List_DrawInstanced',
+                       F.u64b(8) + F.u32b(3) + F.u32b(1) + F.u32b(0) + F.u32b(0)))
+        self.assertEqual(R.detect_aliased_writes(disjoint), [])
+
+    def test_a_read_before_write_finding_gains_the_stream_verdict(self):
+        """The verdict is an added evidence line, one per named resource: it says what the chunk
+        stream's chain behind the read ends at, in the file's own numbering."""
+        path = self.rdc(
+            self.chunk('List_SetGraphicsRootShaderResourceView', F.pl_root_view(7, 0, 401, 0)),
+            self.chunk('List_DrawInstanced',
+                       F.u64b(7) + F.u32b(3) + F.u32b(1) + F.u32b(0) + F.u32b(0)),
+            self.chunk('List_CopyBufferRegion', F.pl_copy_buffer(7, 401, 0, 400, 0, 128)))
+        flags: list[R.RedFlag] = [{'detector': 'read-before-write',
+                                   'what': '1 buffer(s) whose first use is a read that nothing writes first',
+                                   'evidence': ['res401 (buffer, 0.00 MB): read at eid 3, first write eid 5',
+                                                'res9999 (buffer, 0.00 MB): read at eid 3, first write never'],
+                                   'certainty': 'question', 'unproven': True}]
+        R.add_provenance_verdicts(path, flags)
+        self.assertEqual(len(flags[0]['evidence']), 3, 'one verdict per resource the ledger knows')
+        self.assertIn('provenance (chunk stream): res401 -- the chunk stream\'s chain behind that '
+                      'read ends at no writer in the frame before the read (the producer is outside '
+                      'this capture)', flags[0]['evidence'][2])
+        self.assertNotIn('res9999', flags[0]['evidence'][2], 'an unknown resource gets no verdict')
+
+        unchanged: list[R.RedFlag] = [{'detector': 'read-before-write', 'what': 'x',
+                                       'evidence': ['res401'], 'certainty': 'question',
+                                       'unproven': True}]
+        R.add_provenance_verdicts(self.path('nowhere.rdc'), unchanged)
+        self.assertEqual(unchanged[0]['evidence'], ['res401'], 'an unreadable capture adds nothing')
+        other: list[R.RedFlag] = [{'detector': 'write-never-read', 'what': 'x', 'evidence': ['res401'],
+                                   'certainty': 'question', 'unproven': True}]
+        R.add_provenance_verdicts(path, other)
+        self.assertEqual(other[0]['evidence'], ['res401'], 'only the read-before-write rows grow')
+
     def test_a_detector_that_could_not_look_says_so(self):
         """Two families of detectors can be blocked, each with its own reason: the .rdc-side rules need a
         capture path, and the two binding rules need a bundle whose driver resolved descriptor tables."""
@@ -148,7 +245,8 @@ class TestStreamDetectors(StreamCase):
         write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])])
         _flags, runs = R.detect_all(R.load_bundle(bundle))
         skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
-        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work', 'srgb-view-mismatch'):
+        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work', 'srgb-view-mismatch',
+                         'aliased-write'):
             self.assertIn('no capture path given', skipped[detector])
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
             self.assertIn('no resolved descriptor tables', skipped[detector])
@@ -156,7 +254,8 @@ class TestStreamDetectors(StreamCase):
         missing = self.path('nowhere.rdc')
         _flags, runs = R.detect_all(R.load_bundle(bundle), missing)
         skipped = {run['detector']: run['why'] for run in runs if not run['ran']}
-        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work', 'srgb-view-mismatch'):
+        for detector in ('marker-imbalance', 'unattributed-draws', 'zero-work', 'srgb-view-mismatch',
+                         'aliased-write'):
             self.assertIn('could not be read', skipped[detector])
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):
             self.assertIn('no resolved descriptor tables', skipped[detector])

@@ -43,6 +43,23 @@ aliasing
     #14549 res6920[CulledLightLinks] -> res610878[FRayTracingScene::InstanceBuffer]
     #14549 res6914[StartOffsetGrid] -> res1084714[DynamicGeometry.BLASSharedScratchBuffer]
     #14731 res1111089[FRayTracingScene::ScratchBuffer] -> res244046[SceneColor]
+  overlapping placements: 12 pair(s) whose byte ranges overlap while both are live (6 of them a conflict: one is written while the other is still read)
+    res712890[ScreenSpaceAO] at 0x3d90000 and res712891[DeferredShadowMaskTexture] at 0x3ed0000 in heap2259: ~3.2 MB shared, both live #9703..#15563
+      res712891[DeferredShadowMaskTexture] written #15439 (clear, List_ClearRenderTargetView) while res712890[ScreenSpaceAO] read #15455 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res244045[HZBFurthest] at 0x1180000 and res1122845[Tonemap] at 0xe80000 in heap2259: ~1.5 MB shared, both live #16299..#16416
+      res1122845[Tonemap] written #16390 (rtv, List_DrawIndexedInstanced) while res244045[HZBFurthest] read #16432 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res712893[TranslucentVolumeDirectional1] at 0x4390000 and res712900[TranslucentVolumeDirectional0] at 0x4390000 in heap2259: ~1.0 MB shared, both live #15633..#15778
+      res712893[TranslucentVolumeDirectional1] written #15641 (rtv, List_DrawInstanced) while res712900[TranslucentVolumeDirectional0] read #15778 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res244045[HZBFurthest] at 0x1180000 and res244046[SceneColor] at 0x12e0000 in heap2259: ~0.6 MB shared, both live #10150..#15951
+      res244046[SceneColor] written #10150 (rtv, List_ExecuteIndirect) while res244045[HZBFurthest] read #14575 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res92775[SLW.TileListDataBuffer] at 0xfb0000 and res1122845[Tonemap] at 0xe80000 in heap2259: ~0.1 MB shared, both live #16299..#16416
+      res1122845[Tonemap] written #16390 (rtv, List_DrawIndexedInstanced) while res92775[SLW.TileListDataBuffer] read #16432 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res939230[InstanceCulling.InstanceIdsBuffer] at 0x40000 and res1115856[InstanceCulling.InstanceIdsBuffer] at 0x40000 in heap2259: 0.0 MB shared, both live #14894..#14960
+      res939230[InstanceCulling.InstanceIdsBuffer] written #14894 (clear, List_ClearUnorderedAccessViewUint) while res1115856[InstanceCulling.InstanceIdsBuffer] read #14991 (barrier, List_ResourceBarrier) -- no aliasing barrier declares the handover
+    res712901[SLW.SceneDepthWithout] at 0x4d90000 and res712904[Translucency.AfterDOF.Color] at 0x4d90000 in heap2259: ~4.5 MB shared, both live #15804..#15951
+    res92775[SLW.TileListDataBuffer] at 0xfb0000 and res131041[OIT.SampleData] at 0xfc0000 in heap2259: ~0.0 MB shared, both live #15800..#15802
+  (pair extents use the pixels-x-4 estimate: a capture records no texture bytes)
+  ... 4 more pair(s) (maxRows=0 shows all)
   heap2259: 157 resource(s), ~222.8 MB in it, ~180.0 MB live at once (peak at #14441), so up to ~42.8 MB of it could be shared
     disjoint use windows -- candidates, not a plan (D3D12 aliasing has requirements a capture does not record):
       res2263[SceneDepthZ] #9668..#15601 and res712886[SLW.DepthPrepassOutput] #9482..#9482: ~4.5 MB

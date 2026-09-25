@@ -153,6 +153,9 @@ DETECTOR_SEVERITY: Dict[str, Tuple[str, str]] = {
                 'nothing'),
     'shader-io-mismatch': (
         'high', 'the pixel stage reads an input the vertex stage never writes'),
+    'aliased-write': (
+        'high', 'two placed resources share bytes while both are live, and one is written while the '
+                'other is still read: the bytes one side reads may be the other side just wrote them'),
     'depth-logic': (
         'high', 'depth is written through a test that is off, or tested against a target that is not bound'),
     'empty-scissor': (
@@ -199,6 +202,9 @@ DETECTOR_RECIPE: Dict[str, str] = {
     'unbound-table-slot': "replay_dump state '{rdc}' {eid}",
     'binding-kind-mismatch': "replay_dump state '{rdc}' {eid}",
     'shader-io-mismatch': "replay_dump shaders '{rdc}' {eid}",
+    # The one offline recipe: the evidence -- the overlapping placements and their conflicts -- is a
+    # section of `memory`, and no driver command prints it (REFERENCE 4.15).
+    'aliased-write': "memory '{rdc}'",
     'dead-allocation': "replay_dump usage '{rdc}' {resId}",
     'read-before-write': "replay_dump usage '{rdc}' {resId}",
     'write-never-read': "replay_dump usage '{rdc}' {resId}",

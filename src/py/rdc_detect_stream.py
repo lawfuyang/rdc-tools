@@ -1,4 +1,6 @@
-"""The detectors that read the capture's chunk stream: marker balance, draws outside any marker, and calls that can only produce nothing."""
+"""The detectors that read the capture's chunk stream: marker balance, draws outside any marker, calls that
+can only produce nothing, an sRGB view over a linear texture, aliased placements written while read, and the
+provenance verdicts the `read-before-write` findings gain."""
 
 from __future__ import annotations
 
@@ -16,7 +18,9 @@ import rdc_resources  # noqa: F401  (used qualified: the resource table and the 
 from rdc_chunkmap import (POP_MARKER_CHUNKS as POP_MARKER_CHUNKS,
                           PUSH_MARKER_CHUNKS as PUSH_MARKER_CHUNKS)
 
-from typing import Dict, List, Optional, Sequence, Tuple
+import re
+
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 #: How many unattributed draws are named before the rest are counted.
 UNATTRIBUTED_LIMIT = 10
@@ -229,6 +233,109 @@ def detect_srgb_view_mismatch(path: str) -> Optional[List[RedFlag]]:
         'unproven': True,
     }]
 
+
+def _use_ledger(path: str) -> Tuple[Optional[UseLedger], Dict[int, ResourceInfo]]:
+    """The use ledger and the resource table for a capture, or `(None, {})` when it cannot be read.
+
+    The import is inside the function for the reason `_named_chunks`' is: `rdc_analysis` imports this
+    module (the CLI dispatches `report` through it), and the ledger lives in a capture-side module the
+    report side has no business importing at load time. `None` -- not an empty ledger -- says the
+    question could not be asked, which is the difference the run list exists to carry.
+    """
+    import rdc_uses   # lazy: see the comment above
+    try:
+        ledger, resources, _how = rdc_uses._deps_ledger(path)
+    except (rdc_stream.FrameError, OSError):
+        return None, {}                 # a stream that will not decompress, a file that is not there
+    return ledger, resources
+
+
+def detect_aliased_writes(path: str) -> Optional[List[RedFlag]]:
+    """A placed resource written while an overlapping one is still being read (question).
+
+    The pair arithmetic is `rdc_uses.alias_conflicts` (REFERENCE 4.15): two placed resources in one
+    heap whose byte ranges overlap *while both are live*, and among them the ones where one side is
+    written while the other is still read. A pair an aliasing barrier declares between those two uses
+    is deliberate aliasing and is left out of this finding -- it stays in `memory`'s own section, which
+    prints every pair with the barrier named. Two things keep it a question: the extents are the
+    pixels-x-4 estimate (a capture records no texture byte count), and whether the shader actually
+    read the bytes the other side wrote is not in the file. None when no chunk can be named at all,
+    like every detector here; a capture that cannot be read raises, which is what the caller turns
+    into the other skip reason.
+    """
+    if not rdc_chunkmap.load_chunk_names():
+        return None
+    import rdc_uses   # lazy: see `_use_ledger`
+    ledger, resources, _how = rdc_uses._deps_ledger(path)
+    rows = {rid: rdc_uses.tally(rid, record) for rid, record in ledger['resources'].items()}
+    pairs: List[Any] = []
+    for pair in rdc_uses.alias_conflicts(ledger, resources, rows):
+        # A conflict an aliasing barrier declares is the frame doing deliberate aliasing -- `memory`
+        # prints it with the barrier named, and this detector is about the pairs with no statement
+        # behind them.
+        open_conflicts = [conflict for conflict in pair.conflicts if not conflict[4]]
+        if open_conflicts:
+            pairs.append((pair, open_conflicts[0]))
+    if not pairs:
+        return []
+    lines: List[str] = []
+    for pair, conflict in pairs[:UNATTRIBUTED_LIMIT]:
+        writer, reader, write, read, _declared = conflict
+        lines.append('res%d/res%d in heap%d: res%d written at chunk #%d (%s) while res%d read at '
+                     'chunk #%d (%s); no aliasing barrier declares the handover'
+                     % (pair.a, pair.b, pair.heap, writer, write['eid'], write['how'], reader,
+                        read['eid'], read['how']))
+    return [{
+        'detector': 'aliased-write',
+        'what': '%d pair(s) of placed resources share bytes while both are live, and one is written '
+                'while the other is still read (extents are the pixels-x-4 estimate; whether the read '
+                'reached the written bytes is not in the file)' % len(pairs),
+        'evidence': [line[:160] for line in lines],
+        'certainty': 'question',
+        'unproven': True,
+    }]
+
+
+def add_provenance_verdicts(path: str, flags: List[RedFlag]) -> None:
+    """Append the offline walk's one-line verdict to each `read-before-write` finding's evidence.
+
+    The bundle detector says *that* nothing wrote the resource before its first read; the chunk
+    stream's writer chain (`rdc_uses.walk_provenance`, REFERENCE 4.15) says what the frame eventually
+    filled it with or that the producer is outside this capture -- the difference between a static
+    asset and an ordering bug, which the finding alone cannot tell. One line per resource the listed
+    evidence names, and the line says its own numbering (`chunk`), because the finding's eids are the
+    engine's and the walk's are the file's. A capture that cannot be read -- or a resource the file
+    shows no use for -- leaves the finding exactly as it was: the verdict is an addition, never a
+    replacement.
+    """
+    if not path or not any(flag['detector'] == 'read-before-write' for flag in flags):
+        return
+    ledger, resources = _use_ledger(path)
+    if ledger is None:
+        return
+    import rdc_uses   # lazy: see `_use_ledger`
+    for flag in flags:
+        if flag['detector'] != 'read-before-write':
+            continue
+        verdicts: List[str] = []
+        named: List[int] = []
+        for line in flag['evidence']:
+            for found in re.findall(r'res(\d+)', line):
+                rid = int(found)
+                if rid in named:
+                    continue
+                named.append(rid)
+                record = ledger['resources'].get(rid)
+                if record is None or not record['uses']:
+                    continue
+                rows = rdc_uses.tally(rid, record)
+                if not rows['reads']:
+                    continue
+                summary = rdc_uses.provenance_summary(ledger, resources, rid, rows['reads'][0]['eid'])
+                if summary:
+                    verdicts.append('provenance (chunk stream): res%d -- %s' % (rid, summary))
+        flag['evidence'] = list(flag['evidence']) + verdicts
+
 #: `b0 s0` in a reflection row: the register and space a constant block is expected at. The `cbuffer[0]`
 #: form is what `shaders <eid>` writes and it is the only reflection row whose format is pinned down here
 #: by real output; the read-only and write-only resource rows are not parsed until a capture shows them.
@@ -237,6 +344,8 @@ __all__ = [
     'PUSH_MARKER_CHUNKS',
     'UNATTRIBUTED_LIMIT',
     '_named_chunks',
+    'add_provenance_verdicts',
+    'detect_aliased_writes',
     'detect_marker_balance',
     'detect_srgb_view_mismatch',
     'detect_unattributed_draws',

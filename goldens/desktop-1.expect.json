@@ -9,10 +9,11 @@
     "events": 6994,
     "passes": 104,
     "resources": 4843,
-    "findings": 120,
-    "detectors": 21
+    "findings": 121,
+    "detectors": 22
   },
   "findings": {
+    "aliased-write": 1,
     "all-zero-constant-block": 27,
     "binding-kind-mismatch": 25,
     "dead-allocation": 21,
@@ -36,8 +37,8 @@
   },
   "document": "selfab.json",
   "why": [
-    "the report counts are the ones AGENTS.md pins (6994 events / 104 passes / 4843 resources / 120 findings from 21 detectors), and 6,994 is every id with bound state up to the frame's last event rather than a count of draws -- the frame's own 16,857 chunks and 599 draw/dispatch calls are counted elsewhere in its entry. The findings total is five higher than the first count taken from these bytes, all of it `all-zero-constant-block` (22 -> 27): the bundle was re-dumped on 2026-09-23 for the `uavs` array the state document gained, which writes a state file for more events, and that detector reads the cbuffer documents of the events a state file exists for",
-    "the file-side three fire nowhere: this frame's markers balance, every draw and dispatch sits inside one, and none of them is zero-work -- a label of 0 is the same claim as a label of 21, and it is the one that would have caught a detector that stopped looking",
+    "the report counts are the ones AGENTS.md pins (6994 events / 104 passes / 4843 resources / 121 findings from 22 detectors), and 6,994 is every id with bound state up to the frame's last event rather than a count of draws -- the frame's own 16,857 chunks and 599 draw/dispatch calls are counted elsewhere in its entry. The findings total is five higher than the first count taken from these bytes, all of it `all-zero-constant-block` (22 -> 27): the bundle was re-dumped on 2026-09-23 for the `uavs` array the state document gained, which writes a state file for more events, and that detector reads the cbuffer documents of the events a state file exists for. The 22nd detector is `aliased-write` (landed 2026-09-25, the report half of `memory`'s overlapping placements, REFERENCE 4.15): it fires once here -- placed resources sharing bytes while both are live, one written while the other still reads, no aliasing barrier declaring the handover",
+    "the file-side rules that can fire silently stay at zero where they must: this frame's markers balance, every draw and dispatch sits inside one, and none of them is zero-work -- a label of 0 is the same claim as a label of 21, and it is the one that would have caught a detector that stopped looking",
     "the findings histogram is what turns \"120 findings\" into \"120 findings of these nine kinds\": a detector that stopped firing while another fired more would keep the total and lose the fact, which is why unlabelled firings are mismatches too and why the count that moved most (`binding-kind-mismatch`, 5 -> 25) is a number rather than a surprise",
     "the self-A/B compares this bundle with itself, so every one of its nine numbers must be 0 (or `same` = 104 for the pass count): it is the net for the analyser, and the only check here that would catch `replaydiff` itself drifting"
   ]

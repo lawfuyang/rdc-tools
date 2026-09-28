@@ -135,11 +135,14 @@ add_custom_command(TARGET rdc_replay POST_BUILD
 # v1.9.2, BSD-2-Clause, LICENSE beside it), copied into `src/cpp/third_party` so that building this does not
 # depend on a fetched tree. `/W3` and no `/WX`: it is not this project's code to hold to its own warning
 # rules. `LZ4_DLL_EXPORT` is what makes `LZ4LIB_API` `__declspec(dllexport)` — without it the DLL exports
-# nothing at all and the tool finds no function in it.
+# nothing at all and the tool finds no function in it. `LZ4_FAST_DEC_LOOP` is on because this vendored
+# 1.9.2 gates it on `__i386__`/`__x86_64__`, which MSVC does not define, so an MSVC build decoded without
+# the fast loop upstream enables on x64 everywhere else (1.9.3 keys it on `_M_X64` instead). The decode
+# is byte-identical either way; the flag only picks the loop shape.
 enable_language(C)
 add_library(rdc_lz4 SHARED "${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/third_party/lz4/lz4.c")
 target_include_directories(rdc_lz4 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/third_party/lz4")
-target_compile_definitions(rdc_lz4 PRIVATE LZ4_DLL_EXPORT=1)
+target_compile_definitions(rdc_lz4 PRIVATE LZ4_DLL_EXPORT=1 LZ4_FAST_DEC_LOOP=1)
 set_target_properties(rdc_lz4 PROPERTIES PREFIX "")
 if(MSVC)
   target_compile_options(rdc_lz4 PRIVATE /W3 /utf-8)

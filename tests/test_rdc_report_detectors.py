@@ -410,6 +410,29 @@ class TestReportDetectors(BundleCase):
         self.assertNotIn('NotTracked', texture['what'] + str(texture['evidence']) + str(buffer['evidence']),
                          'a resource the engine did not track is never judged')
 
+    def test_the_shared_chain_map_answers_what_per_resource_chains_do(self):
+        """`cmd_report` builds the usage chains once (`usage_chain_map`) and hands the same map to the
+        detectors and the notable ranking; this pins that the shared map answers exactly what the
+        per-resource rebuilds did -- findings, run list and notable lists are the whole observable
+        behaviour, so all three are compared against a run that shared nothing."""
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(1, targets=['11 64x64x1 R8G8B8A8_UNORM'])], resources=[
+            resource('326', name='ColoredTexture', usage=[{'eid': 282, 'usage': 17}]),
+            resource('315', name='Opened', kind='buffer',
+                     usage=[{'eid': 147, 'usage': 15}, {'eid': 200, 'usage': 22}]),
+            resource('2207', name='BufferedRT', usage=[{'eid': 444, 'usage': 32}]),
+        ])
+        loaded = R.load_bundle(bundle)
+        passes = R.reconstruct_passes(loaded['events'], loaded['resources'])
+        chains = R.usage_chain_map(loaded['resources'])
+        self.assertEqual(chains,
+                         {int(r['resource']): R._usage_chain(r) for r in loaded['resources']},
+                         'the map is the per-resource chains, keyed by resource id')
+        self.assertEqual(R.detect_all(loaded), R.detect_all(loaded, None, passes, chains),
+                         'the shared map changes nothing the report can show')
+        self.assertEqual(R.notables(loaded, passes), R.notables(loaded, passes, chains),
+                         'the notable ranking answers the same from the map')
+
     def test_a_write_nothing_reads_later_is_a_question(self):
         """Grouped by the kind of last write, because each group is a different story: a resolve nobody
         reads is a readback that never happened, a dispatch output nobody reads is work that dies."""

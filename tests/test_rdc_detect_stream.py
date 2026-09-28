@@ -109,6 +109,28 @@ class TestStreamDetectors(StreamCase):
         self.assertEqual(flags[0]['evidence'], ['List_DrawInstanced at chunk 1'])
         self.assertIn('dispatch 1x1x0', flags[1]['what'])
 
+    def test_the_shared_walk_answers_what_each_own_walk_does(self):
+        """`detect_all` pays the chunk walk once over the union of what the three walk-sharing detectors
+        want (`DETECTOR_WALK_CHUNKS`) and hands each of them the rows; each filters them to its own name
+        set. This pins that a detector fed the shared walk finds exactly what its own walk finds -- one
+        capture where all three have something to say, each answered both ways."""
+        path = self.rdc(self.chunk('PushMarker', b'BasePass\x00'),
+                        self.draw_instanced(0),
+                        self.dispatch(1, 1, 0),
+                        self.chunk('PopMarker', b'BasePass\x00'),
+                        self.draw_instanced(100))
+        shared = R._named_chunks(path, R.DETECTOR_WALK_CHUNKS)
+        assert shared is not None
+        self.assertTrue(any(row[1] in R.DRAW_CHUNKS for row in shared),
+                        'the union walk carries the draw chunks zero-work wants')
+        for detector in (R.detect_marker_balance, R.detect_unattributed_draws, R.detect_zero_work):
+            own = detector(path)
+            from_shared = detector(path, shared)
+            self.assertEqual(own, from_shared,
+                             '%s answers the same from the shared walk' % detector.__name__)
+        self.assertEqual([flag['detector'] for flag in R.detect_zero_work(path, shared)],
+                         ['zero-work', 'zero-work'], 'the filtered rows are zero-work\'s own')
+
     def test_a_linear_texture_read_through_an_srgb_view_is_a_question(self):
         """The format rule's other half, and one a bundle cannot answer: the resource table says the bits are
         `R8G8B8A8_UNORM` and a view written over the same resource declares `R8G8B8A8_UNORM_SRGB`, so the

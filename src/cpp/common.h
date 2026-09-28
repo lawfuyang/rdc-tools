@@ -527,11 +527,18 @@ std::map<int, CallVolume> CallVolumesByEid(IReplayController *ctrl, int &calls);
 //: than "the frame has no events" -- the caller falls back to a coarser bound.
 int LastEventId(IReplayController *ctrl);
 
-//: Move the replay to `eid`, refreshing even if that id is already current. Every command moves the
-//: engine through here, and the reason it is a function rather than 18 calls to
-//: `ctrl->SetFrameEvent` is `AnyEventReplayed` below: `probe`'s answer is only trustworthy on a
-//: *cold* engine (commands_frame.cpp says why), and a cached answer must only be written when it was.
-void MoveToEvent(IReplayController *ctrl, int eid);
+//: Move the replay to `eid`. Every command moves the engine through here, and the reason it is a
+//: function rather than 18 calls to `ctrl->SetFrameEvent` is `AnyEventReplayed` below: `probe`'s
+//: answer is only trustworthy on a *cold* engine (commands_frame.cpp says why), and a cached answer
+//: must only be written when it was.
+//:
+//: `bForce` refreshes even when `eid` is already current, and defaults to true because anything may
+//: have re-executed the log since the last move (`FetchCounters`, pixel history, the post-VS fold) --
+//: a caller that has not accounted for those must not let the engine answer from wherever such a call
+//: left it. The non-forcing form is for the one caller that *knows* the position is current: the
+//: controller short-circuits it at the event it already holds, so a repeated move costs nothing, and
+//: a different `eid` replays there as usual -- the flag only ever removes provably redundant work.
+void MoveToEvent(IReplayController *ctrl, int eid, bool bForce = true);
 
 //: True once any command has moved the replay. A process that has not moved it yet is the state
 //: `probe`'s answer requires -- and the state a probe cache may be written from (see `MoveToEvent`).
@@ -552,7 +559,8 @@ int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
              const char *filter);
 int CmdFind(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *needle,
             int maxRows);
-int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid);
+int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+             bool bAlreadyAtEid = false);
 int CmdStateDiff(IReplayController *ctrl, ICaptureFile *file, const char *path, int eidA, int eidB);
 int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *what,
               unsigned long long offset, unsigned long long length, const char *asMode);
@@ -650,9 +658,9 @@ int CmdPixelHistory(IReplayController *ctrl, ICaptureFile *file, const char *pat
                     const char *what, unsigned x, unsigned y, const Subresource &sub,
                     CompType typeCast, int maxRows);
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-               bool bWantDisasm);
+               bool bWantDisasm, bool bAlreadyAtEid = false);
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-               ShaderStage stage, int slot);
+               ShaderStage stage, int slot, bool bAlreadyAtEid = false);
 
 //: One constant block's bytes and the variables over them, at the *current* event: what `CmdCbuffer`
 //: prints and what `watch` reads at every event of a range. The two share this rather than the

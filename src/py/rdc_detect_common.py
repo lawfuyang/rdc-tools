@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rdc_bundle import *  # noqa: F401,F403
 
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 _USAGE_STAGES = ('VS', 'HS', 'DS', 'GS', 'PS', 'CS', 'TS', 'MS')
 
@@ -63,7 +63,15 @@ def usage_name(value: int) -> str:
     this table does not know (a newer engine's usage, and naming it would be a guess)."""
     return USAGE_NAMES[value] if 0 <= value < len(USAGE_NAMES) else 'usage(%d)' % value
 
-def _usage_chain(resource: BundleResource) -> List[Tuple[int, FrozenSet[str]]]:
+#: One resource's usage chain (see `_usage_chain`): the `(eid, {usage names})` rows, ascending.
+UsageChain = List[Tuple[int, FrozenSet[str]]]
+
+#: Every resource's chain keyed by the resource's id number -- the per-report answer that five
+#: detectors and the notable ranking used to rebuild one resource at a time, seven chains per resource
+#: on the corpus bundles (measured on `desktop-1`: 36,224 chain builds for 4,843 resources).
+UsageChains = Dict[int, UsageChain]
+
+def _usage_chain(resource: BundleResource) -> UsageChain:
     """A resource's usage as `(eid, {names})` per event, ascending.
 
     Rows are one usage each, so an eid can carry several and the chain is a *set* per event: deduplicating
@@ -81,12 +89,53 @@ def _usage_chain(resource: BundleResource) -> List[Tuple[int, FrozenSet[str]]]:
             usage_name(int(record.get('usage', 0) or 0)))
     return [(eid, frozenset(names)) for eid, names in sorted(per_event.items())]
 
-def _usage_judged(resource: BundleResource) -> Optional[List[Tuple[int, FrozenSet[str]]]]:
+def usage_chain_map(resources: Sequence[BundleResource]) -> UsageChains:
+    """Every resource's chain in one pass, keyed by the resource's id number (`resource`, the number the
+    bundle prints as `res<N>`).
+
+    The chains are a property of the bundle, and the report asks for them from more places than one --
+    the usage detectors, the notable ranking and the pass roll-up -- so the caller that has the bundle
+    builds the map once and hands it down (see `detect_all`). Resource ids are unique in a bundle, which
+    is what makes the id a safe key.
+    """
+    chains: UsageChains = {}
+    for resource in resources:
+        chains[int(resource.get('resource', '0') or 0)] = _usage_chain(resource)
+    return chains
+
+def _chain_of(resource: BundleResource, chains: Optional[UsageChains]) -> UsageChain:
+    """A resource's chain, from the map when there is one and computed when there is not.
+
+    A resource the map does not hold (a caller holding a dict from outside the list the map was built
+    from) is computed rather than missed: the answer is the same either way, and a `KeyError` here would
+    be a crash in a rule that has an answer.
+    """
+    if chains is None:
+        return _usage_chain(resource)
+    key = int(resource.get('resource', '0') or 0)
+    if key in chains:
+        return chains[key]
+    return _usage_chain(resource)
+
+def usage_collected(bundle: BundleData) -> bool:
+    """Whether the bundle carries usage lists -- the manifest's own word for it.
+
+    The gate the usage detectors, the notable ranking and the chain map all key off; one function because
+    the expression is the same contract in each of them, and a copy that drifted would be a rule that
+    disagreed with its own skip reason.
+    """
+    return str(bundle['manifest'].get('resourceUsage', '')) == 'collected'
+
+def _usage_judged(resource: BundleResource, chains: Optional[UsageChains] = None) -> Optional[UsageChain]:
     """The chain of a resource this family may judge, or None: textures and buffers only (a heap or a queue
-    is not an allocation the application reads and writes), and never a resource the engine did not track."""
+    is not an allocation the application reads and writes), and never a resource the engine did not track.
+
+    `chains` is the per-report map (`usage_chain_map`) when the caller has one; without it the chain is
+    computed here, which is what a direct call gets.
+    """
     if str(resource.get('kind')) not in ('texture', 'buffer'):
         return None
-    chain = _usage_chain(resource)
+    chain = _chain_of(resource, chains)
     if not chain or (len(chain) == 1 and chain[0][1] == frozenset(['Unused'])):
         return None
     return chain
@@ -264,12 +313,17 @@ __all__ = [
     'USAGE_READS',
     'USAGE_TARGETS',
     'USAGE_WRITES',
+    'UsageChain',
+    'UsageChains',
     '_USAGE_STAGES',
+    '_chain_of',
     '_resource_label',
     '_usage_chain',
     '_usage_flag',
     '_usage_judged',
     'severity_of',
     'severity_table',
+    'usage_chain_map',
+    'usage_collected',
     'usage_name',
 ]

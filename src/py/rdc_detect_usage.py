@@ -6,9 +6,9 @@ from rdc_bundle import *  # noqa: F401,F403
 from rdc_detect_common import *  # noqa: F401,F403
 from rdc_passes import *  # noqa: F401,F403
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
-def detect_read_before_write(bundle: BundleData) -> List[RedFlag]:
+def detect_read_before_write(bundle: BundleData, chains: Optional[UsageChains] = None) -> List[RedFlag]:
     """A resource read with nothing in the frame writing it first (`question`).
 
     "First" is a comparison of eids, and a write at the *same* eid does not count: one call can write and
@@ -20,10 +20,13 @@ def detect_read_before_write(bundle: BundleData) -> List[RedFlag]:
     one thing to look at, not five. Measured on the Android capture: 6 resources, every one read and *never*
     written in the frame -- two asset textures, an LUT, the font atlas, a sky cube and one allocator buffer,
     which is what the legitimate case looks like.
+
+    `chains` is the per-report usage-chain map (`usage_chain_map`) when the caller has one; without it each
+    chain is built where it is asked for, which is what a direct call gets.
     """
     groups: Dict[Tuple[str, str], List[str]] = {}
     for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
-        chain = _usage_judged(resource)
+        chain = _usage_judged(resource, chains)
         if chain is None:
             continue
         first_read = next(((eid, names) for eid, names in chain if names & USAGE_READS), None)
@@ -45,7 +48,7 @@ def detect_read_before_write(bundle: BundleData) -> List[RedFlag]:
             groups[key]))
     return flags
 
-def detect_write_never_read(bundle: BundleData) -> List[RedFlag]:
+def detect_write_never_read(bundle: BundleData, chains: Optional[UsageChains] = None) -> List[RedFlag]:
     """A resource written with nothing afterwards reading it (`question`).
 
     "Afterwards" is strict: only a read at a strictly later eid counts, or a copy's own source row would read
@@ -59,7 +62,7 @@ def detect_write_never_read(bundle: BundleData) -> List[RedFlag]:
     """
     groups: Dict[str, List[str]] = {}
     for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
-        chain = _usage_judged(resource)
+        chain = _usage_judged(resource, chains)
         if chain is None:
             continue
         last_write = max((eid for eid, names in chain if names & USAGE_WRITES), default=0)
@@ -83,7 +86,7 @@ def detect_write_never_read(bundle: BundleData) -> List[RedFlag]:
             groups[key]))
     return flags
 
-def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
+def detect_load_instead_of_clear(bundle: BundleData, chains: Optional[UsageChains] = None) -> List[RedFlag]:
     """A render target first used with nothing clearing, discarding or writing it (the usage chain).
 
     A target's *contents* are not in the usage list, but its history is: when nothing cleared, discarded or
@@ -96,7 +99,7 @@ def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
     """
     flags: List[RedFlag] = []
     for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
-        chain = _usage_judged(resource)
+        chain = _usage_judged(resource, chains)
         if chain is None:
             continue
         first_target = next(((eid, names) for eid, names in chain if names & USAGE_TARGETS), None)
@@ -119,7 +122,8 @@ def detect_load_instead_of_clear(bundle: BundleData) -> List[RedFlag]:
         })
     return flags
 
-def detect_dead_compute(bundle: BundleData) -> List[RedFlag]:
+def detect_dead_compute(bundle: BundleData, chains: Optional[UsageChains] = None,
+                        passes: Optional[Sequence[ReportPass]] = None) -> List[RedFlag]:
     """A compute pass that binds UAVs nothing afterwards reads (`question`).
 
     The unit is the *compute pass* the report already derives -- a run of dispatches agreeing on pipeline and
@@ -140,15 +144,20 @@ def detect_dead_compute(bundle: BundleData) -> List[RedFlag]:
     costs time. `question` for the reasons a usage list always has: a later frame reading the result, and a
     CPU readback after the capture, look exactly like nothing ever reading it -- and a UAV bound is not
     necessarily written, so the finding is about a *binding* nothing read afterwards.
+
+    `passes` is the pass list the report already built when the caller has one; without it the passes are
+    reconstructed here, which is what a direct call gets. The fields this reads (kind, firstEid, lastEid)
+    are reconstruct_passes' own, so a rolled-up list answers the same as a fresh one.
     """
     flags: List[RedFlag] = []
-    for entry in reconstruct_passes(bundle['events'], bundle['resources']):
+    for entry in (passes if passes is not None
+                  else reconstruct_passes(bundle['events'], bundle['resources'])):
         if str(entry.get('kind')) != 'compute':
             continue
         first, last = int(entry['firstEid']), int(entry['lastEid'])
         lines: List[str] = []
         for resource in bundle['resources']:
-            chain = _usage_judged(resource)
+            chain = _usage_judged(resource, chains)
             if chain is None:
                 continue
             bound = [eid for eid, names in chain if 'CS_RWResource' in names and first <= eid <= last]

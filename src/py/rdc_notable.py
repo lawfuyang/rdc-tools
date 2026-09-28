@@ -17,7 +17,7 @@ from __future__ import annotations
 from rdc_bundle import *  # noqa: F401,F403
 from rdc_detect_common import *  # noqa: F401,F403
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 #: How many passes and resources the ranking lists. Stated rather than tuned: a report whose notable list is
 #: longer than this is one nobody reads to the end, and the oddity rules below list every match anyway.
@@ -158,11 +158,11 @@ def _target_ids(entry: ReportPass) -> List[str]:
         ids.append(_res_id(str(entry['depth'])))
     return [idtext for idtext in ids if idtext not in ('', '0')]
 
-def _read_eids(resource: BundleResource) -> List[int]:
+def _read_eids(resource: BundleResource, chains: Optional[UsageChains] = None) -> List[int]:
     """The events at which the engine recorded a *read* of this resource, from its usage chain."""
-    return [eid for eid, names in _usage_chain(resource) if names & USAGE_READS]
+    return [eid for eid, names in _chain_of(resource, chains) if names & USAGE_READS]
 
-def _rw_eids(resource: BundleResource) -> List[int]:
+def _rw_eids(resource: BundleResource, chains: Optional[UsageChains] = None) -> List[int]:
     """The events where the resource is bound as a UAV, or otherwise in a read-write row.
 
     The engine's `*_RWResource` usages say the resource was reachable for reading *and* writing and do not say
@@ -171,14 +171,14 @@ def _rw_eids(resource: BundleResource) -> List[int]:
     entirely -- "read by 0 passes" for a buffer a compute shader sampled through a UAV -- would be a false
     claim, so they are counted separately and named as the ambiguity they are.
     """
-    return [eid for eid, names in _usage_chain(resource)
+    return [eid for eid, names in _chain_of(resource, chains)
             if any(name.endswith('RWResource') for name in names)]
 
-def _touched_after(resource: BundleResource, eid: int) -> bool:
+def _touched_after(resource: BundleResource, eid: int, chains: Optional[UsageChains] = None) -> bool:
     """Whether anything reads -- or *may* read -- this resource later than an event, which is what "nothing
     consumes what this pass wrote" means. A definite read counts, and so does a UAV row, because "the row does
     not say" is not the same as "it did not"."""
-    return any(read > eid for read in _read_eids(resource) + _rw_eids(resource))
+    return any(read > eid for read in _read_eids(resource, chains) + _rw_eids(resource, chains))
 
 def _counter_cost(bundle: BundleData, first: int, last: int) -> Tuple[float, int]:
     """The *cost* counter summed over one pass's events, and how many rows that was.
@@ -202,10 +202,12 @@ def _counter_cost(bundle: BundleData, first: int, last: int) -> Tuple[float, int
         rows += 1
     return total, rows
 
-def notable_passes(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple[List[NotablePass], List[str]]:
+def notable_passes(bundle: BundleData, passes: Sequence[ReportPass],
+                   chains: Optional[UsageChains] = None) -> Tuple[List[NotablePass], List[str]]:
     """The passes worth looking at first: the top of the ranking, then every pass an oddity rule lists.
 
-    Returns the rows and the roll-up notes (what the oddity cap left out).
+    Returns the rows and the roll-up notes (what the oddity cap left out). `chains` is the per-report
+    usage-chain map (`usage_chain_map`) when the caller has one.
     """
     have_counters = bool(bundle['counters'])
     resources = {_res_id(str(r.get('resource', ''))): r for r in bundle['resources']}
@@ -257,9 +259,11 @@ def notable_passes(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple[Li
         if not entry.get('marker'):
             odd_here(PASS_ODDITIES[2])
         known = [idtext for idtext in targets if idtext in resources]
-        if known and all(not _touched_after(resources[idtext], entry['lastEid']) for idtext in known):
+        if known and all(not _touched_after(resources[idtext], entry['lastEid'], chains)
+                         for idtext in known):
             odd_here('%s: res%s' % (PASS_ODDITIES[3], ', res'.join(known)))
-        only = sorted(idtext for idtext in known if _only_this_pass(resources[idtext], entry, passes))
+        only = sorted(idtext for idtext in known
+                      if _only_this_pass(resources[idtext], entry, passes, chains))
         if only:
             odd_here('%s: res%s' % (PASS_ODDITIES[4], ', res'.join(only)))
 
@@ -285,9 +289,10 @@ def notable_passes(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple[Li
     listed = sorted(rows.values(), key=lambda r: (r['rank'] == 0, r['rank'] or r['passIndex']))
     return listed, notes
 
-def _only_this_pass(resource: BundleResource, entry: ReportPass, passes: Sequence[ReportPass]) -> bool:
+def _only_this_pass(resource: BundleResource, entry: ReportPass, passes: Sequence[ReportPass],
+                    chains: Optional[UsageChains] = None) -> bool:
     """Whether every usage row of a resource falls inside one pass -- and there is more than one row to it."""
-    chain = [eid for eid, _names in _usage_chain(resource)]
+    chain = [eid for eid, _names in _chain_of(resource, chains)]
     if len(chain) < 2:
         return False
     elsewhere = [other for other in passes if other['index'] != entry['index']
@@ -295,7 +300,8 @@ def _only_this_pass(resource: BundleResource, entry: ReportPass, passes: Sequenc
     mine = any(entry['firstEid'] <= eid <= entry['lastEid'] for eid in chain)
     return mine and not elsewhere
 
-def _usage_text(resource: BundleResource, readers: List[int], rw: List[int]) -> str:
+def _usage_text(resource: BundleResource, readers: List[int], rw: List[int],
+                chains: Optional[UsageChains] = None) -> str:
     """What the usage chain says about a resource -- including the two ways it can say nothing.
 
     "Read by 0 passes" is only true of a resource the engine tracked and never saw read. A resource with an
@@ -303,7 +309,7 @@ def _usage_text(resource: BundleResource, readers: List[int], rw: List[int]) -> 
     "not tracked"; printing either as "read by 0 passes" would turn "I do not know" into "nothing reads it",
     which is the one claim this whole report is built to avoid making.
     """
-    chain = _usage_chain(resource)
+    chain = _chain_of(resource, chains)
     if not chain:
         return 'the engine recorded no usage row for it at all, so nothing here knows who touches it'
     if len(chain) == 1 and chain[0][1] == frozenset(['Unused']):
@@ -335,15 +341,20 @@ def _resource_row(resource: BundleResource, rank: int, values: List[str]) -> Not
     return NotableResource(resource='res%s' % _res_id(str(resource.get('resource', ''))), name=name, kind=kind,
                            detail=detail, rank=rank, why=[], values=values)
 
-def notable_resources(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple[List[NotableResource], List[str]]:
-    """The resources worth looking at first: the top of the ranking, then every resource a rule lists."""
-    have_usage = str(bundle['manifest'].get('resourceUsage', '')) == 'collected'
+def notable_resources(bundle: BundleData, passes: Sequence[ReportPass],
+                      chains: Optional[UsageChains] = None) -> Tuple[List[NotableResource], List[str]]:
+    """The resources worth looking at first: the top of the ranking, then every resource a rule lists.
+
+    `chains` is the per-report usage-chain map (`usage_chain_map`) when the caller has one; the ranking
+    calls the chain helpers once per resource, so the map is what keeps that one call from being seven.
+    """
+    have_usage = usage_collected(bundle)
     targets = {idtext for entry in passes for idtext in _target_ids(entry)}
 
     def read_passes(resource: BundleResource) -> List[int]:
         if not have_usage:
             return []
-        eids = _read_eids(resource)
+        eids = _read_eids(resource, chains)
         return [entry['index'] for entry in passes
                 if any(entry['firstEid'] <= eid <= entry['lastEid'] for eid in eids)]
 
@@ -351,7 +362,7 @@ def notable_resources(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple
         """The passes that bind it read-write: a UAV read and a UAV write look the same in the row."""
         if not have_usage:
             return []
-        eids = _rw_eids(resource)
+        eids = _rw_eids(resource, chains)
         return [entry['index'] for entry in passes
                 if any(entry['firstEid'] <= eid <= entry['lastEid'] for eid in eids)]
 
@@ -363,15 +374,15 @@ def notable_resources(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple
         idtext = 'res%s' % _res_id(str(resource.get('resource', '')))
         values = [_size_text(resource)]
         if have_usage:
-            values.append(_usage_text(resource, read_passes(resource), rw_passes(resource)))
+            values.append(_usage_text(resource, read_passes(resource), rw_passes(resource), chains))
         rows[idtext] = _resource_row(resource, rank, values)
         rows[idtext]['why'].append('listed by the ranking: #%d of %d resource(s)' % (rank, len(ranked)))
 
     for resource in sorted(judged, key=lambda r: int(r.get('resource', '0') or 0)):
         idtext = 'res%s' % _res_id(str(resource.get('resource', '')))
         reasons: List[str] = []
-        if (have_usage and not _read_eids(resource) and not _rw_eids(resource)
-                and _usage_judged(resource) is not None):
+        if (have_usage and not _read_eids(resource, chains) and not _rw_eids(resource, chains)
+                and _usage_judged(resource, chains) is not None):
             reasons.append(RESOURCE_SPECIALS[0])
         if idtext in targets:
             reasons.append(RESOURCE_SPECIALS[1])
@@ -398,17 +409,22 @@ def notable_resources(bundle: BundleData, passes: Sequence[ReportPass]) -> Tuple
         listed = listed[:NOTABLE_LIMIT + ODDITY_LIMIT]
     return listed, notes
 
-def notables(bundle: BundleData, passes: Sequence[ReportPass]) -> Notables:
-    """Both notable lists and the rules they were built by: the whole content of the report's section."""
-    pass_rows, pass_notes = notable_passes(bundle, passes)
-    resource_rows, resource_notes = notable_resources(bundle, passes)
+def notables(bundle: BundleData, passes: Sequence[ReportPass],
+             chains: Optional[UsageChains] = None) -> Notables:
+    """Both notable lists and the rules they were built by: the whole content of the report's section.
+
+    `chains` is the per-report usage-chain map (`usage_chain_map`) when the caller has one -- the report
+    builds it once and hands it to the detectors and to both lists.
+    """
+    pass_rows, pass_notes = notable_passes(bundle, passes, chains)
+    resource_rows, resource_notes = notable_resources(bundle, passes, chains)
     # The three inputs whose availability is a fact about *this* bundle rather than about the tool: the table
     # says which this frame could answer, so a reader can see what the order above was computed from. The work
     # volumes are per event, so "some pass has one" is the question -- nothing else reads the field.
     per_bundle = {'primitives (vertices, triangles, threads)':
                       any(int(p.get('volumeCalls', 0) or 0) for p in passes),
                   'counter cost': bool(bundle['counters']),
-                  'passes reading it': str(bundle['manifest'].get('resourceUsage', '')) == 'collected'}
+                  'passes reading it': usage_collected(bundle)}
     inputs = [_per_bundle(entry, per_bundle.get(entry['input'], entry['available']))
               for entry in PASS_INPUTS]
     resource_inputs = [_per_bundle(entry, per_bundle.get(entry['input'], entry['available']))

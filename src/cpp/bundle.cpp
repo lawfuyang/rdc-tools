@@ -15,6 +15,36 @@ std::string DigestText(const unsigned char *digest)
     snprintf(out + i * 2, 3, "%02x", digest[i]);
   return std::string(out, 64);
 }
+
+//: The SHA-256 provider and its hash-object size, opened once for the process rather than once per
+//: hash: the manifest hashes every written file (about 3,400 on a corpus bundle, plus the capture
+//: itself), and each `BCryptOpenAlgorithmProvider` was a syscall into bcryptprimitives that every
+//: one of them paid for a handle the whole process could share. Best effort like the hashing
+//: itself -- a provider that cannot be opened leaves the hashes empty, the first file warns, and
+//: the callers print that as the absence it is.
+BCRYPT_ALG_HANDLE Sha256Provider(DWORD &objectBytes, bool &bWarned)
+{
+  static BCRYPT_ALG_HANDLE alg = NULL;
+  static DWORD objectLength = 0;
+  static bool bTried = false;
+  if(!bTried)
+  {
+    bTried = true;
+    if(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) >= 0)
+    {
+      DWORD ignored = 0;
+      if(BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&objectLength, sizeof(objectLength),
+                           &ignored, 0) < 0)
+        objectLength = 0;
+    }
+    else
+    {
+      bWarned = true;
+    }
+  }
+  objectBytes = objectLength;
+  return alg;
+}
 }    // namespace
 
 //: SHA-256 of a buffer in memory, for a document that has to identify *bytes* rather than a file:
@@ -27,15 +57,13 @@ std::string Sha256Bytes(const void *data, size_t size)
   if(data == NULL && size != 0)
     return std::string();
 
-  BCRYPT_ALG_HANDLE alg = NULL;
-  BCRYPT_HASH_HANDLE hash = NULL;
-  if(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) < 0)
+  DWORD objectBytes = 0;
+  bool bWarned = false;
+  BCRYPT_ALG_HANDLE alg = Sha256Provider(objectBytes, bWarned);
+  if(alg == NULL)
     return std::string();
 
-  DWORD objectBytes = 0, ignored = 0;
-  if(BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&objectBytes, sizeof(objectBytes),
-                       &ignored, 0) < 0)
-    objectBytes = 0;
+  BCRYPT_HASH_HANDLE hash = NULL;
   std::vector<unsigned char> object(objectBytes);
   unsigned char digest[32];
 
@@ -47,26 +75,22 @@ std::string Sha256Bytes(const void *data, size_t size)
 
   if(hash != NULL)
     BCryptDestroyHash(hash);
-  BCryptCloseAlgorithmProvider(alg, 0);
   return bOk ? DigestText(digest) : std::string();
 }
 
 std::string Sha256File(const std::filesystem::path &path)
 {
-  BCRYPT_ALG_HANDLE alg = NULL;
-  BCRYPT_HASH_HANDLE hash = NULL;
-  std::string hex;
-
-  if(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) < 0)
+  DWORD objectBytes = 0;
+  bool bWarned = false;
+  BCRYPT_ALG_HANDLE alg = Sha256Provider(objectBytes, bWarned);
+  if(alg == NULL)
   {
-    fprintf(stderr, "warning: no SHA-256 provider available; the manifest will have no hashes\n");
-    return hex;
+    if(bWarned)
+      fprintf(stderr, "warning: no SHA-256 provider available; the manifest will have no hashes\n");
+    return std::string();
   }
 
-  DWORD objectBytes = 0, ignored = 0;
-  if(BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&objectBytes, sizeof(objectBytes),
-                       &ignored, 0) < 0)
-    objectBytes = 0;
+  BCRYPT_HASH_HANDLE hash = NULL;
   std::vector<unsigned char> object(objectBytes);
   unsigned char digest[32];
 
@@ -96,7 +120,6 @@ std::string Sha256File(const std::filesystem::path &path)
     fclose(f);
   if(hash != NULL)
     BCryptDestroyHash(hash);
-  BCryptCloseAlgorithmProvider(alg, 0);
 
   if(!bOk)
   {
@@ -232,8 +255,19 @@ bool HasBoundState(const D3D12Pipe::State *st)
 //: path.
 int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char *path,
                         const D3D12Pipe::State *st, int eid, bool bWantDisasm,
-                        const std::string &bundle, std::vector<std::string> &written)
+                        const std::string &bundle, std::vector<std::string> &written,
+                        bool bAlreadyAtEid)
 {
+  // `bAlreadyAtEid` is the caller's promise that the replay is at `eid` and that nothing has
+  // re-executed the log since the move there: the state, shader and cbuffer documents below each
+  // move to the same event, and with the promise they take the non-forcing form -- the
+  // controller's own same-event short-circuit -- instead of re-applying initial contents and
+  // re-walking the chunks for every one of them (measured shape: ~850 state groups x (2 + cbuffer
+  // blocks) forced re-plays on a corpus bundle). The caller must withdraw the promise for any
+  // event whose `--bounds` fold ran in between: the post-VS fold is a `ReplayLog`, and after one
+  // of those a forced move is the only thing that re-establishes the position. Between this
+  // function's own calls there is only reading -- pipeline state from the controller's cache,
+  // shader reflection, cbuffer contents, descriptor heaps -- none of it re-executes anything.
   // The names under the bundle are paths, built by the path type rather than by hand: a caller may
   // have named the bundle with a trailing separator, which `+ "\\states"` would have doubled.
   const std::filesystem::path statesDir = std::filesystem::path(bundle) / "states";
@@ -248,7 +282,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
     const CaptureStdout out(target);
     if(!out.Ok())
       return 1;
-    CmdState(ctrl, file, path, eid);
+    CmdState(ctrl, file, path, eid, bAlreadyAtEid);
     ProfileAdd(kProfileStateDoc, tDoc);
     written.push_back(BundleRelative(bundle, target));
   }
@@ -261,7 +295,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
     const CaptureStdout out(target);
     if(!out.Ok())
       return 1;
-    CmdShaders(ctrl, file, path, eid, bWantDisasm);
+    CmdShaders(ctrl, file, path, eid, bWantDisasm, bAlreadyAtEid);
     ProfileAdd(kProfileShadersDoc, tDoc);
     written.push_back(BundleRelative(bundle, target));
   }
@@ -287,7 +321,7 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
       const CaptureStdout out(target);
       if(!out.Ok())
         return 1;
-      CmdCbuffer(ctrl, file, path, eid, stage, (int)b);
+      CmdCbuffer(ctrl, file, path, eid, stage, (int)b, bAlreadyAtEid);
       ProfileAdd(kProfileCBuffers, tDoc);
       written.push_back(BundleRelative(bundle, target));
     }
@@ -1199,7 +1233,12 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       // those two kinds of absence are told apart by the log line after the loop rather than by a
       // member whose only content would be "nothing".
       std::string bounds;
-      if(opts.m_bBounds && vol != callVolumes.end() && !vol->second.m_bDispatch)
+      // Whether this event's own `--bounds` fold re-executed the replay between the loop's move and
+      // the document writer below: the post-VS fold is a `ReplayLog`, and the writer's non-forcing
+      // moves are only valid while nothing has re-executed (see WriteEventDocuments).
+      const bool bBoundsFolded =
+          (opts.m_bBounds && vol != callVolumes.end() && !vol->second.m_bDispatch);
+      if(bBoundsFolded)
       {
         const int instances = (int)std::max((long long)1, vol->second.m_Instances);
         const CallBounds call = CallPositionBounds(ctrl, MeshDataStage::Count, 0, instances);
@@ -1236,8 +1275,8 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       if(previousKey.empty() || key != previousKey || bForce)
       {
         previousKey = key;
-        const int rc =
-            WriteEventDocuments(ctrl, file, path, st, eid, bWantDisasm, opts.m_OutDir, written);
+        const int rc = WriteEventDocuments(ctrl, file, path, st, eid, bWantDisasm, opts.m_OutDir,
+                                           written, !bBoundsFolded);
         if(rc == 0)
           stateFiles++;
         else

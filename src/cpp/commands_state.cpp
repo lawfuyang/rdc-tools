@@ -37,9 +37,13 @@ rdcarray<BoundUav> BoundUavs(IReplayController *ctrl)
   return out;
 }
 
-int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid)
+int CmdState(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+             bool bAlreadyAtEid)
 {
-  MoveToEvent(ctrl, eid);
+  // `bAlreadyAtEid` is the bundle writer's promise that the replay is at `eid` and nothing has
+  // re-executed it since (bundle.cpp says which calls those are): the non-forcing move is free at
+  // the event the controller holds. The CLI passes the default, which refreshes.
+  MoveToEvent(ctrl, eid, !bAlreadyAtEid);
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);
@@ -591,9 +595,9 @@ int CmdBuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, con
 //: shaders can share one, so an A/B of two captures (or of one capture through two builds) needs the
 //: digest to say "the same shader" or "a different one" as a fact rather than as a guess.
 int CmdShaders(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-               bool bWantDisasm)
+               bool bWantDisasm, bool bAlreadyAtEid)
 {
-  MoveToEvent(ctrl, eid);
+  MoveToEvent(ctrl, eid, !bAlreadyAtEid);    // see CmdState for the flag's promise
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   if(d3d12 == NULL)
     return Fail(1, "no D3D12 pipeline state at eid %d", eid);
@@ -834,9 +838,9 @@ void BlockRead(IReplayController *ctrl, const D3D12Pipe::State *st, const Shader
 }
 
 int CmdCbuffer(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
-               ShaderStage stage, int slot)
+               ShaderStage stage, int slot, bool bAlreadyAtEid)
 {
-  MoveToEvent(ctrl, eid);
+  MoveToEvent(ctrl, eid, !bAlreadyAtEid);    // see CmdState for the flag's promise
   const D3D12Pipe::State *d3d12 = ctrl->GetD3D12PipelineState();
   const D3D12Pipe::Shader *sh = StageShader(d3d12, stage);
   if(sh == NULL || sh->resourceId == ResourceId::Null())

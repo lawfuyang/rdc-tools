@@ -30,10 +30,20 @@ bool DocumentBuffering()
   return g_bBufferDocuments;
 }
 
-void MoveToEvent(IReplayController *ctrl, int eid)
+void MoveToEvent(IReplayController *ctrl, int eid, bool bForce)
 {
   g_bReplayed = true;
-  ctrl->SetFrameEvent((uint32_t)eid, true);    // the one `SetFrameEvent` left in the program
+  // `force` re-runs the replay even when the engine is already at `eid` -- initial contents
+  // re-applied, the lists flushed, the serialised chunks walked again -- which is why it is the
+  // *default*: anything may have re-executed the log since the last move (`FetchCounters`, pixel
+  // history, the post-VS fold), and a caller that has not accounted for those must not let the
+  // engine answer from wherever such a call left it. The controller short-circuits a non-forced
+  // call at the same event it already holds, so the one caller that *knows* the position is
+  // current -- the bundle's document writer, which runs straight after the events loop's own move
+  // and touches nothing but reads in between -- pays nothing for its repeated moves. A non-forced
+  // call at a *different* event replays there as usual, so the flag only ever removes work that
+  // is provably redundant.
+  ctrl->SetFrameEvent((uint32_t)eid, bForce);    // the one `SetFrameEvent` left in the program
 }
 
 bool AnyEventReplayed()

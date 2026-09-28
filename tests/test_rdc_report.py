@@ -160,6 +160,26 @@ class TestReportRollups(BundleCase):
         self.assertIn('vs 2348: cbuffer[0] $Globals b0 s0 80 bytes', text)
         self.assertIn('ps 2349: cbuffer[1] MobileBasePass b3 s0 64 bytes', text)
 
+    def test_states_are_read_by_listing_and_a_foreign_name_is_ignored(self):
+        """`load_bundle` decides which `states/` documents exist from one directory listing rather than
+        one `open` per event -- this pins both halves of that: a document for an event the bundle names
+        loads, and a file whose name belongs to no event stays ignored (only the events' own names are
+        looked up, exactly as the per-event probe did)."""
+        bundle = self.path('b')
+        write_bundle(
+            bundle,
+            events=[event(96, targets=['2207 2003x1254x1 R10G10B10A2_UNORM'])],
+            states={96: {'shaders': {'eid': 96, 'stages': [
+                {'stage': 'vs', 'resource': '2348', 'entry': 'Main', 'constantBlocks': []}]}}})
+        # A document for an eid that is not an event, and one whose name is not an eid at all: both are
+        # the directory listing's business only, and neither may become part of the bundle.
+        write_json(bundle, os.path.join('states', '9600.state.json'), {'eid': 9600})
+        write_json(bundle, os.path.join('states', 'notes.txt'), 'not a state document')
+        loaded = R.load_bundle(bundle)
+        self.assertEqual(sorted(loaded['states']), ['96'])
+        self.assertIsNotNone(loaded['states']['96']['shaders'])
+        self.assertIsNone(loaded['states']['96']['state'], 'an event with no state document says None')
+
     def test_resources_are_attributed_to_the_pass_that_first_uses_them(self):
         bundle = self.path('b')
         write_bundle(

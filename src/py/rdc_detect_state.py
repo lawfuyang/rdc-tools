@@ -176,7 +176,7 @@ def detect_stencil_without_writer(bundle: BundleData) -> List[RedFlag]:
         'left in it. A clear is not counted as a writer, because a `Clear` row does not say which of depth '
         'and stencil it cleared' % len(lines), lines, 'question')]
 
-def detect_mismatched_msaa(bundle: BundleData) -> List[RedFlag]:
+def detect_mismatched_msaa(bundle: BundleData, chains: Optional[UsageChains] = None) -> List[RedFlag]:
     """A multisampled colour target nothing ever resolves (question).
 
     `samples` is in the resource table and a resolve is a usage row, so the decidable half of the row needs
@@ -193,7 +193,7 @@ def detect_mismatched_msaa(bundle: BundleData) -> List[RedFlag]:
     for resource in sorted(bundle['resources'], key=lambda r: int(r.get('resource', '0') or 0)):
         if str(resource.get('kind')) != 'texture' or int(resource.get('samples', 1) or 1) <= 1:
             continue
-        chain = _usage_judged(resource)
+        chain = _usage_judged(resource, chains)
         if chain is None:
             continue
         if not any('ColorTarget' in names for _eid, names in chain):

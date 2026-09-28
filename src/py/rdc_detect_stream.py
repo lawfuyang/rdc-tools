@@ -25,6 +25,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 #: How many unattributed draws are named before the rest are counted.
 UNATTRIBUTED_LIMIT = 10
 
+#: Everything the three walk-sharing detectors want between them: the markers and every draw chunk, which
+#: is a superset of each detector's own set (`zero-work`'s three names are draw chunks, and
+#: `unattributed-draws` wants exactly markers plus draws). One walk over this answers all three, where
+#: three walks re-framed the same stream three times -- `detect_all` pays the walk once and hands each
+#: detector the rows, and each detector filters them to its own set so its findings are the same as its
+#: own walk's (measured on `desktop-1`: two of the three full walks gone).
+DETECTOR_WALK_CHUNKS = PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS + tuple(rdc_chunkmap.DRAW_CHUNKS)
+
 def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, str, Buffer]]]:
     """`(chunk index, name, payload)` for the chunks whose name is in `wanted`, or None if this tool cannot
     name chunks at all.
@@ -51,15 +59,23 @@ def _named_chunks(path: str, wanted: Sequence[str]) -> Optional[List[Tuple[int, 
             found.append((index, name, rdc_stream.chunk_payload(stream, chunk)))
     return found
 
-def detect_marker_balance(path: str) -> Optional[List[RedFlag]]:
+def detect_marker_balance(path: str,
+                          chunks: Optional[Sequence[Tuple[int, str, Buffer]]] = None) -> Optional[List[RedFlag]]:
     """Markers that do not balance (certain).
 
     A `PopMarker` with nothing pushed, or pushes still open at the end of the stream. Evidence is the chunk
     index, never an event id: the two are different spaces and the stream is all this detector can see
     (REFERENCE §9). Drawing a pass boundary from an unbalanced tree is how a report attributes work to the
     wrong pass, so this is reported before anything tries to.
+
+    `chunks` is the shared walk (`_named_chunks` over `DETECTOR_WALK_CHUNKS`) when the caller has one; the
+    rows it does not want are filtered out here, so the answer is the same as this detector's own walk's.
     """
-    chunks = _named_chunks(path, PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS)
+    wanted = PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS
+    if chunks is None:
+        chunks = _named_chunks(path, wanted)
+    else:
+        chunks = [row for row in chunks if row[1] in wanted]
     if chunks is None:
         return None
 
@@ -95,14 +111,21 @@ def detect_marker_balance(path: str) -> Optional[List[RedFlag]]:
         })
     return flags
 
-def detect_unattributed_draws(path: str) -> Optional[List[RedFlag]]:
+def detect_unattributed_draws(path: str,
+                              chunks: Optional[Sequence[Tuple[int, str, Buffer]]] = None) -> Optional[List[RedFlag]]:
     """Draws and dispatches outside any marker (certain).
 
     A hygiene note, not a bug: plenty of engines draw outside markers. It matters here because the report
     attributes work per pass, and a draw with no marker has nothing to be attributed *to*.
-    """
 
-    chunks = _named_chunks(path, PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS + tuple(rdc_chunkmap.DRAW_CHUNKS))
+    `chunks` is the shared walk (`DETECTOR_WALK_CHUNKS`, which is this detector's own wanted set whole);
+    passed in by `detect_all`, walked here when it is not.
+    """
+    wanted = PUSH_MARKER_CHUNKS + POP_MARKER_CHUNKS + tuple(rdc_chunkmap.DRAW_CHUNKS)
+    if chunks is None:
+        chunks = _named_chunks(path, wanted)
+    else:
+        chunks = [row for row in chunks if row[1] in wanted]
     if chunks is None:
         return None
 
@@ -132,16 +155,22 @@ def detect_unattributed_draws(path: str) -> Optional[List[RedFlag]]:
         'unproven': True,
     }]
 
-def detect_zero_work(path: str) -> Optional[List[RedFlag]]:
+def detect_zero_work(path: str,
+                     chunks: Optional[Sequence[Tuple[int, str, Buffer]]] = None) -> Optional[List[RedFlag]]:
     """Draws and dispatches that can only produce nothing (certain).
 
     Zero indices, zero vertices, zero instances or a zero dispatch dimension: the call is in the stream and
     the GPU does nothing. The counts come from the same payload decoder `chunks`/`draws` use, so the fields
     are read in one place only.
-    """
 
+    `chunks` is the shared walk (`DETECTOR_WALK_CHUNKS`) when the caller has one; this detector's three
+    names are draw chunks, so its own rows are a filter of that set and the answer is the same.
+    """
     wanted = ('List_DrawIndexedInstanced', 'List_DrawInstanced', 'List_Dispatch')
-    chunks = _named_chunks(path, wanted)
+    if chunks is None:
+        chunks = _named_chunks(path, wanted)
+    else:
+        chunks = [row for row in chunks if row[1] in wanted]
     if chunks is None:
         return None
 
@@ -340,6 +369,7 @@ def add_provenance_verdicts(path: str, flags: List[RedFlag]) -> None:
 #: form is what `shaders <eid>` writes and it is the only reflection row whose format is pinned down here
 #: by real output; the read-only and write-only resource rows are not parsed until a capture shows them.
 __all__ = [
+    'DETECTOR_WALK_CHUNKS',
     'POP_MARKER_CHUNKS',
     'PUSH_MARKER_CHUNKS',
     'UNATTRIBUTED_LIMIT',

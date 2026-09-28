@@ -48,7 +48,15 @@ walks this into `info['sections']`, stopping at the first byte that is not 0 (th
   The speed comes from the shape rather than the library: the dictionary is the destination's own tail, which
   is the contiguous case LZ4 has a fast path for, so nothing is allocated or copied per page. A decoder API
   that hands back a fresh `bytes` object per page (the `lz4` PyPI package, which measured 562 MB/s for exactly
-  that reason) is what this replaced, and no `pip` package is involved.
+  that reason) is what this replaced, and no `pip` package is involved. The vendored 1.9.2 also builds with
+  `LZ4_FAST_DEC_LOOP=1` (CMakeLists.txt): upstream gates that loop on `__x86_64__`, which MSVC does not
+  define, so an MSVC build was decoding without it. Verified byte-identical on both corpus captures -- each
+  decoded through a no-flag build and a flagged build of the same source, in one session, `$RDC_LZ4_DLL`
+  picking the library -- the digests and lengths agreeing exactly (`desktop-1`: 1,539,923,584 bytes,
+  sha256 `d9bcf053…`; `desktop-2`: 1,468,797,504 bytes, `1784048c…`) -- and modestly faster: best of two
+  interleaved decodes per side, `desktop-1` 0.732 s → 0.634 s and `desktop-2` 0.571 s → 0.547 s. The decode
+  is memory-bandwidth bound, so this is a few percent of a cold command's decompression rather than a step
+  change: it is upstream's x64 loop shape, measured rather than assumed.
 
   The blocks are **pages of one continuous LZ4 stream, not independent frames**: RenderDoc compresses with
   `LZ4_compress_fast_continue` and decompresses with `LZ4_decompress_safe_continue` over a shared stream
@@ -830,6 +838,33 @@ with `cProfile`: 35.3 s of `_thread.lock.acquire`, i.e. waiting for the A/B, aga
 own transcripts and 3.9 s of its driver session). With `--capture` given, the pair is reported as **not
 compared** -- "`--capture mobile-1` limits this run to one capture" -- and the whole-corpus run is unchanged.
 The same session's numbers for the run itself: 33 s → 22.5 s for `--capture mobile-1`.
+
+**A fifth look** (2026-09-28) took the whole-report `cProfile` apart and found the time above the scan in
+four places, all measured on `desktop-1`'s bundle:
+
+| what | before | after |
+|---|---|---|
+| `load_bundle` probing `states/<eid>.*` per event | 16,540 opens, 13,138 of them misses | 3,402 -- one `os.listdir` answers which exist, and only the events' own names are looked up |
+| the usage chains, rebuilt by each detector and the notable ranking | 36,224 `_usage_chain` builds (7 per resource) | one `usage_chain_map` per report, threaded through `detect_all` and `notables` |
+| `reconstruct_passes` in the report | twice (`cmd_report` and `dead-compute` each built it) | once, passed down; the fields the detector reads are the pass list's own |
+| `firstTouched` per pass | every resource × every pass (4,843 × 104) | one order sorted by `firstEvent`, two bisects per pass |
+| the three walk-sharing stream detectors | three full chunk walks | one over the union (`DETECTOR_WALK_CHUNKS`), each detector filtering to its own set |
+| `report`, warm, same session | 3.99 s | 2.90-3.03 s (detectors 1.57 → 1.08 s, bundle read 1.01 → 0.68 s) |
+
+The equivalence is pinned both ways: `detect_all` with the shared map and pass list answers exactly what
+the per-resource rebuilds did (a test compares findings, run list and notable lists), and `goldens --check`
+over all three captures reports 0 mismatches. Two things were measured and *declined*: memoising
+`known_for_capture`'s capture hash (a `(path, size, mtime)` cache trusts metadata where the corpus's whole
+contract is content identity, and the size-first gate already keeps the hash off captures the corpus does
+not have), and sharing the use ledger between `aliased-write` and the provenance verdicts (~0.1 s, for an
+exception-passing protocol between two skip contracts that differ).
+
+The same session moved the *pair's* A/B under the captures' own checks (`rdc_goldens.cmd_goldens`): the pair
+is offline -- `replaydiff` over two bundle directories, no device -- and its inputs exist before the run
+started, so it runs on a thread started before the captures' loop and joined where the serial order had it.
+The answer, the notes and the output order are unchanged (same results, same exit codes); only the waiting
+overlaps. Measured against the documented ~154 s: **117.1 s**, 0 mismatches, the pair and the driver both
+compared.
 
 
 ### 4.14 Reading the file: mapped, not copied
@@ -2073,6 +2108,25 @@ black box behind a call"). Bounding the sweep at the frame's last event took the
 on the same afternoon's machine: the 946 clamped-tail ids it stopped collecting were 946 `SetFrameEvent`
 calls in the sweep and as many again in the writing pass, and every state document, cbuffer and image the
 bundle contains was byte-identical across the change.
+
+**The writing pass no longer re-forces the event it is already at** (2026-09-28). `MoveToEvent` always passed
+`force=true` to `SetFrameEvent`, and the controller's own code answers a forced call by re-running
+`ReplayLog(eid, WithoutDraw)` + `ReplayLog(eid, OnlyDraw)` + `FetchPipelineState` even when it is already at
+`eid` -- so every state document, shader document and cbuffer document (which each begin with their own
+`MoveToEvent` to the event the events loop just moved to) paid a full re-play: initial contents re-applied,
+the lists flushed, the serialised chunks walked again. The fix is the engine's own short-circuit:
+`MoveToEvent` gained a `bForce` parameter (still `true` by default, because anything may have re-executed the
+log since the last move -- `FetchCounters` does `ReplayLog(0, maxEID, eReplay_Full)`, and so do pixel
+history, the post-VS fold and shader debugging), and `WriteEventDocuments` passes the non-forcing form for
+the events whose `--bounds` fold did not just re-execute between the loop's move and the writer. A
+non-forcing call at a *different* event replays there as usual, so the flag only ever removes provably
+redundant work. Measured on the full `desktop-1` dump (`--with-images`, sweep warm, same session): two
+same-exe control dumps came out **750.5 s and 679.9 s** and byte-identical bundles (3,900 files, 0 differing
+hashes -- the determinism control the A/B stands on), and the changed build **514.6 s** with the same
+byte-identical bundle: **~25-31% off**, all of it from the events/states/cbuffers phase. The manifest's SHA-256
+also opens the BCrypt provider once for the process now rather than once per hashed file (~3,400 of them),
+which is the same class of saving and did not move the A/B on its own. `goldens --check`'s driver half and the
+driver's own selftest (226 checks) are unchanged by both.
 
 **Why the sweep is not parallel.** It looks embarrassingly parallel -- one `SetFrameEvent` per id, each
 independent -- and a parallel version was built and measured before being removed: four worker

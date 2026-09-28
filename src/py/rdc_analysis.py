@@ -133,14 +133,16 @@ if TYPE_CHECKING:       # `unittest` is only needed by `selftest`, and importing
 # defines: it says "this name is part of this module's interface", so the type checker does not report the
 # import as unused while still checking that the module it comes from exports it.
 from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT as DEAD_ALLOCATION_LIMIT,
+                        DETECTOR_WALK_CHUNKS as DETECTOR_WALK_CHUNKS,
                         KIND_ORDER as KIND_ORDER, NOTABLE_LIMIT as NOTABLE_LIMIT,
                         ODDITY_LIMIT as ODDITY_LIMIT, RECOMMENDATION_LIMIT as RECOMMENDATION_LIMIT,
                         REPORT_VERSION as REPORT_VERSION, SEVERITY_ORDER as SEVERITY_ORDER,
-                        BundleData as BundleData,
+                        BundleData as BundleData, UsageChain as UsageChain, UsageChains as UsageChains,
 
                         BundleError as BundleError, DetectorRun as DetectorRun,
                         RedFlag as RedFlag, ReportDocument as ReportDocument, ReportPass as ReportPass,
-                        _command as _command, _refs as _refs,
+                        _chain_of as _chain_of, _command as _command, _named_chunks as _named_chunks,
+                        _refs as _refs, _usage_chain as _usage_chain, _usage_judged as _usage_judged,
                         add_provenance_verdicts as add_provenance_verdicts,
                         apply_known as apply_known,
                         cmd_report as cmd_report, detect_all as detect_all,
@@ -162,7 +164,8 @@ from rdc_report import (BUNDLE_VERSION as BUNDLE_VERSION, DEAD_ALLOCATION_LIMIT 
                         recommendations as recommendations,
                         render_report_markdown as render_report_markdown,
                         report_caveats as report_caveats,
-                        severity_of as severity_of, severity_table as severity_table)
+                        severity_of as severity_of, severity_table as severity_table,
+                        usage_chain_map as usage_chain_map, usage_collected as usage_collected)
 from rdc_chunknames import VERSION as BUNDLED_NAMES_VERSION  # the bundled table's RenderDoc version
 from rdc_renderdoc_src import (BootstrapError as BootstrapError,
                                NO_BOOTSTRAP_ENV as NO_BOOTSTRAP_ENV, describe as describe,

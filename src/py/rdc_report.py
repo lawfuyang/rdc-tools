@@ -15,6 +15,7 @@ from rdc_bundle import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_goldens import KnownCause as KnownCause, known_for_capture as known_for_capture
 from rdc_passes import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 import rdc_profile
+import rdc_types  # noqa: F401  (used qualified: the walk's payload type, `rdc_types.Buffer`)
 from rdc_notable import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_engine_schema import *  # noqa: F401,F403  (re-exported for the CLI and tests)
 from rdc_detect_common import *  # noqa: F401,F403  (re-exported for the CLI and tests)
@@ -80,8 +81,16 @@ def apply_known(flags: List[RedFlag], known: Sequence[Union[str, KnownCause]]) -
     return stale
 
 @rdc_profile.timed('report: detectors')
-def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List[RedFlag], List[DetectorRun]]:
-    """Every finding, and what each detector did -- listed, so "clean" cannot be confused with "unchecked"."""
+def detect_all(bundle: BundleData, rdc_path: Optional[str] = None,
+               passes: Optional[Sequence[ReportPass]] = None,
+               chains: Optional[UsageChains] = None) -> Tuple[List[RedFlag], List[DetectorRun]]:
+    """Every finding, and what each detector did -- listed, so "clean" cannot be confused with "unchecked".
+
+    `passes` and `chains` are the pass list and the usage-chain map the report already has when the caller
+    built them (`cmd_report` does); without them each is built where it was built before, which is what a
+    direct call gets. Sharing them is what keeps one report from reconstructing the same passes twice and
+    rebuilding the same per-resource chains once per detector.
+    """
     flags: List[RedFlag] = []
     runs: List[DetectorRun] = []
 
@@ -112,16 +121,28 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     # `resourceUsage: (not collected...)` and each of them is *skipped with the reason* rather than reported
     # clean. The three chain rules stay separate detectors (and separate rules) rather than one
     # pass, because each has its own certainty and each can be checked on its own.
-    collected = str(bundle['manifest'].get('resourceUsage', '')) == 'collected'
+    collected = usage_collected(bundle)
     reason = '' if collected else 'no usage lists in this bundle (written with --no-usage)'
-    for detector, function in (('dead-allocation', detect_dead_allocations),
-                               ('read-before-write', detect_read_before_write),
+    if chains is None and collected:
+        # The one map this report's detectors and the notable ranking all read: built here when the caller
+        # did not hand one in, and built once in `cmd_report` when it did.
+        chains = usage_chain_map(bundle['resources'])
+    runs.append({'detector': 'dead-allocation', 'ran': collected, 'why': reason})
+    if collected:
+        # The one usage detector that reads the raw records rather than the chains: usage 0 is its whole
+        # question, so it shares the gate and not the map.
+        flags.extend(detect_dead_allocations(bundle))
+    for detector, function in (('read-before-write', detect_read_before_write),
                                ('write-never-read', detect_write_never_read),
-                               ('load-instead-of-clear', detect_load_instead_of_clear),
-                               ('dead-compute', detect_dead_compute)):
+                               ('load-instead-of-clear', detect_load_instead_of_clear)):
         runs.append({'detector': detector, 'ran': collected, 'why': reason})
         if collected:
-            flags.extend(function(bundle))
+            flags.extend(function(bundle, chains))
+    runs.append({'detector': 'dead-compute', 'ran': collected, 'why': reason})
+    if collected:
+        # The pass list is the report's own (built by `cmd_report` before any detector runs); the fields
+        # this reads are `reconstruct_passes`'s own, so a passed-in list answers the same as a fresh one.
+        flags.extend(detect_dead_compute(bundle, chains, passes))
 
     # The pipeline-state rules need the blocks the driver started recording with this bundle format
     # (viewports/scissors/outputMerger, and the component type on signature rows). A bundle from an older
@@ -139,7 +160,7 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     # MSAA is the one of the group that needs no pipeline state: `samples` is in the resource table and a
     # resolve is a usage row, which every bundle has.
     runs.append({'detector': 'mismatched-msaa', 'ran': True, 'why': ''})
-    flags.extend(detect_mismatched_msaa(bundle))
+    flags.extend(detect_mismatched_msaa(bundle, chains))
 
     # The geometry rule reads the post-VS bounds, which are their own opt-in: folding a draw's geometry
     # is the one thing a dump makes the engine *run* (REFERENCE §9), so a bundle without `--bounds` has
@@ -153,10 +174,52 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     # RenderDoc source tree to name what they are looking at. Either being absent is a *skip* with the
     # reason, never a clean report, because "no marker is unbalanced" and "I could not tell markers apart"
     # are different answers and only one of them is worth anything.
+    #
+    # The first three all walk the same stream for overlapping name sets, so the walk is paid once here
+    # over the union of what they want (`DETECTOR_WALK_CHUNKS`) and each filters the rows to its own set --
+    # its findings are the ones its own walk produced. A walk that fails records the failure, and each of
+    # the three then reports the reason its own failed walk would have, because the same file failed the
+    # same way for each of them before this shared anything.
+    walk: Union[List[Tuple[int, str, rdc_types.Buffer]], BaseException, None] = None
+    if rdc_path:
+        try:
+            walk = _named_chunks(rdc_path, DETECTOR_WALK_CHUNKS)
+        except Exception as exc:
+            walk = exc
     for detector, function in (('marker-imbalance', detect_marker_balance),
                                ('unattributed-draws', detect_unattributed_draws),
-                               ('zero-work', detect_zero_work),
-                               ('srgb-view-mismatch', detect_srgb_view_mismatch),
+                               ('zero-work', detect_zero_work)):
+        if not rdc_path:
+            runs.append({'detector': detector, 'ran': False, 'why': 'no capture path given'})
+            continue
+        if isinstance(walk, BaseException):
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'the capture could not be read: %s' % walk})
+            continue
+        if walk is None:
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'no chunk-name map: the RenderDoc source tree was not found '
+                                '(README §1.1)'})
+            continue
+        try:
+            found = function(rdc_path, walk)
+        except Exception as exc:
+            # A capture that moved, or that is not a capture: these detectors are the only part of a report
+            # that touches the file, and a report about a bundle must not die because the .rdc is elsewhere.
+            # The reason goes in the run list, which is where a reader looks for what was not checked.
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'the capture could not be read: %s' % exc})
+            continue
+        if found is None:
+            # The shared walk above already answered this (it is None exactly when there is no chunk-name
+            # map), so this is the detectors' own contract kept honest rather than a reachable branch.
+            runs.append({'detector': detector, 'ran': False,
+                         'why': 'no chunk-name map: the RenderDoc source tree was not found '
+                                '(README §1.1)'})
+            continue
+        runs.append({'detector': detector, 'ran': True, 'why': ''})
+        flags.extend(found)
+    for detector, function in (('srgb-view-mismatch', detect_srgb_view_mismatch),
                                ('aliased-write', detect_aliased_writes)):
         if not rdc_path:
             runs.append({'detector': detector, 'ran': False, 'why': 'no capture path given'})
@@ -164,9 +227,6 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
         try:
             found = function(rdc_path)
         except Exception as exc:
-            # A capture that moved, or that is not a capture: these detectors are the only part of a report
-            # that touches the file, and a report about a bundle must not die because the .rdc is elsewhere.
-            # The reason goes in the run list, which is where a reader looks for what was not checked.
             runs.append({'detector': detector, 'ran': False,
                          'why': 'the capture could not be read: %s' % exc})
             continue
@@ -218,7 +278,12 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
     # with an empty interpretation and the reason, which is a statement the report prints.
     engine = interpret_frame(bundle, passes)
 
-    flags, detectors = detect_all(bundle, path)
+    # The usage chains are asked for by five detectors, the notable ranking and the pass roll-up; one map
+    # built here answers all of them, where before each rebuilt the same per-resource chains (measured on
+    # `desktop-1`: 36,224 chain builds for 4,843 resources -- seven per resource).
+    chains: Optional[UsageChains] = usage_chain_map(bundle['resources']) if usage_collected(bundle) else None
+
+    flags, detectors = detect_all(bundle, path, passes, chains)
 
     # The causes the corpus knows for *this* capture, matched by the corpus's own identity for it (its
     # SHA-256, `rdc_goldens.known_for_capture`): a finding whose cause has been followed to the frame and
@@ -228,8 +293,9 @@ def cmd_report(path: str, bundle_dir: str, out_dir: Optional[str] = None) -> int
 
     # Which of them is worth looking at first (REFERENCE §4.11): a ranking whose inputs and rules are printed with
     # its result, plus everything the rules list whatever its rank. The two lists are computed together because
-    # they share the rule table and the roll-up notes.
-    notable_lists = notables(bundle, passes)
+    # they share the rule table and the roll-up notes -- and the chain map above, which is the ranking's own
+    # per-resource question answered once.
+    notable_lists = notables(bundle, passes, chains)
 
     # And what to *do* about it (REFERENCE §4.11): one lead per detector that fired, per oddity rule that matched
     # and per gap the report could not close -- each with the command that shows its evidence. It reads the

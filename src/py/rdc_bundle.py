@@ -430,13 +430,21 @@ def load_bundle(bundle_dir: str) -> BundleData:
     # The per-event documents that exist, keyed by eid: the pass roll-up names the shaders and the
     # constant blocks of the pass's first event, which is exactly the event the bundle writes a state
     # file for (its state hash includes the render targets, so a pass boundary is always a change).
+    # One `listdir` answers which of them exist, because the file name *is* the eid: probing per event
+    # paid one failed `open` per event without one (measured on the corpus bundles: 16,540 opens of
+    # which 13,138 miss, and a failed open is not cheap on Windows). A name in the listing that belongs
+    # to no event stays ignored, the same as before -- only the events' own names are looked up.
     states: Dict[str, Dict[str, Any]] = {}
     states_dir = os.path.join(bundle_dir, 'states')
     if os.path.isdir(states_dir):
+        present = set(os.listdir(states_dir))
         for event in events:
             eid = int(event['eid'])
-            state = _bundle_file(bundle_dir, os.path.join('states', '%d.state.json' % eid), False)
-            shaders = _bundle_file(bundle_dir, os.path.join('states', '%d.shaders.json' % eid), False)
+            state_name, shaders_name = '%d.state.json' % eid, '%d.shaders.json' % eid
+            state = (_bundle_file(bundle_dir, os.path.join('states', state_name), False)
+                     if state_name in present else None)
+            shaders = (_bundle_file(bundle_dir, os.path.join('states', shaders_name), False)
+                       if shaders_name in present else None)
             states[str(eid)] = {'state': state, 'shaders': shaders}
 
     # The constant-block dumps, keyed by their file name. They are core, not optional: a bundle without

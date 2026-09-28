@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
 
 import rdc_cache
@@ -1081,6 +1082,27 @@ def cmd_goldens(argv: Sequence[str] = ()) -> int:
     driver_any = False
     driver_argv = list((corpus.get('driver') or {}).get('argv') or [rdc_driver.EXE_PATH])
     notes: List[str] = []
+
+    # The pair is offline -- `replaydiff` over two bundle directories, no device -- and its inputs
+    # exist before this run started, so it runs *under* the captures' checks instead of after them:
+    # started here, joined where the serial order had it. The answer, the notes and the output order
+    # are the thread's, not a second run's; only the waiting overlaps (the pair's A/B measured ~18 s
+    # of a run the driver's sessions dominate, REFERENCE 4.17). `daemon`, because a harness that dies
+    # must not wait on a child of its own; an exception inside is re-raised at the join, which is
+    # where the serial code raised it.
+    pair_box: Dict[str, object] = {}
+
+    def run_pair() -> None:
+        try:
+            pair_box['result'] = check_pair(root, corpus)
+        except BaseException as exc:    # not swallowed: re-raised at the join, in serial order
+            pair_box['error'] = exc
+
+    pair_thread: Optional[threading.Thread] = None
+    if not write and not only:
+        pair_thread = threading.Thread(target=run_pair, daemon=True)
+        pair_thread.start()
+
     for capture in corpus['captures']:
         name = str(capture.get('name', ''))
         if only and name != only:
@@ -1143,7 +1165,15 @@ def cmd_goldens(argv: Sequence[str] = ()) -> int:
         pair_checked, failed, problems = False, 0, []
         _print('pair    : not compared (--capture %s limits this run to one capture)' % only)
     else:
-        pair_checked, failed, problems = check_pair(root, corpus)
+        # The join is where the serial order had the pair, so nothing observable moves: the thread's
+        # answer (started before the captures' loop), or the serial call when no thread was started.
+        if pair_thread is None:
+            pair_checked, failed, problems = check_pair(root, corpus)
+        else:
+            pair_thread.join()
+            if 'error' in pair_box:
+                raise cast(BaseException, pair_box['error'])
+            pair_checked, failed, problems = cast(Tuple[bool, int, List[str]], pair_box['result'])
     mismatched += failed + schema_failed
     notes.extend(problems)
     if schema_failed:

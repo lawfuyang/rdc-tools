@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import bisect
+
 from rdc_bundle import *  # noqa: F401,F403
 from rdc_detect_common import *  # noqa: F401,F403
 
@@ -78,10 +80,19 @@ def reconstruct_passes(events: Sequence[BundleEvent],
 
         last_kind, last_targets, last_depth, last_dispatch = kind, targets, depth, dispatch
 
+    # The first-touch roll-up asks, per pass, for the resources whose `firstEvent` falls inside it: a scan
+    # per pass is every resource times every pass (4,843 x 104 on the PC bundle), where one order sorted
+    # by `firstEvent` answers the same question with two bisects per pass. The sort is stable, so equal
+    # firstEvents keep file order, and `_describe` re-sorts by resource id -- the rows come out the same
+    # either way.
+    firsts = [int(r.get('firstEvent', 0) or 0) for r in resources]
+    by_first = sorted(range(len(resources)), key=firsts.__getitem__)
+    ordered = [firsts[index] for index in by_first]
     for entry in passes:
         first, last = entry['firstEid'], entry['lastEid']
-        entry['firstTouched'] = _describe(
-            entry, [r for r in resources if first <= int(r.get('firstEvent', 0) or 0) <= last])
+        lo = bisect.bisect_left(ordered, first)
+        hi = bisect.bisect_right(ordered, last)
+        entry['firstTouched'] = _describe(entry, [resources[index] for index in by_first[lo:hi]])
     return passes
 
 def _pass_structure(kind: str, targets: Sequence[str], depth: str) -> str:

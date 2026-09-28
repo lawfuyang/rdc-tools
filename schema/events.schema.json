@@ -37,6 +37,22 @@
             "threads": {"type": "integer"}
           },
           "additionalProperties": false
+        },
+        "bounds": {
+          "type": "object",
+          "description": "where the draw's geometry lands, written by `dump --bounds`; absent for a dispatch, for an event that is not a call, and for a draw whose geometry stage the engine could not give (or whose data is not a post-projection position). `stage` names the stage the numbers are that stage's -- `gsout` for a tessellated draw, `meshout` for a mesh dispatch, `vsout` otherwise. `vertices` is every vertex the stream held, `finite` the ones the boxes cover and `projected` the ones with a place on the screen, so `finite == vertices` and `projected == finite` are what make the boxes the whole draw's rather than a part of it -- a vertex whose position is not a number, or one behind the eye, can clip its primitive back into view (`clipMin`/`clipMax` are `x y z w` in clip space, `ndcMin`/`ndcMax` are `x/w y/w z/w` over the projected vertices; either pair is absent when there is nothing to take it from)",
+          "properties": {
+            "stage": {"type": "string"},
+            "instances": {"type": "integer"},
+            "vertices": {"type": "integer"},
+            "finite": {"type": "integer"},
+            "projected": {"type": "integer"},
+            "clipMin": {"type": "string"},
+            "clipMax": {"type": "string"},
+            "ndcMin": {"type": "string"},
+            "ndcMax": {"type": "string"}
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

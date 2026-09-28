@@ -32,7 +32,7 @@ def report_caveats() -> List[str]:
         'and the section says which concepts that costs. The values printed with a concept are the members '
         'the table tags, as the bundle\'s cbuffer documents hold them: what the engine reported at that '
         'event, not what the shader made of it.',
-        'Twenty-two detectors run -- six over the bundle, five over the usage chain, five over the pipeline '
+        'Twenty-three detectors run -- six over the bundle, five over the usage chain, six over the pipeline '
         'state, one over the resource table and five over the capture\'s chunk stream -- and a finding is '
         'proven only where the corpus carries a cause for it (the capture\'s `known` list, matched by the '
         'capture\'s own SHA-256, REFERENCE §4.17); everything else is unproven, a lead rather than a verdict. '
@@ -57,6 +57,16 @@ def report_caveats() -> List[str]:
         '(texture against buffer -- the row names a binding, not its type), and a range/heap disagreement at '
         'a register no shader reads. A bundle whose driver did not resolve descriptor tables carries no slot '
         'rows, and the rules that read them are then reported as not looked at rather than as clean.',
+        'The geometry rule reads where a draw\'s own positions land, which is the post-VS fold `dump '
+        '--bounds` writes into each event row (`mesh --bounds` prints the same numbers per call): a bundle '
+        'written without that flag reports the rule as not looked at, and a draw whose fold does not cover '
+        'every vertex -- a position that is not a number is left out of the box, and a vertex behind the eye '
+        'can clip its primitive back into view -- is not judged rather than counted as clean. What it says '
+        'about a draw it does judge is arithmetic on the capture\'s own numbers: every vertex behind the eye, '
+        'every vertex outside one clip plane, or a whole draw projecting outside the rectangle it writes (the '
+        'viewport and scissor in force are each a question, because neither is in the state hash). Whether the '
+        'application *meant* to cull the draw is not in any capture: `cullFlags` is nowhere in the public '
+        'replay API of 1.46.',
         'The notable lists rank what a bundle can measure -- the work its calls asked for, calls, target '
         'pixels, resource churn, and counter cost when the bundle was written with --with-counters -- and their '
         'own table says so where an input is not available: the work volumes live in a bundle written from '

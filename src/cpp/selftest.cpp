@@ -418,6 +418,52 @@ int CmdSelftest()
             "histogram-range-text", "a row must say the span of the group it covers");
   }
 
+  // ------------------------------------------------------------------ the position-bounds arithmetic
+  //
+  // `mesh --bounds` and the report's geometry check fold a stage's positions the same way
+  // (`PositionBoundsAdd`), and a device is what makes that *right* rather than what makes it
+  // checkable: most draws in this machine's corpus have no post-VS data at all, so the fold is
+  // checked here on a hand-built stream where every count and every box is known. What the checks
+  // are about is the three counts, because a verdict may only be taken from a box that covers
+  // everything: a NaN is left out of the box and a vertex behind the eye has no place on the screen.
+  {
+    float verts[4][4] = {
+        {1.0f, 2.0f, 3.0f, 4.0f},      // projected: NDC (0.25, 0.5, 0.75)
+        {-1.0f, -2.0f, 1.0f, 2.0f},    // projected: NDC (-0.5, -1, 0.5)
+        {0.0f, 0.0f, 0.0f, 0.0f},      // w == 0: finite, not projected
+        {5.0f, 5.0f, 5.0f, std::numeric_limits<float>::quiet_NaN()},
+    };
+    bytebuf data;
+    data.resize(sizeof(verts));
+    memcpy(data.data(), verts, sizeof(verts));
+
+    PositionBounds bounds;
+    PositionBoundsAdd(bounds, data.data(), data.size(), sizeof(float) * 4u, 4);
+    t.Check(bounds.m_Vertices == 4 && bounds.m_Finite == 3 && bounds.m_Projected == 2,
+            "bounds-counts",
+            "four vertices, one a NaN and one with w == 0, must count as 3 finite and 2 projected");
+    t.Check(bounds.m_bAny && bounds.m_ClipMin[3] == 0.0f && bounds.m_ClipMax[3] == 4.0f,
+            "bounds-clip-box", "the clip box must be the four components, w included");
+    t.Check(bounds.m_bProjected && bounds.m_NdcMin[0] == -0.5f && bounds.m_NdcMax[0] == 0.25f &&
+                bounds.m_NdcMin[2] == 0.5f && bounds.m_NdcMax[2] == 0.75f,
+            "bounds-ndc-box", "the NDC box must divide per vertex, and only the w > 0 ones");
+
+    // The union over a call's instances is a merge of boxes and a *sum* of counts: an instance whose
+    // vertices were dropped would otherwise stop being counted, and the report reads those totals.
+    PositionBounds two = bounds;
+    PositionBounds again;
+    PositionBoundsAdd(again, data.data(), data.size(), sizeof(float) * 4u, 4);
+    MergePositionBounds(two, again);
+    t.Check(two.m_Vertices == 8 && two.m_Finite == 6 && two.m_Projected == 4 &&
+                two.m_NdcMin[0] == -0.5f,
+            "bounds-merge", "two folds merged must add the counts and keep the union of the boxes");
+
+    const PositionBounds empty;
+    t.Check(empty.m_Vertices == 0 && !empty.m_bAny && !empty.m_bProjected,
+            "bounds-empty-is-not-a-box",
+            "no vertices must mean no box rather than a box at the origin");
+  }
+
   // ------------------------------------------------------------------ the image helpers
   //
   // A contact sheet and a difference map are pictures nobody can check by reading the code, so the
@@ -1282,6 +1328,8 @@ int CmdSelftest()
             "the usage text omits counters --per-pass");
     t.Check(usage.find("histogram") != std::string::npos, "usage-lists-histogram",
             "the usage text omits histogram");
+    t.Check(usage.find("callstack") != std::string::npos, "usage-lists-callstack",
+            "the usage text omits callstack");
 
     HMODULE dll = LoadReplayDLL();
     if(dll == NULL)

@@ -56,6 +56,11 @@ void Usage()
       "usage: replay_dump <command> <capture.rdc> [args] [--json]\n"
       "\n"
       "  info    <rdc>                     renderdoc version, driver, API properties, counts\n"
+      "  callstack <rdc> <eid>             the CPU-side callstack behind one call, when the "
+      "capture\n"
+      "                                    carries one (`info` says whether it was recorded with\n"
+      "                                    them): the shortest path from a call to a line of the\n"
+      "                                    application\n"
       "  draws   <rdc> [max=80] [filter]   the action tree with event ids (markers and calls)\n"
       "  find    <rdc> <substring> [max=40]   events whose call name or marker path matches, and\n"
       "                                        resources whose name matches (case-insensitive)\n"
@@ -97,10 +102,15 @@ void Usage()
       "and looking\n"
       "  mesh    <rdc> <eid> [instance] [max] [--stage vsin|vsout|gsout|taskout|meshout] [--obj "
       "<file>]\n"
-      "                                    one instance's vertices at that stage, with the "
+      "          [--bounds]              one instance's vertices at that stage, with the "
       "primitive\n"
       "                                    count and the position bounds; --obj exports a "
       "Wavefront OBJ\n"
+      "                                    and --bounds asks where the draw's geometry lands\n"
+      "                                    instead (one row per instance, `max` capping the "
+      "rows):\n"
+      "                                    the clip-space position box, the box the perspective\n"
+      "                                    divide makes of it, and the vertices behind the eye\n"
       "  image   <rdc> <eid> <out.bmp> [--overlay <name>] [--mip N] [--slice N] [--sample N]\n"
       "          [--cast <type>] [--hdr M] [--gamma]   the texture display at that event, as a "
       "BMP\n"
@@ -271,7 +281,13 @@ void Usage()
       "fetches the counters: `counters.json` per event, and `counters-passes.json` the engine's "
       "own "
       "fold over\n"
-      "its passes -- the same document `counters --per-pass` prints. `--since`/`--until` pin the "
+      "its passes -- the same document `counters --per-pass` prints. `--bounds` adds each draw's\n"
+      "post-VS geometry to its event row: the clip-space position box, the box the perspective "
+      "divide\n"
+      "makes of it, and how many vertices are in front of the eye (`mesh --bounds` prints the "
+      "same\n"
+      "numbers per instance, and the report's geometry check reads them). `--since`/`--until` pin "
+      "the "
       "id "
       "range (the default scans until 256 ids "
       "in a row\n"
@@ -874,7 +890,8 @@ int MinArgs(const char *cmd)
     return 3;    // <eid> <stage>
   if(!strcmp(cmd, "statediff"))
     return 3;    // <eidA> <eidB>
-  if(!strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "mesh"))
+  if(!strcmp(cmd, "state") || !strcmp(cmd, "shaders") || !strcmp(cmd, "mesh") ||
+     !strcmp(cmd, "callstack"))
     return 2;    // <eid>: `mesh`'s instance and cap are optional, and its id is what comes first
   if(!strcmp(cmd, "trace"))
     return 2;    // <eid>: which invocation to run is an option, so the id is the only positional
@@ -930,7 +947,7 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
                          !strcmp(cmd, "mesh") || !strcmp(cmd, "image") ||
                          !strcmp(cmd, "statediff") || !strcmp(cmd, "patch") ||
                          !strcmp(cmd, "pixelhistory") || !strcmp(cmd, "crosscheck") ||
-                         !strcmp(cmd, "trace");
+                         !strcmp(cmd, "trace") || !strcmp(cmd, "callstack");
   if(!atMarkerText.empty())
   {
     std::string matched;
@@ -998,6 +1015,8 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
 
   if(!strcmp(cmd, "info"))
     return CmdInfo(ctrl, file, path);
+  if(!strcmp(cmd, "callstack") && args.size() > 1)
+    return CmdCallstack(ctrl, file, path, ToInt(args[1], 0));
   if(!strcmp(cmd, "draws"))
     return CmdDraws(ctrl, file, path, args.size() > 1 ? ToInt(args[1], 80) : 80,
                     args.size() > 2 ? args[2].c_str() : NULL);
@@ -1097,18 +1116,24 @@ int DispatchCommand(IReplayController *ctrl, ICaptureFile *file, const char *pat
     // The positionals come first, as the help text shows, and the *first* option ends them: `mesh
     // 270 --stage gsout` has no instance rather than reading `gsout` as one. `at` only advances
     // over positionals, so an option's value is never mistaken for one.
-    int instance = 0, maxRows = 16;
+    MeshOptions opts;
     size_t at = 2;
     if(at < args.size() && !IsOption(args[at]))
-      instance = ToInt(args[at++], instance);
+      opts.m_Instance = ToInt(args[at++], 0);
     if(at < args.size() && !IsOption(args[at]))
-      maxRows = ToInt(args[at++], maxRows);
-    MeshDataStage stage = MeshDataStage::VSOut;
+      opts.m_MaxRows = ToInt(args[at++], opts.m_MaxRows);
     const char *stageName = OptValue(args, "--stage", NULL);
-    if(stageName != NULL && !MeshStageFromName(stageName, stage))
-      return Fail(2, "'%s' is not a mesh stage (%s)", stageName, MeshStageNames(", ").c_str());
-    return CmdMesh(ctrl, file, path, ToInt(args[1], 0), instance, maxRows, stage,
-                   OptValue(args, "--obj", NULL));
+    if(stageName != NULL)
+    {
+      if(!MeshStageFromName(stageName, opts.m_Stage))
+        return Fail(2, "'%s' is not a mesh stage (%s)", stageName, MeshStageNames(", ").c_str());
+      opts.m_bStageGiven = true;
+    }
+    opts.m_bBounds = HasOpt(args, "--bounds");
+    const char *objPath = OptValue(args, "--obj", NULL);
+    if(objPath != NULL)
+      opts.m_ObjPath = objPath;
+    return CmdMesh(ctrl, file, path, ToInt(args[1], 0), opts);
   }
   if(!strcmp(cmd, "image") && args.size() > 2)
   {

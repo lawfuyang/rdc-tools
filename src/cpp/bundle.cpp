@@ -296,6 +296,43 @@ int WriteEventDocuments(IReplayController *ctrl, ICaptureFile *file, const char 
   return 0;
 }
 
+//: One draw's post-VS geometry as the `bounds` member of its event row, or an empty string when
+//: there is nothing to write. The stage is named because the numbers are that stage's: `gsout` for
+//: a tessellated draw, `meshout` for a mesh dispatch, `vsout` for everything else -- and a reader
+//: comparing two dumps has to know which one produced them.
+//:
+//: The counts are what a check needs to trust the boxes: `vertices` is every vertex the stream held
+//: and `projected` the ones with a place on the screen, so `projected == vertices` is the statement
+//: that no vertex was behind the eye (or unusable), which is what makes the box the whole draw's.
+static std::string BoundsMember(const CallBounds &call, int instances)
+{
+  if(!call.m_bData || !call.m_bPosition)
+    return std::string();
+
+  std::string member =
+      Fmt("\"bounds\": {\"stage\": \"%s\", \"instances\": %d, \"vertices\": %lld, "
+          "\"finite\": %lld, \"projected\": %lld",
+          MeshStageText(call.m_Stage), instances, call.m_Total.m_Vertices, call.m_Total.m_Finite,
+          call.m_Total.m_Projected);
+  if(call.m_Total.m_bAny)
+  {
+    member += Fmt(", \"clipMin\": \"%g %g %g %g\", \"clipMax\": \"%g %g %g %g\"",
+                  (double)call.m_Total.m_ClipMin[0], (double)call.m_Total.m_ClipMin[1],
+                  (double)call.m_Total.m_ClipMin[2], (double)call.m_Total.m_ClipMin[3],
+                  (double)call.m_Total.m_ClipMax[0], (double)call.m_Total.m_ClipMax[1],
+                  (double)call.m_Total.m_ClipMax[2], (double)call.m_Total.m_ClipMax[3]);
+  }
+  if(call.m_Total.m_bProjected)
+  {
+    member += Fmt(", \"ndcMin\": \"%g %g %g\", \"ndcMax\": \"%g %g %g\"",
+                  (double)call.m_Total.m_NdcMin[0], (double)call.m_Total.m_NdcMin[1],
+                  (double)call.m_Total.m_NdcMin[2], (double)call.m_Total.m_NdcMax[0],
+                  (double)call.m_Total.m_NdcMax[1], (double)call.m_Total.m_NdcMax[2]);
+  }
+  member += "}, ";
+  return member;
+}
+
 //: The `dump` command's options, parsed from its argument list here and passed to the writers as
 //: one struct rather than as eight parameters that must stay in step. `forceEvents` are extra ids
 //: the caller wants documents for even where the state did not change.
@@ -313,6 +350,10 @@ struct DumpOptions
   bool m_bWithImages = false;
   bool m_bWithCounters = false;
   bool m_bWithTextures = false;
+  //: The one thing a dump asks the engine to *run* rather than to describe: the post-VS geometry of
+  //: every draw, which is a stream-out pass and a readback per call. Opt-in for that reason, and
+  //: the report's geometry check is its only reader (REFERENCE 4.11).
+  bool m_bBounds = false;
   bool m_bOverwrite = false;
   bool m_bNoUsage = false;
   std::vector<int> m_ForceEvents;
@@ -809,6 +850,8 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
       opts.m_bWithCounters = true;
     else if(a == "--textures")
       opts.m_bWithTextures = true;
+    else if(a == "--bounds")
+      opts.m_bBounds = true;
     else if(a == "--overwrite")
       opts.m_bOverwrite = true;
     else if(a == "--no-usage")
@@ -965,6 +1008,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("vendor", (long long)props.vendor);
     Field("shaderDebugging", (long long)props.shaderDebugging);
     Field("pixelHistory", (long long)props.pixelHistory);
+    Field("callstacks", (long long)(file->HasCallstacks() ? 1 : 0));
     Field("chunks", (long long)ctrl->GetStructuredFile().chunks.size());
     Field("resources", (long long)ctrl->GetResources().size());
     Field("textures", (long long)ctrl->GetTextures().size());
@@ -1008,6 +1052,10 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
 
   int eventsWritten = 0;
   size_t stateFiles = 0;
+  // `--bounds`: how many draws got a `bounds` member, and why the rest did not. Counted rather than
+  // written into the row, because "the engine had no geometry stage for this draw" and "its data is
+  // not a post-projection position" are facts about the *run*, not about the call.
+  int boundsCalls = 0, boundsNoData = 0, boundsNoPosition = 0;
   {
     const JsonDocument bJson;
     const CaptureStdout out(std::filesystem::path(opts.m_OutDir) / "events.json");
@@ -1145,15 +1193,34 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
         volume += ", ";
       }
 
+      // The call's geometry, when `--bounds` asked for it: the one readback a dump makes, folded
+      // over every instance of the draw. It is absent for a dispatch, for an event that is not a
+      // call (no volume), and for a draw whose geometry stage the engine could not give -- and
+      // those two kinds of absence are told apart by the log line after the loop rather than by a
+      // member whose only content would be "nothing".
+      std::string bounds;
+      if(opts.m_bBounds && vol != callVolumes.end() && !vol->second.m_bDispatch)
+      {
+        const int instances = (int)std::max((long long)1, vol->second.m_Instances);
+        const CallBounds call = CallPositionBounds(ctrl, MeshDataStage::Count, 0, instances);
+        bounds = BoundsMember(call, instances);
+        if(!bounds.empty())
+          boundsCalls++;
+        else if(!call.m_bData)
+          boundsNoData++;
+        else
+          boundsNoPosition++;
+      }
+
       ObjectRow(Fmt(
           "{\"eid\": %d, \"marker\": \"%s\", \"pso\": \"%s\", \"psoKind\": \"%s\", \"shaders\": "
           "\"%s\","
-          " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, %s\"state\": \"%s\"}",
+          " \"targets\": [%s], \"depth\": \"%s\", \"rootParameters\": %u, %s%s\"state\": \"%s\"}",
           eid,
           JsonEscape(markerPaths.count(eid) ? markerPaths.find(eid)->second : std::string()).c_str(),
-          IdText(st->pipelineResourceId).c_str(), bCompute ? "compute" : "graphics",
-          shaderIds.c_str(), targets.c_str(), depth.c_str(),
-          (unsigned)st->rootSignature.parameters.size(), volume.c_str(), stateHash.c_str()));
+          IdText(st->pipelineResourceId).c_str(), bCompute ? "compute" : "graphics", shaderIds.c_str(),
+          targets.c_str(), depth.c_str(), (unsigned)st->rootSignature.parameters.size(),
+          volume.c_str(), bounds.c_str(), stateHash.c_str()));
       eventsWritten++;
       ProfileAdd(kProfileEventRow, tRow);
 
@@ -1226,6 +1293,12 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
   }
   Log("bundle: events.json written (%d id(s) with bound state, %d state file group(s))",
       eventsWritten, (int)stateFiles);
+  if(opts.m_bBounds)
+  {
+    Log("bundle: --bounds folded %d draw(s) (%d with no geometry stage to read, %d whose stage is "
+        "not a post-projection position)",
+        boundsCalls, boundsNoData, boundsNoPosition);
+  }
 
   // Everything that could be answered differently because the host was faster is behind us: no
   // `SetFrameEvent` follows this point, so from here the documents are written through a buffered
@@ -1464,6 +1537,7 @@ int CmdDump(IReplayController *ctrl, ICaptureFile *file, const char *path,
     Field("withImages", (long long)(opts.m_bWithImages ? 1 : 0));
     Field("withCounters", (long long)(opts.m_bWithCounters ? 1 : 0));
     Field("withTextures", (long long)(opts.m_bWithTextures ? 1 : 0));
+    Field("withBounds", (long long)(opts.m_bBounds ? 1 : 0));
     Field("resourceUsage", std::string(opts.m_bNoUsage ? "not collected" : "collected"));
     Field("stateHashInputs",
           std::string("pso, shader ids, render targets, depth target, root signature"

@@ -184,8 +184,9 @@ the engine.** Five rules follow, and every recipe below keeps to them:
   plus the command that shows it — the rule the tools follow themselves (`AGENTS.md`).
 
 The examples run as written against a capture called `capture.rdc` in the current folder, with `python` standing
-for the interpreter of §1 and everything else spelled out. Items marked *(ROADMAP §N)* do not exist yet;
-everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the full reference for each command.
+for the interpreter of §1 and everything else spelled out. Everything in these tables exists — what is not
+implemented yet is in `ROADMAP.md`, and REFERENCE §4 (offline) and §9 (the driver) are the full reference for
+each command.
 
 ### 2.1 Pick the command by what you are asking
 
@@ -210,6 +211,8 @@ everything else does, and REFERENCE §4 (offline) and §9 (the driver) are the f
 | What does a shader read, and is it given what it reads? | `shaders`, then `crosscheck` |
 | Where is this string / name in the stream? | `grep`, `count`, `names`, `strings` |
 | What did the engine complain about? | `debug` |
+| Which line of the application issued this call? | `callstack <eid>` — when the capture was recorded with callstacks (say `info` first) |
+| Is this instance's geometry even on screen? | `mesh <eid> --bounds`; the report's geometry rule reads the same numbers out of a `dump --bounds` bundle |
 | Which event ids are real? | `probe`, `draws`, `find` |
 | What was bound at eid E? | `state <eid>`, by number or marker path |
 | What changed between two events? | `statediff <eidA> <eidB>` |
@@ -347,7 +350,8 @@ badly (REFERENCE §9).
 
 | Command | What it answers | Example |
 |---|---|---|
-| `info` | renderdoc version, driver, GPU, API properties, feature flags (`pixelHistory`, `shaderDebugging`) and counts — the cheapest sanity check there is | `info 'capture.rdc'` |
+| `info` | renderdoc version, driver, GPU, API properties, feature flags (`pixelHistory`, `shaderDebugging`, `callstacks`) and counts — the cheapest sanity check there is | `info 'capture.rdc'` |
+| `callstack` | the CPU-side callstack behind one call: the chunk it was recorded in, the raw addresses and their resolved names (innermost first), or the note saying the capture carries none — the shortest path from a call to a line of the application | `callstack 'capture.rdc' 2731` |
 | `probe` | which event ids actually have pipeline state; a wrong eid returns an *empty* state rather than an error, so this is what runs before "nothing is bound" is believed. The whole frame by default (a number caps the range, `last` spells the default), it must be the session's **first** command, and the answer is cached — a repeat costs the session's startup | `probe 'capture.rdc'`, `probe 'capture.rdc' 3000` |
 | `debug` | the API's own complaints (validation layer, etc.) — they outrank any self-made hypothesis; `--group` folds each distinct message into one row with its count and eid range, and `--fail-on` exits **1** when anything at or above that severity was reported (a pass/fail line for a script) | `debug 'capture.rdc' --group --fail-on medium` |
 | `draws` | the action tree with event ids: markers and calls, optionally filtered | `draws 'capture.rdc' 200 Shadow` |
@@ -374,7 +378,7 @@ badly (REFERENCE §9).
 | `histogram` | a target's statistics instead of its picture: the engine's min/max and its own histogram of the range between them, as bars (`--json` for the numbers). A resource id or name, or `--eid` for render target 0 at an event | `histogram 'capture.rdc' res1195304 --rows 32` · `histogram 'capture.rdc' --eid 692` |
 | `image` | the texture display at one event, as a BMP | `image 'capture.rdc' 27931 pass1.bmp` |
 | `sheet` | one image per pass, a montage of them and an index; `--list` writes nothing | `sheet 'capture.rdc' .\sheet --max 40` |
-| `mesh` | post-VS vertices for one instance | `mesh 'capture.rdc' 27931 0 20` |
+| `mesh` | post-VS vertices for one instance; `--bounds` asks where the draw's geometry lands instead — one row per instance with the clip-space box, the box the divide makes of it and how many vertices are behind the eye | `mesh 'capture.rdc' 27931 0 20`, `mesh 'capture.rdc' 27931 --bounds` |
 | `imgdiff` | how two images differ: how many pixels, how far, and a perceptual hash of each — a number, not an opinion | `imgdiff 'capture.rdc' before.bmp after.bmp --out heat.bmp` |
 | `pixelhistory` | why this pixel is this colour: every event up to the scope that tried to write it, the test that rejected each, and the value before, from and after it | `pixelhistory 'capture.rdc' last res1234 640 360` |
 
@@ -390,7 +394,7 @@ badly (REFERENCE §9).
 
 | Command | What it answers | Example |
 |---|---|---|
-| `dump` | the whole frame to disk as a bundle the offline tool reads: `events.json`, `states/`, `cbuffers/`, `resources.json`, `messages.json` and a manifest with every hash; `--with-images`, `--textures`, `--with-counters`, `--since`/`--until`/`--max-events` bound the work | `dump 'capture.rdc' bundle --with-images` |
+| `dump` | the whole frame to disk as a bundle the offline tool reads: `events.json`, `states/`, `cbuffers/`, `resources.json`, `messages.json` and a manifest with every hash; `--with-images`, `--textures`, `--with-counters`, `--bounds` (each draw's post-VS geometry, what the report's geometry rule reads), `--since`/`--until`/`--max-events` bound the work | `dump 'capture.rdc' bundle --with-images` |
 | `bundle-verify` | re-hashes a bundle with no device and no DLL, so it can be checked anywhere | `bundle-verify bundle` |
 | `batch` | runs every command in a file against one open capture, paying the open once; each line's output is preceded by `#=== <line>` so a stream can be split again | `batch 'capture.rdc' run.txt > before.txt` |
 | `multi` | the same thing from a command line: one line per argument, in the batch syntax, all in one session — measured, `info` and `state` are 7.07 s and 7.30 s on a 1.55 GB capture while six commands in one session are 7.14 s in total | `multi 'capture.rdc' "state 413" "shaders 413" "crosscheck 413"` |
@@ -689,6 +693,12 @@ shown.
 * **Formats and features are conditional.** Not every texture format can be decoded, shader debugging needs
   debug info that captures usually lack, counters need driver support, and pixel history needs the capture to
   support it. Report the gap; do not synthesise around it.
+* **A flag on every chunk is not a frame in one.** `info`'s `callstacks 1` means the capture was *recorded
+  with the setting on* — all 16,564 chunks of `desktop-1` carry the flag — and its recorder collected no frame
+  for any of them, so `callstack` answers with that rather than with a stack (REFERENCE §9). The same shape of
+  trap is behind the report's geometry rule: it reads the post-VS bounds **only** `dump --bounds` writes, and
+  even a bundle dumped with the flag judges only the draws whose fold covers every vertex — so "no finding"
+  there means "nothing was proved", not "all geometry is on screen".
 * **A long scan is split across processes, and only when the stream is cached.** `strings` and `names` scan
   the whole stream in slices, each in its own process, each mapping the *cached* stream rather than being
   handed the bytes — so `$RDC_NO_CACHE`, or a capture whose stream has never been stored, runs the same scan
@@ -720,8 +730,8 @@ built on.
   reference, §5 worked examples, §6 verified payload facts, §7 how to add a command, §8 pitfalls and known
   limitations, §9 the replay driver (`replay_dump`). Its section numbers are the ones the code cites.
 * **`ROADMAP.md`** — what is not implemented yet, in priority order, each item with its *P* label and its own
-  effort figure: the extracts the engine already answers (§1), the analysis built on them (§2), two probes
-  whose answer is not yet known (§3), and the suggested order (§4) that places every item in one phased list.
+  effort figure: the two probes whose answer is not yet known (§1) and the suggested order (§2) that places
+  them in one phased list.
   Its scope is **one machine** — a `.rdc` here, this repository's Python, the driver exe — and work needing
   anything else (a replay server, another API's capture, a DLL inside the captured application, a program of
   our own) is named in "what is deliberately *not* on this list" with the reason it left. Landed items are

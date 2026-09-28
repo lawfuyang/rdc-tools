@@ -14,6 +14,7 @@ remoteReplay       0
 vendor             6
 shaderDebugging    1
 pixelHistory       1
+callstacks         1
 chunks             16857
 resources          4843
 textures           408
@@ -866,6 +867,18 @@ hash               4630d0eec99fb34d93b521025758fd6681a91872a87ad034e5cd5163f9815
 EyeAdaptationBuffer t0 s0 n1
 RWEyeAdaptationTexture u0 s0 n1
 threadId0 reg0 c3 uint
+#=== callstack 2731
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                2731
+callstacks         1
+chunk              ID3D12GraphicsCommandList::DrawIndexedInstanced
+stackChunk         
+note               no chunk in this capture carries a callstack frame: all 16857 carry the flag -- it was recorded with callstacks on -- and the recorder collected nothing for any of them
 #=== trace 2731 --pixel 640,360
 #=== trace 2731 --vertex 0
 schemaVersion      1
@@ -1665,6 +1678,26 @@ __i3_183 = 8437760
 stepCount          200
 variables          156
 truncated          on
+#=== mesh 2731 --bounds
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                2731
+instances          1
+stage              vsout
+vertices           4
+finite             4
+projected          4
+clipMin            -1230.42 -729.432 10 2060.79
+clipMax            -1194.85 -670.276 10 2075.85
+ndcMin             -0.595007 -0.352738 0.0048173
+ndcMax             -0.577576 -0.324004 0.0048525
+note               
+[0] 4 vertex/vertices, 4 finite, 4 projected, clip -1230.42 -729.432 10 2060.79 .. -1194.85 -670.276 10 2075.85, ndc -0.595007 -0.352738 0.0048173 .. -0.577576 -0.324004 0.0048525
+shown              1
 --- stderr ---
 error: the engine produced no trace for pixel 640,360 at eid 2731 (ps, res166972): sourceDebugInfo is 1
        its shader loading log says: Found debug data in the shader

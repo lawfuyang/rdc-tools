@@ -26,6 +26,7 @@ const SchemaDoc kSchemas[] = {
     "vendor": {"type": "integer"},
     "shaderDebugging": {"type": "integer"},
     "pixelHistory": {"type": "integer"},
+    "callstacks": {"type": "integer", "description": "1 when the capture was recorded with callstacks (it carries a ResolveDatabase section), else 0; `info` and `callstack` both report it"},
     "chunks": {"type": "integer"},
     "resources": {"type": "integer"},
     "textures": {"type": "integer"},
@@ -33,6 +34,30 @@ const SchemaDoc kSchemas[] = {
     "debugMessages": {"type": "integer"},
     "captureBytes": {"type": "integer"},
     "absPath": {"type": "string"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"callstack", "callstack", R"sc({
+  "title": "callstack",
+  "description": "One call's CPU-side callstack, out of the capture's own recording. `callstacks` is whether the capture was recorded with them at all (the same flag `info` prints); a capture without them answers with `note` rather than with an error. `chunk` is the structured chunk the event was recorded in and `stackChunk` the chunk whose metadata carries the stack -- the same name when the call's own chunk has it, an ancestor's when the stack sits higher, empty when nothing recorded one. `addresses` are that chunk's raw frames and `frames` their resolved names, both **innermost first** -- the order the recording and RenderDoc's own inspector use. A frame the resolver could not name is left out rather than printed blank.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid",
+               "callstacks", "chunk", "stackChunk", "addresses", "frames", "note"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "callstacks": {"type": "integer"},
+    "chunk": {"type": "string"},
+    "stackChunk": {"type": "string"},
+    "addresses": {"type": "array", "items": {"type": "string"}},
+    "frames": {"type": "array", "items": {"type": "string"}},
+    "note": {"type": "string"}
   },
   "additionalProperties": false
 })sc"},
@@ -74,6 +99,22 @@ const SchemaDoc kSchemas[] = {
             "groups": {"type": "array", "items": {"type": "integer"}},
             "threadsPerGroup": {"type": "array", "items": {"type": "integer"}},
             "threads": {"type": "integer"}
+          },
+          "additionalProperties": false
+        },
+        "bounds": {
+          "type": "object",
+          "description": "where the draw's geometry lands, written by `dump --bounds`; absent for a dispatch, for an event that is not a call, and for a draw whose geometry stage the engine could not give (or whose data is not a post-projection position). `stage` names the stage the numbers are that stage's -- `gsout` for a tessellated draw, `meshout` for a mesh dispatch, `vsout` otherwise. `vertices` is every vertex the stream held, `finite` the ones the boxes cover and `projected` the ones with a place on the screen, so `finite == vertices` and `projected == finite` are what make the boxes the whole draw's rather than a part of it -- a vertex whose position is not a number, or one behind the eye, can clip its primitive back into view (`clipMin`/`clipMax` are `x y z w` in clip space, `ndcMin`/`ndcMax` are `x/w y/w z/w` over the projected vertices; either pair is absent when there is nothing to take it from)",
+          "properties": {
+            "stage": {"type": "string"},
+            "instances": {"type": "integer"},
+            "vertices": {"type": "integer"},
+            "finite": {"type": "integer"},
+            "projected": {"type": "integer"},
+            "clipMin": {"type": "string"},
+            "clipMax": {"type": "string"},
+            "ndcMin": {"type": "string"},
+            "ndcMax": {"type": "string"}
           },
           "additionalProperties": false
         }
@@ -158,6 +199,7 @@ const SchemaDoc kSchemas[] = {
     "withImages": {"type": "integer"},
     "withCounters": {"type": "integer"},
     "withTextures": {"type": "integer"},
+    "withBounds": {"type": "integer", "description": "1 when the bundle was dumped with `--bounds` (the report's geometry check reads it); absent in a bundle written before the flag existed, which reads as 0"},
     "resourceUsage": {"type": "string", "description": "`collected`, or why the usage lists are absent"},
     "stateHashInputs": {"type": "string", "description": "what the events' state hash is computed from"},
     "statesRule": {"type": "string", "description": "when a state file is written"},
@@ -595,6 +637,36 @@ const SchemaDoc kSchemas[] = {
     "boundsNote": {"type": "string"},
     "obj": {"type": "string"},
     "objVertices": {"type": "integer"}
+  },
+  "additionalProperties": false
+})sc"},
+
+    {"mesh-bounds", "mesh --bounds", R"sc({
+  "title": "mesh-bounds",
+  "description": "Where one draw's geometry lands: the box the stage's positions fill, the box the perspective divide makes of it, and one row per instance saying the same for that instance. This is `mesh --bounds`, the driver half of the report's geometry check -- a draw whose geometry is wholly outside one clip plane, or wholly outside its target's rectangle, cannot have written a pixel of it. `vertices` is every vertex the streams held, `finite` the ones the boxes actually cover and `projected` the ones with a place on the screen, so `finite == vertices` and `projected == finite` are the statements that make the boxes the whole call's: a vertex whose position is not a number is left out of them, and one behind the eye can clip its primitive back into view. `instances` is the engine's own instance count for the call and `shown` how many rows are in `instanceBounds` (the row cap is the command's `max`, default 16); the counts and boxes are over the instances *folded*, which is every instance of the call unless an instance argument named one. `note` says which of the reasons there is nothing to read applies, and is empty when there is.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid",
+               "instances", "stage", "vertices", "finite", "projected", "note", "instanceBounds", "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "instances": {"type": "integer"},
+    "stage": {"type": "string", "description": "the stage the numbers are that stage's: gsout, vsout or meshout"},
+    "vertices": {"type": "integer"},
+    "finite": {"type": "integer"},
+    "projected": {"type": "integer"},
+    "clipMin": {"type": "string", "description": "`x y z w`, absent when no vertex had four finite components"},
+    "clipMax": {"type": "string"},
+    "ndcMin": {"type": "string", "description": "`x/w y/w z/w`, absent when no vertex was in front of the eye"},
+    "ndcMax": {"type": "string"},
+    "note": {"type": "string"},
+    "instanceBounds": {"type": "array", "items": {"type": "string"}},
+    "shown": {"type": "integer"}
   },
   "additionalProperties": false
 })sc"},

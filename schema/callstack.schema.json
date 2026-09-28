@@ -1,0 +1,23 @@
+{
+  "title": "callstack",
+  "description": "One call's CPU-side callstack, out of the capture's own recording. `callstacks` is whether the capture was recorded with them at all (the same flag `info` prints); a capture without them answers with `note` rather than with an error. `chunk` is the structured chunk the event was recorded in and `stackChunk` the chunk whose metadata carries the stack -- the same name when the call's own chunk has it, an ancestor's when the stack sits higher, empty when nothing recorded one. `addresses` are that chunk's raw frames and `frames` their resolved names, both **innermost first** -- the order the recording and RenderDoc's own inspector use. A frame the resolver could not name is left out rather than printed blank.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid",
+               "callstacks", "chunk", "stackChunk", "addresses", "frames", "note"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "callstacks": {"type": "integer"},
+    "chunk": {"type": "string"},
+    "stackChunk": {"type": "string"},
+    "addresses": {"type": "array", "items": {"type": "string"}},
+    "frames": {"type": "array", "items": {"type": "string"}},
+    "note": {"type": "string"}
+  },
+  "additionalProperties": false
+}

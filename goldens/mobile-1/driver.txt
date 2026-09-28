@@ -14,6 +14,7 @@ remoteReplay       0
 vendor             6
 shaderDebugging    1
 pixelHistory       1
+callstacks         1
 chunks             11923
 resources          4304
 textures           282
@@ -728,6 +729,18 @@ cbuffer[1] View                         b1 s0 5996 bytes, 1 variables
 SceneDepthTexture t0 s0 n1
 OutputProjectionTexture u0 s0 n1
 threadId0 reg0 c3 uint
+#=== callstack 692
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                692
+callstacks         1
+chunk              ID3D12GraphicsCommandList::DrawIndexedInstanced
+stackChunk         
+note               no chunk in this capture carries a callstack frame: all 11923 carry the flag -- it was recorded with callstacks on -- and the recorder collected nothing for any of them
 #=== trace 692 --pixel 640,360
 #=== trace 692 --vertex 0
 schemaVersion      1
@@ -1542,6 +1555,26 @@ __i9_247 = -2.22732e-05
 stepCount          200
 variables          211
 truncated          on
+#=== mesh 692 --bounds
+schemaVersion      1
+capture            <capture>
+renderdoc          <engine>
+driver             D3D12
+localReplay        1
+machine            Windows x86 64-bit 
+eid                692
+instances          1
+stage              vsout
+vertices           567
+finite             567
+projected          567
+clipMin            122.391 -227.603 10 304.323
+clipMax            152.848 -169.505 10 334.702
+ndcMin             0.391767 -0.73471 0.0298773
+ndcMax             0.476012 -0.53319 0.0328598
+note               
+[0] 567 vertex/vertices, 567 finite, 567 projected, clip 122.391 -227.603 10 304.323 .. 152.848 -169.505 10 334.702, ndc 0.391767 -0.73471 0.0298773 .. 0.476012 -0.53319 0.0328598
+shown              1
 --- stderr ---
 error: the engine produced no trace for pixel 640,360 at eid 692 (ps, res1149844): sourceDebugInfo is 1
        its shader loading log says: Found debug data in the shader

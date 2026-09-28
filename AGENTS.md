@@ -78,7 +78,10 @@ npx --yes pyright@latest                  # must print: 0 errors, 0 warnings
 - A refactor of this kind is checked against the *real* captures, not only the suite: `report` over
   `desktop-1` must still print `6994 events / 104 passes / 4843 resources / 121 findings from
   22 detectors` and `engine   : Unreal Engine (108 concept(s) by name, 1 question(s))`, and the driver's text
-  output must stay byte-identical. (6,994 is every id with bound state up to the frame's last event; the
+  output must stay byte-identical. (That `22` counts the runs that *ran* -- the run list in `report.json` is
+  23 since 2026-09-28, because `geometry-offscreen` reads the post-VS bounds only `dump --bounds` writes and
+  reports itself not looked at on a bundle dumped without the flag. `goldens`' `report.detectors` label
+  counts the same way.) (6,994 is every id with bound state up to the frame's last event; the
   sweep that produced 16,857 also collected the clamped tail past it, which is gone since REFERENCE §9's
   sweep bound.)
 - New behaviour needs tests in `tests/`; a bug fix needs a test that fails before the fix. A new **detector**

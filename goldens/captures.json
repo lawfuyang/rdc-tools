@@ -68,8 +68,10 @@
         ["crosscheck"],
         ["state", "2731"],
         ["shaders", "2731"],
+        ["callstack", "2731"],
         ["trace", "2731", "--pixel", "640,360"],
-        ["trace", "2731", "--vertex", "0"]
+        ["trace", "2731", "--vertex", "0"],
+        ["mesh", "2731", "--bounds"]
       ],
       "bundle": "build/goldens/desktop-1",
       "commands": [
@@ -109,8 +111,10 @@
         ["crosscheck"],
         ["state", "692"],
         ["shaders", "692"],
+        ["callstack", "692"],
         ["trace", "692", "--pixel", "640,360"],
-        ["trace", "692", "--vertex", "0"]
+        ["trace", "692", "--vertex", "0"],
+        ["mesh", "692", "--bounds"]
       ],
       "bundle": "build/goldens/mobile-1",
       "commands": [

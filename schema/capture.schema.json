@@ -18,6 +18,7 @@
     "vendor": {"type": "integer"},
     "shaderDebugging": {"type": "integer"},
     "pixelHistory": {"type": "integer"},
+    "callstacks": {"type": "integer", "description": "1 when the capture was recorded with callstacks (it carries a ResolveDatabase section), else 0; `info` and `callstack` both report it"},
     "chunks": {"type": "integer"},
     "resources": {"type": "integer"},
     "textures": {"type": "integer"},

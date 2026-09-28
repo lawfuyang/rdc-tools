@@ -15,7 +15,7 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -39,19 +39,44 @@ def capture_text(func: Callable[..., object], *args: Any, **kwargs: Any) -> str:
 
 def event(eid: int, kind: str = 'graphics', targets: Sequence[str] = (), depth: str = '0',
           pso: str = '100', shaders: str = 'vs=2348 ', marker: str = '',
-          volume: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+          volume: Optional[Dict[str, Any]] = None,
+          bounds: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """One `events.json` record, with the fields the report reads spelled out.
 
     `volume` is the work the call asked for, which a driver from 2026-09-22 on writes for a draw or a
     dispatch: it is left out by default, because a bundle without it is the case the report has to keep
-    saying so about.
+    saying so about. `bounds` is the post-VS geometry `dump --bounds` writes (and `geo` below builds
+    one), which is left out for the same reason: a bundle without the flag has none.
     """
     record: Dict[str, Any] = {'eid': eid, 'marker': marker, 'pso': pso, 'psoKind': kind, 'shaders': shaders,
                               'targets': list(targets), 'depth': depth, 'rootParameters': 1,
                               'state': 'deadbeef'}
     if volume is not None:
         record['volume'] = volume
+    if bounds is not None:
+        record['bounds'] = bounds
     return record
+
+def geo(vertices: int, finite: Optional[int] = None, projected: Optional[int] = None,
+        clip: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
+        ndc: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
+        stage: str = 'vsout', instances: int = 1) -> Dict[str, Any]:
+    """One `bounds` member as `dump --bounds` writes it: the three counts and the two boxes.
+
+    `finite`/`projected` default to `vertices` (a stream where nothing was dropped and nothing is
+    behind the eye), because that is the case a verdict may be taken from; the tests that make a
+    detector *not* fire pass the smaller numbers explicitly.
+    """
+    bounds: Dict[str, Any] = {'stage': stage, 'instances': instances, 'vertices': vertices,
+                              'finite': vertices if finite is None else finite,
+                              'projected': vertices if projected is None else projected}
+    if clip is not None:
+        bounds['clipMin'] = ' '.join('%g' % value for value in clip[0])
+        bounds['clipMax'] = ' '.join('%g' % value for value in clip[1])
+    if ndc is not None:
+        bounds['ndcMin'] = ' '.join('%g' % value for value in ndc[0])
+        bounds['ndcMax'] = ' '.join('%g' % value for value in ndc[1])
+    return bounds
 
 def draw_volume(vertices: int, instances: int = 1, triangles: int = 0) -> Dict[str, Any]:
     """A draw's volume, as the driver writes it: triangles are the caller's, because the topology decides them."""

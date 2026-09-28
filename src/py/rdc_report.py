@@ -141,6 +141,14 @@ def detect_all(bundle: BundleData, rdc_path: Optional[str] = None) -> Tuple[List
     runs.append({'detector': 'mismatched-msaa', 'ran': True, 'why': ''})
     flags.extend(detect_mismatched_msaa(bundle))
 
+    # The geometry rule reads the post-VS bounds, which are their own opt-in: folding a draw's geometry
+    # is the one thing a dump makes the engine *run* (REFERENCE §9), so a bundle without `--bounds` has
+    # none, and "no draw's geometry is off screen" and "nobody asked" are different answers.
+    bounds_reason = _bounds_reason(bundle)
+    runs.append({'detector': 'geometry-offscreen', 'ran': not bounds_reason, 'why': bounds_reason})
+    if not bounds_reason:
+        flags.extend(detect_geometry_offscreen(bundle))
+
     # The .rdc-side rules: they need the chunk stream, so they need the capture path, and they need the
     # RenderDoc source tree to name what they are looking at. Either being absent is a *skip* with the
     # reason, never a clean report, because "no marker is unbalanced" and "I could not tell markers apart"

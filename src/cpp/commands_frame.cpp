@@ -19,12 +19,181 @@ int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path)
   // The one API property a command is *gated* on, and the gate says so in its own message: a capture
   // whose driver cannot answer pixel history is refused rather than answered with an empty list.
   Field("pixelHistory", (long long)props.pixelHistory);
+  // Not an API property but a property of the *file*: whether the recording was made with
+  // callstacks on (`capture_options.h`'s `captureCallstacks`, which stores a `ResolveDatabase`
+  // section). It is here because it is the same kind of answer -- what this capture can be asked --
+  // and because `callstack` is the command that asks it.
+  Field("callstacks", (long long)(file->HasCallstacks() ? 1 : 0));
   Field("chunks", (long long)sd.chunks.size());
   Field("resources", (long long)ctrl->GetResources().size());
   Field("textures", (long long)ctrl->GetTextures().size());
   Field("buffers", (long long)ctrl->GetBuffers().size());
   Field("debugMessages", (long long)ctrl->GetDebugMessages().size(), true);
 
+  g_Indent = 0;
+  if(g_bJson)
+    printf("}\n");
+  return 0;
+}
+
+//: The chunk of the structured file an event id was recorded from: the action the engine's own list
+//: names for `eid`, and the chunk of that action's *last* event.
+//:
+//: Not a guess: `ActionDescription::events[i].chunkIndex` is the structured file's own index for
+//: the call, and it is the same member `ActionDescription::GetName` reads (which is why the last
+//: event is the one that carries the call's name -- a multi-action's expansion events are its
+//: children). `APIEvent::NoChunk` is the engine's marker for an event that has no chunk, and it is
+//: carried out rather than turned into 0, because chunk 0 is a real chunk.
+static uint32_t EventChunkIndex(const rdcarray<ActionDescription> &actions, int eid)
+{
+  for(size_t i = 0; i < actions.size(); i++)
+  {
+    const ActionDescription &action = actions[i];
+    if((int)action.eventId == eid && !action.events.empty())
+    {
+      const uint32_t chunk = action.events.back().chunkIndex;
+      if(chunk != APIEvent::NoChunk)
+        return chunk;
+    }
+    const uint32_t child = EventChunkIndex(action.children, eid);
+    if(child != APIEvent::NoChunk)
+      return child;
+  }
+  return APIEvent::NoChunk;
+}
+
+//: The nearest chunk at or above `chunkIndex` that carries a callstack.
+//:
+//: The metadata hangs off the top-level chunk that was serialised (`SDChunkMetaData::callstack`),
+//: and the chunk an event names is not always that one -- so this walks up until it finds a stack,
+//: which is exactly what RenderDoc's own API inspector does with the selected chunk.
+//: `kMaxTreeDepth` bounds the walk because the tree is the capture's to choose.
+static const SDChunk *ChunkWithCallstack(const SDFile &sd, uint32_t chunkIndex)
+{
+  if(chunkIndex >= sd.chunks.size())
+    return NULL;
+  const SDObject *node = sd.chunks[chunkIndex];
+  for(int depth = 0; node != NULL && depth < kMaxTreeDepth; depth++)
+  {
+    // `SDBasic::Chunk` is what a chunk sets in its own constructor, so this cast is a check rather
+    // than an assumption -- an `SDObject` that is not a chunk has no metadata to read.
+    if(node->type.basetype == SDBasic::Chunk)
+    {
+      const SDChunk *chunk = static_cast<const SDChunk *>(node);
+      if(!chunk->metadata.callstack.empty())
+        return chunk;
+    }
+    node = node->GetParent();
+  }
+  return NULL;
+}
+
+int CmdCallstack(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid)
+{
+  // Deliberately no `MoveToEvent`: a callstack is a property of the *recording* (the chunk the call
+  // was serialised in), not of the state at an event, so nothing here needs the engine moved --
+  // which also makes this one of the few commands that costs no `SetFrameEvent`.
+  PrintCaptureHeader(file, path);
+  Field("eid", (long long)eid);
+
+  const bool bHasCallstacks = file->HasCallstacks();
+  Field("callstacks", (long long)(bHasCallstacks ? 1 : 0));
+
+  const SDFile &sd = ctrl->GetStructuredFile();
+  const uint32_t chunkIndex = EventChunkIndex(ctrl->GetRootActions(), eid);
+  if(chunkIndex == APIEvent::NoChunk)
+  {
+    // A wrong id must not answer with an empty stack: a state setter or a barrier has no chunk of its
+    // own, and an id past the frame's end names nothing at all, and the two are worth telling apart.
+    return Fail(
+        1,
+        "no recorded action with event id %d: a call and a marker have a chunk of their own "
+        "and this id has none (`draws` lists the calls, `probe` the ids with state)",
+        eid);
+  }
+
+  // The event's *own* chunk, then the chunk the stack actually came from: the two differ when the
+  // stack sits on an ancestor (a call recorded inside another one), and a reader has to be able to
+  // tell "this call was recorded here" from "this is the call whose stack I am showing".
+  const SDChunk *chunk = chunkIndex < sd.chunks.size() ? sd.chunks[chunkIndex] : NULL;
+  Field("chunk", chunk != NULL ? std::string(chunk->name.c_str()) : std::string());
+  const SDChunk *stackChunk = ChunkWithCallstack(sd, chunkIndex);
+  Field("stackChunk", stackChunk != NULL ? std::string(stackChunk->name.c_str()) : std::string());
+
+  std::string note;
+  rdcarray<uint64_t> addresses;
+  rdcarray<rdcstr> frames;
+  if(!bHasCallstacks)
+  {
+    // The answer the corpus gives, and the reason it is the answer: the option is off by default,
+    // so a capture nobody deliberately recorded with callstacks carries none -- which is a fact
+    // about the file rather than a failure to look.
+    note =
+        "this capture carries no callstacks: it was recorded without them (RenderDoc's capture "
+        "options call the setting `captureCallstacks`, and a capture that has them carries a "
+        "`ResolveDatabase` section, which this one does not)";
+  }
+  else if(stackChunk == NULL)
+  {
+    // Whether the emptiness is this chunk's or the whole recording's: the flag is on the chunk, the
+    // frames are the recorder's, and a capture made with the option on can hold a flag on every chunk
+    // and a frame on none (`desktop-1` and `mobile-1` are exactly that -- 16,564 and 11,923 flagged
+    // chunks, no frames anywhere). One pass over the structured file's chunk list is a size read per
+    // chunk, so this costs nothing and turns "not here" into "not anywhere in this capture".
+    size_t withStack = 0;
+    for(size_t i = 0; i < sd.chunks.size(); i++)
+    {
+      if(!sd.chunks[i]->metadata.callstack.empty())
+        withStack++;
+    }
+    if(withStack == 0)
+      note =
+          Fmt("no chunk in this capture carries a callstack frame: all %llu carry the flag -- it "
+              "was recorded with callstacks on -- and the recorder collected nothing for any of "
+              "them",
+              (unsigned long long)sd.chunks.size());
+    else
+      note =
+          Fmt("this event's chunk carries none, and %llu other chunk(s) in this capture do: the "
+              "recorder collects for the chunks its settings name, not for every one",
+              (unsigned long long)withStack);
+  }
+  else
+  {
+    addresses = stackChunk->metadata.callstack;
+    // The resolver is the capture's own database plus the OS symbol handler, and it is a separate
+    // step: a capture from another platform has addresses without names (`Callstack::MakeResolver`
+    // needs the platform's own reader), which is why the addresses are printed either way.
+    const ResultDetails res = file->InitResolver(false, NULL);
+    if(!res.OK())
+    {
+      note = Fmt("the callstack could not be resolved, so the addresses are shown raw: %s",
+                 ResultText(res).c_str());
+    }
+    else
+    {
+      frames = file->GetResolve(addresses);
+    }
+  }
+
+  ArrayOpen("addresses");
+  for(size_t i = 0; i < addresses.size(); i++)
+    Row(Fmt("0x%llx", (unsigned long long)addresses[i]));
+  ArrayClose(false);
+
+  // Innermost first, which is the order the recording has them in (`RtlCaptureStackBackTrace` on
+  // Windows writes the current frame at index 0) and the order RenderDoc's own inspector lists.
+  ArrayOpen("frames");
+  for(size_t i = 0; i < frames.size(); i++)
+  {
+    // The resolver's own "no name" answer: `GetResolve` returns one empty string when no resolver
+    // was loaded at all, and an unresolved frame is an empty name -- neither is a frame to print.
+    if(!frames[i].empty())
+      Row(std::string(frames[i].c_str()));
+  }
+  ArrayClose(false);
+
+  Field("note", note, true);
   g_Indent = 0;
   if(g_bJson)
     printf("}\n");
@@ -398,6 +567,220 @@ Bounds3 VertexBounds(const bytebuf &data, size_t stride, size_t count)
   return bounds;
 }
 
+// --------------------------------------------------------------------------- position bounds
+//
+// `mesh --bounds` and the report's geometry check share these, because the same arithmetic answers
+// both questions ("what does this draw cover" and "could this draw have written its target") and two
+// implementations of a divide would eventually disagree about a vertex that lands on a clip plane.
+
+void PositionBoundsAdd(PositionBounds &bounds, const byte *data, size_t size, size_t stride,
+                       size_t count)
+{
+  for(size_t v = 0; v < count; v++)
+  {
+    // The offset is computed in `size_t` and checked before it is used, for the same reason
+    // `VertexBounds` does it: `v * stride` can wrap, and a wrapped offset would read outside the
+    // buffer ([expr.add]). A stride that cannot hold four floats cannot hold a position either.
+    const size_t offset = v * stride;
+    if(stride < 4u * sizeof(float) || offset + 4u * sizeof(float) > size)
+      break;
+    float xyzw[4];
+    memcpy(xyzw, data + offset, sizeof(xyzw));
+    bounds.m_Vertices++;
+    // A vertex with a `NaN` or an infinity is *counted* and not folded: one of them in the
+    // comparison poisons every later min and max, and a box that claimed to cover a vertex it
+    // skipped would be the one lie this whole check exists to avoid.
+    if(!std::isfinite(xyzw[0]) || !std::isfinite(xyzw[1]) || !std::isfinite(xyzw[2]) ||
+       !std::isfinite(xyzw[3]))
+      continue;
+    bounds.m_Finite++;
+    if(!bounds.m_bAny)
+    {
+      for(size_t c = 0; c < 4; c++)
+        bounds.m_ClipMin[c] = bounds.m_ClipMax[c] = xyzw[c];
+      bounds.m_bAny = true;
+    }
+    else
+    {
+      for(size_t c = 0; c < 4; c++)
+      {
+        if(xyzw[c] < bounds.m_ClipMin[c])
+          bounds.m_ClipMin[c] = xyzw[c];
+        if(xyzw[c] > bounds.m_ClipMax[c])
+          bounds.m_ClipMax[c] = xyzw[c];
+      }
+    }
+
+    // Only a vertex in front of the eye has an NDC: dividing by zero or by a negative `w` reports a
+    // place on the screen that the vertex cannot rasterise at, and the whole point of the box is
+    // that a verdict may be taken from it.
+    if(xyzw[3] > 0.0f)
+    {
+      const float ndc[3] = {xyzw[0] / xyzw[3], xyzw[1] / xyzw[3], xyzw[2] / xyzw[3]};
+      if(!bounds.m_bProjected)
+      {
+        for(size_t c = 0; c < 3; c++)
+          bounds.m_NdcMin[c] = bounds.m_NdcMax[c] = ndc[c];
+        bounds.m_bProjected = true;
+      }
+      else
+      {
+        for(size_t c = 0; c < 3; c++)
+        {
+          if(ndc[c] < bounds.m_NdcMin[c])
+            bounds.m_NdcMin[c] = ndc[c];
+          if(ndc[c] > bounds.m_NdcMax[c])
+            bounds.m_NdcMax[c] = ndc[c];
+        }
+      }
+      bounds.m_Projected++;
+    }
+  }
+}
+
+//: One instance's own counts, from the engine's description of its stream.
+//:
+//: `numIndices` is the vertex count for a stream-out stage -- the engine sets it to the draw's index
+//: (or vertex) count -- while a mesh dispatch's output is a meshlet list whose `numIndices` is the
+//: *index* count instead: on eid 876 of the hobby capture that is 8,108,315 indices against 368,559
+//: vertices, so the meshlets' own vertex counts are what is summed there. The vertices are contiguous
+//: in the order the meshlets wrote them, which is what makes one run per instance the right window.
+static void MeshCounts(const MeshFormat &mesh, size_t &vertices, long long &primitives)
+{
+  if(!mesh.meshletSizes.empty())
+  {
+    long long indices = 0;
+    vertices = 0;
+    for(size_t i = 0; i < mesh.meshletSizes.size(); i++)
+    {
+      vertices += mesh.meshletSizes[i].numVertices;
+      indices += (long long)mesh.meshletSizes[i].numIndices;
+    }
+    primitives = PrimitiveCount(mesh.topology, indices);
+    return;
+  }
+
+  vertices = mesh.numIndices;
+  primitives = PrimitiveCount(mesh.topology, (long long)mesh.numIndices);
+}
+
+void MergePositionBounds(PositionBounds &into, const PositionBounds &from)
+{
+  into.m_Vertices += from.m_Vertices;
+  into.m_Finite += from.m_Finite;
+  into.m_Projected += from.m_Projected;
+  if(from.m_bAny)
+  {
+    if(!into.m_bAny)
+    {
+      for(size_t c = 0; c < 4; c++)
+      {
+        into.m_ClipMin[c] = from.m_ClipMin[c];
+        into.m_ClipMax[c] = from.m_ClipMax[c];
+      }
+      into.m_bAny = true;
+    }
+    else
+    {
+      for(size_t c = 0; c < 4; c++)
+      {
+        into.m_ClipMin[c] = std::min(into.m_ClipMin[c], from.m_ClipMin[c]);
+        into.m_ClipMax[c] = std::max(into.m_ClipMax[c], from.m_ClipMax[c]);
+      }
+    }
+  }
+  if(from.m_bProjected)
+  {
+    if(!into.m_bProjected)
+    {
+      for(size_t c = 0; c < 3; c++)
+      {
+        into.m_NdcMin[c] = from.m_NdcMin[c];
+        into.m_NdcMax[c] = from.m_NdcMax[c];
+      }
+      into.m_bProjected = true;
+    }
+    else
+    {
+      for(size_t c = 0; c < 3; c++)
+      {
+        into.m_NdcMin[c] = std::min(into.m_NdcMin[c], from.m_NdcMin[c]);
+        into.m_NdcMax[c] = std::max(into.m_NdcMax[c], from.m_NdcMax[c]);
+      }
+    }
+  }
+}
+
+CallBounds CallPositionBounds(IReplayController *ctrl, MeshDataStage stage, int firstInstance,
+                              int instanceCount)
+{
+  CallBounds call;
+
+  // Which stage: the one the caller named, or -- for `Count`, which is the engine's own "the last
+  // stage that wrote something" -- the last geometry stage this draw has. A pipeline with a
+  // tessellation or geometry shader writes `gsout`, a mesh dispatch writes `meshout`, and
+  // everything else writes `vsout`; asking each in turn is one fetch, because the engine caches the
+  // post-VS data per event.
+  const MeshDataStage order[3] = {MeshDataStage::GSOut, MeshDataStage::VSOut, MeshDataStage::MeshOut};
+  MeshFormat mesh;
+  if(stage != MeshDataStage::Count)
+  {
+    mesh = ctrl->GetPostVSData((uint32_t)std::max(0, firstInstance), 0, stage);
+    call.m_Stage = stage;
+    call.m_bData = mesh.vertexResourceId != ResourceId::Null() && mesh.vertexByteStride != 0;
+  }
+  else
+  {
+    for(size_t i = 0; i < 3; i++)
+    {
+      const MeshFormat candidate =
+          ctrl->GetPostVSData((uint32_t)std::max(0, firstInstance), 0, order[i]);
+      if(candidate.vertexResourceId != ResourceId::Null() && candidate.vertexByteStride != 0)
+      {
+        mesh = candidate;
+        call.m_Stage = order[i];
+        call.m_bData = true;
+        break;
+      }
+    }
+  }
+  if(!call.m_bData)
+    return call;
+
+  // The engine's own answer to "is the first `Vec4f` a post-projection position": without it the
+  // four floats are something else's, and the divide below would be arithmetic on a number that has
+  // no place on a screen.
+  call.m_bPosition = mesh.unproject;
+  if(!call.m_bPosition)
+    return call;
+
+  // One readback for the whole call rather than one per instance: the buffer holds every instance's
+  // data, and the per-instance runs are windows into that single read. The engine fills the runs'
+  // offsets and counts from the stream-out counters when the instances wrote different amounts, so
+  // they are read from the engine rather than assumed to be a stride apart.
+  const bytebuf data = ctrl->GetBufferData(mesh.vertexResourceId, 0, mesh.vertexByteSize);
+
+  const int count = std::max(1, instanceCount);
+  for(int i = 0; i < count; i++)
+  {
+    const MeshFormat one =
+        ctrl->GetPostVSData((uint32_t)std::max(0, firstInstance + i), 0, call.m_Stage);
+    size_t vertices = 0;
+    long long primitives = 0;
+    MeshCounts(one, vertices, primitives);
+
+    PositionBounds bounds;
+    if(one.vertexByteOffset < data.size())
+    {
+      PositionBoundsAdd(bounds, data.data() + one.vertexByteOffset,
+                        data.size() - (size_t)one.vertexByteOffset, one.vertexByteStride, vertices);
+    }
+    MergePositionBounds(call.m_Total, bounds);
+    call.m_Instance.push_back(bounds);
+  }
+  return call;
+}
+
 long long WriteObj(const std::filesystem::path &path, const bytebuf &positions, size_t stride,
                    size_t count, const std::vector<uint32_t> &indices, Topology topology,
                    std::string &why)
@@ -461,10 +844,140 @@ long long WriteObj(const std::filesystem::path &path, const bytebuf &positions, 
   return written;
 }
 
-int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int instance,
-            int maxRows, MeshDataStage stage, const char *objPath)
+//: `--bounds`: one row per instance -- the counts, the box the stage's positions fill, and the box
+//: the perspective divide makes of them -- plus the union of those rows. This is the half of the
+//: question "the draw is in the frame and nothing appears" that arithmetic can answer: the
+//: geometry's own place on the screen, where the other half (the application's own frustum
+//: decision) is not in any capture -- `cullFlags` appears nowhere in the public replay API in 1.46.
+//:
+//: The union is the *document's* numbers and the rows are the reading: a caller that wants to know
+//: whether this call could have written anything folds `vertices`, `finite`, `projected` and the two
+//: boxes, which is what the report does with the same numbers out of a bundle (`dump --bounds`).
+static int CmdMeshBounds(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+                         const MeshOptions &opts)
+{
+  // The call's own instance count, from the engine's action list: `mesh` describes one instance and
+  // `--bounds` with no instance is about the call, so the count cannot come from the argument.
+  int instances = 1;
+  {
+    int calls = 0;
+    const std::map<int, CallVolume> volumes = CallVolumesByEid(ctrl, calls);
+    const std::map<int, CallVolume>::const_iterator found = volumes.find(eid);
+    if(found != volumes.end() && found->second.m_Instances > 0)
+      instances = (int)found->second.m_Instances;
+  }
+
+  // One instance named, or every one of them: the plain form's "absent means instance 0" would answer
+  // a different question here, which is why `MeshOptions::m_Instance` keeps "not given" apart.
+  const bool bOne = opts.m_Instance >= 0;
+  const int first = bOne ? opts.m_Instance : 0;
+  const int count = bOne ? 1 : instances;
+
+  const CallBounds call = CallPositionBounds(
+      ctrl, opts.m_bStageGiven ? opts.m_Stage : MeshDataStage::Count, first, count);
+
+  PrintCaptureHeader(file, path);
+  Field("eid", (long long)eid);
+  Field("instances", (long long)instances);
+  Field("stage", std::string(MeshStageText(call.m_Stage)));
+  Field("vertices", (long long)call.m_Total.m_Vertices);
+  Field("finite", (long long)call.m_Total.m_Finite);
+  Field("projected", (long long)call.m_Total.m_Projected);
+
+  if(call.m_Total.m_bAny)
+  {
+    Field("clipMin",
+          Fmt("%g %g %g %g", (double)call.m_Total.m_ClipMin[0], (double)call.m_Total.m_ClipMin[1],
+              (double)call.m_Total.m_ClipMin[2], (double)call.m_Total.m_ClipMin[3]));
+    Field("clipMax",
+          Fmt("%g %g %g %g", (double)call.m_Total.m_ClipMax[0], (double)call.m_Total.m_ClipMax[1],
+              (double)call.m_Total.m_ClipMax[2], (double)call.m_Total.m_ClipMax[3]));
+  }
+  if(call.m_Total.m_bProjected)
+  {
+    Field("ndcMin", Fmt("%g %g %g", (double)call.m_Total.m_NdcMin[0],
+                        (double)call.m_Total.m_NdcMin[1], (double)call.m_Total.m_NdcMin[2]));
+    Field("ndcMax", Fmt("%g %g %g", (double)call.m_Total.m_NdcMax[0],
+                        (double)call.m_Total.m_NdcMax[1], (double)call.m_Total.m_NdcMax[2]));
+  }
+
+  // Why there is nothing to read, in the order the reasons are reached. "Nothing was found" and
+  // "nothing can be concluded from what was found" are different answers, and only one of them is
+  // about the capture.
+  std::string note;
+  if(!call.m_bData)
+    note =
+        "no post-VS data for this event: the engine has nothing for a geometry stage here (a "
+        "dispatch that is not a mesh dispatch, or a draw whose geometry stage it could not fetch)";
+  else if(!call.m_bPosition)
+    note =
+        Fmt("the engine has data for %s and does not report it as a post-projection position, so "
+            "there is no clip-space box to read from it",
+            MeshStageText(call.m_Stage));
+  else if(call.m_Total.m_Vertices == 0)
+    note = "the stream held no vertices";
+  else if(!call.m_Total.m_bAny)
+    note =
+        "no finite position in the stream: every vertex had a NaN or an infinity among its four "
+        "position components";
+  Field("note", note);
+
+  const int cap = opts.m_MaxRows;
+  int shown = 0;
+  ArrayOpen("instanceBounds");
+  for(size_t i = 0; i < call.m_Instance.size(); i++)
+  {
+    if(cap > 0 && (long long)shown >= cap)
+      break;
+    const PositionBounds &bounds = call.m_Instance[i];
+    const int index = first + (int)i;
+
+    std::string row = Fmt("[%d] %lld vertex/vertices, %lld finite, %lld projected", index,
+                          bounds.m_Vertices, bounds.m_Finite, bounds.m_Projected);
+    if(bounds.m_bAny)
+    {
+      row +=
+          Fmt(", clip %g %g %g %g .. %g %g %g %g", (double)bounds.m_ClipMin[0],
+              (double)bounds.m_ClipMin[1], (double)bounds.m_ClipMin[2], (double)bounds.m_ClipMin[3],
+              (double)bounds.m_ClipMax[0], (double)bounds.m_ClipMax[1], (double)bounds.m_ClipMax[2],
+              (double)bounds.m_ClipMax[3]);
+    }
+    if(bounds.m_bProjected)
+    {
+      row += Fmt(", ndc %g %g %g .. %g %g %g", (double)bounds.m_NdcMin[0],
+                 (double)bounds.m_NdcMin[1], (double)bounds.m_NdcMin[2], (double)bounds.m_NdcMax[0],
+                 (double)bounds.m_NdcMax[1], (double)bounds.m_NdcMax[2]);
+    }
+    // The two counts a verdict has to see, said in words when they are not the whole stream: a box
+    // is only a statement about the geometry when nothing was left out of it.
+    if(bounds.m_Finite < bounds.m_Vertices)
+      row += Fmt(", %lld with a NaN or an infinity", bounds.m_Vertices - bounds.m_Finite);
+    if(bounds.m_Finite > 0 && bounds.m_Projected < bounds.m_Finite)
+      row += Fmt(", %lld behind the eye (w <= 0)", bounds.m_Finite - bounds.m_Projected);
+    Row(row);
+    shown++;
+  }
+  ArrayClose(false);
+  Field("shown", (long long)shown, true);
+
+  g_Indent = 0;
+  if(g_bJson)
+    printf("}\n");
+  return 0;
+}
+
+int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+            const MeshOptions &opts)
 {
   MoveToEvent(ctrl, eid);
+
+  if(opts.m_bBounds)
+    return CmdMeshBounds(ctrl, file, path, eid, opts);
+
+  const int instance = opts.m_Instance >= 0 ? opts.m_Instance : 0;
+  const int maxRows = opts.m_MaxRows;
+  const MeshDataStage stage = opts.m_Stage;
+  const char *const objPath = opts.m_ObjPath.empty() ? NULL : opts.m_ObjPath.c_str();
 
   PrintCaptureHeader(file, path);
   Field("eid", (long long)eid);

@@ -37,9 +37,19 @@ write-while-read conflicts among them, and whether an aliasing barrier declares 
 **`provenance`** command, the chain of writers behind one use, back through copies and resolves. Both are in
 `README.md` (the command list) and REFERENCE §4.15; the overlap arithmetic is also the report's
 `aliased-write` detector, and the report's `read-before-write` findings carry the walk as a one-line verdict
-in their evidence. What is left here is the smaller answers with the two probes (§1), plus the three
-candidates the survey killed — their reasons are worth more where they are, under "what is deliberately
-*not* on this list".
+in their evidence. What is left here is the two probes (§1), plus the three candidates the survey killed —
+their reasons are worth more where they are, under "what is deliberately *not* on this list".
+
+**Phase 4 landed on 2026-09-28 and left this file**: the two smaller answers §1 used to hold are the
+**`callstack <eid>`** command (`info` says whether a capture carries callstacks at all) and
+**`mesh --bounds`** with `dump --bounds` — each draw's post-VS geometry folded into a bundle, and the report's
+`geometry-offscreen` rule reading it (every vertex behind the eye, every vertex outside one clip plane, or a
+whole draw projecting outside the rectangle it writes). They are in `README.md` (the command list), REFERENCE §9
+(the two commands, the bundle's `bounds` member and what `--bounds` costs) and REFERENCE §4.11 (the rule, its
+coverage gate and its measurements). The measurement the `callstack` item was waiting on is in REFERENCE §9:
+`desktop-1` and `mobile-1` *were* recorded with callstacks on — every chunk carries the flag and the
+`resolvedb` section is in the file — and the recorder collected **no frame for any of them**, so the item landed
+with its "there is nothing here, and it is the capture rather than the query" path as the corpus's answer.
 
 The survey also cut three candidates, and the reasons are kept in "what is deliberately *not* on this list"
 below, because a measurement that removes an item is worth as much as one that adds it. Half of what the
@@ -196,29 +206,7 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ---
 
-## 1. P3 — the smaller answers, and the two probes
-
-* **`mesh --bounds` — is this instance's geometry even on screen.** *What*: the post-VS bounds the driver
-  already extracts (`mesh` prints `boundsMin`/`boundsMax`, with the vertex and primitive counts) checked
-  against the pass's target: wholly outside the viewport, wholly behind the near plane, `w <= 0` at every
-  vertex — each said as a verdict in the report, beside the pass whose target it could not have written.
-  *Why*: "the draw is in the frame and nothing appears" is the missing-mesh question, and this half of it is
-  arithmetic, where the other half — the *application's* own frustum decision — cannot be read at all:
-  `cullFlags` appears nowhere in the public replay API in 1.46, so the engine cannot be asked why it dropped
-  the instance. *How*: the numbers come from the driver; the check belongs offline in the report, which knows
-  the target size. The first step is a measurement: `desktop-1`'s `vsout` bounds for eid 2731 read
-  `-1230.42 -729.432 10` to `-1194.85 -670.276 10`, which is plainly not NDC, so settle which space each
-  stage reports before writing the comparison. *Blocks*: nothing. **~0.5 d.**
-
-* **`callstack <eid>` — which line of the application issued this call.** *What*: `info` gains whether the
-  capture carries callstacks (`HasCallstacks`, `renderdoc_replay.h`), and the command prints the stack for an
-  event or an action. *Why*: it is the shortest path from a frame to a source line — "who issued this barrier
-  or this copy" — and it is what turns "the state is wrong here" into a file to open. *How*: a small driver
-  addition; the *dependency* is a capture recorded with callstacks on (`captureCallstacks`,
-  `capture_options.h`), and none of the three in the corpus is — their sections end at `resolvedb`. So the
-  item lands and is tested on its "this capture has none" path here, and becomes useful the first time a
-  capture is recorded with the option. *Blocks*: one capture recorded with callstacks on — a capture-side
-  choice rather than a new program, so it is not the D3D12-harness case. **~0.5 d + the capture.**
+## 1. P3 — the two probes
 
 * **Why the pixel path of `trace` produces nothing.** Measured again on the re-pinned corpus: on both new
   captures every shader carries its own debug data (258 of 258 bindings, 196 of 196) and `--vertex 0` steps
@@ -249,13 +237,9 @@ item of §1 appears exactly once, so this is the whole list in one place rather 
 item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
 item *is*.
 
-**The smaller answers and the probes (§1, ~2 d)**, where the bounds check is the one that pays per line of
-code and each probe ends in a sentence either way:
+**The two probes (§1, ~1 d)**, each of which ends in a sentence either way:
 
-1. **`mesh --bounds` (§1, ~0.5 d)** — settle the space first, then the verdict.
-2. **`callstack <eid>` (§1, ~0.5 d)** — with `info` reporting availability; useful from the first capture
-   that carries one.
-3. **Why the pixel path of `trace` produces nothing (§1, ~0.5 d)** — fix the message, or document the
+1. **Why the pixel path of `trace` produces nothing (§1, ~0.5 d)** — fix the message, or document the
    engine's limit in the words of the measurement.
-4. **Does a patched shader carry debug info? (§1, ~0.5 d)** — if it does, "change the shader, then step it"
+2. **Does a patched shader carry debug info? (§1, ~0.5 d)** — if it does, "change the shader, then step it"
    is the next feature; if not, it is one paragraph in REFERENCE.

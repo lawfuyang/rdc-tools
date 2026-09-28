@@ -8,7 +8,7 @@ from rdc_detect_binding import *  # noqa: F401,F403
 
 import re
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 def _state_ranges(bundle: BundleData) -> List[Tuple[int, int, Dict[str, Any]]]:
     """`(first, last, state)` per state document: the events that document's state is bound for."""
@@ -214,6 +214,282 @@ def detect_mismatched_msaa(bundle: BundleData) -> List[RedFlag]:
         'texture returns one sample of it, and what a later pass expects is the resolved image' % len(lines),
         lines, 'question')]
 
+# ---------------------------------------------------------------------------
+# The geometry rules: where a draw's own positions land, against the target it writes.
+#
+# `dump --bounds` folds each draw's post-VS positions (`mesh --bounds` prints the same numbers per
+# instance): the clip-space box, the NDC box over the vertices in front of the eye, and the three
+# counts that say what the boxes cover. Everything below is arithmetic on that fold, which is why the
+# rules can be *certain* where the fold is complete -- and why every one of them checks first.
+
+#: The D3D clip volume, as the six half-spaces a primitive is clipped against, named by what the box
+#: test looks like rather than by which end of the projection it is: `z = 0` is the "near" plane in a
+#: standard projection and the "far" one in a reversed-Z projection, and a bundle does not say which.
+#: Naming the half-space keeps the verdict true either way.
+def _outside_plane(clip_min: Sequence[float], clip_max: Sequence[float]) -> Optional[str]:
+    """The one clip plane every vertex of the box is outside, or None.
+
+    A primitive wholly outside one plane cannot be rasterised -- that is what clipping means -- so this
+    is the strongest verdict the fold supports, and the one that does not need the target at all. The
+    tests are on `x + w` and `x - w` rather than on `x`: a box's extremes *bound* those sums
+    (`max(x + w) <= clipMax.x + clipMax.w`), so a plane can be named from two corners even though the
+    bundle holds no vertex. They are deliberately conservative -- a box that straddles a plane is not
+    claimed about, because a primitive that clips against it may still cover part of the screen.
+    """
+    x_min, y_min, z_min, _w_min = clip_min
+    x_max, y_max, z_max, w_max = clip_max
+    if x_max + w_max < 0.0:
+        return 'left of the clip plane x = -w'
+    if x_min - w_max > 0.0:
+        return 'right of the clip plane x = w'
+    if y_max + w_max < 0.0:
+        return 'below the clip plane y = -w'
+    if y_min - w_max > 0.0:
+        return 'above the clip plane y = w'
+    if z_max < 0.0:
+        return 'beyond the clip plane z = 0'
+    if z_min - w_max > 0.0:
+        return 'beyond the clip plane z = w'
+    return None
+
+def _bounds_reason(bundle: BundleData) -> str:
+    """`''` when the bundle carries post-VS geometry bounds, else the reason its absence is a *skip*.
+
+    The members come from `dump --bounds`, which is opt-in because folding a draw's geometry is the one
+    thing a dump asks the engine to *run* rather than to describe (a stream-out pass and a readback per
+    draw). The manifest says whether the flag was given, which is what keeps "nobody asked" apart from
+    "asked, and the engine gave no post-projection position for any draw" -- a fact about the capture
+    rather than about the bundle, and one a reader of a *clean* report would otherwise not see.
+    """
+    for event in bundle['events']:
+        if isinstance(event.get('bounds'), dict):
+            return ''
+    if int(bundle['manifest'].get('withBounds', 0) or 0) == 0:
+        return ('no post-VS geometry bounds in this bundle: `dump --bounds` writes them, and this '
+                'bundle was written without that flag')
+    return ('no draw in this bundle carries post-VS geometry bounds although it was dumped with '
+            '--bounds: the engine gave no post-projection position for any of its draws')
+
+def _bounds_counts(bounds: Dict[str, Any]) -> Optional[Tuple[int, int, int]]:
+    """`(vertices, finite, projected)` from a `bounds` member, or None when it does not carry them.
+
+    All three are required: a bundle whose member named only the boxes could not be judged soundly, and
+    reading the missing ones as zero would turn "I cannot tell" into "nothing projects".
+    """
+    for key in ('vertices', 'finite', 'projected'):
+        if key not in bounds:
+            return None
+    try:
+        return (int(bounds['vertices']), int(bounds['finite']), int(bounds['projected']))
+    except (TypeError, ValueError):
+        return None
+
+def _bounds_box(bounds: Dict[str, Any], key: str, count: int) -> Optional[List[float]]:
+    """One box out of a `bounds` member: `count` floats from the driver's space-separated string."""
+    text = bounds.get(key)
+    if not isinstance(text, str):
+        return None
+    parts = text.split()
+    if len(parts) != count:
+        return None
+    try:
+        return [float(part) for part in parts]
+    except ValueError:
+        return None
+
+def _target_rect(bundle: BundleData, event: BundleEvent) -> Optional[Tuple[str, int, int]]:
+    """The rectangle the draw's own targets cover: `(what, width, height)`.
+
+    The *union* of every bound target and the depth target, because the answer needed is "is this
+    inside anything the call writes" and a mixed-size MRT is legal. `what` names what it came from for
+    the evidence line. There are three ways to have no answer -- a target row the parse cannot read, a
+    depth target with no resource table entry, no output at all -- and each returns None, which the
+    caller reports as *not judged* rather than as clean.
+    """
+    width, height = 0, 0
+    name = ''
+    for row in event.get('targets', []) or []:
+        parts = str(row).split()
+        if len(parts) < 2:
+            continue
+        size = parts[1].split('x')
+        if len(size) != 3:
+            continue
+        try:
+            w, h = int(size[0]), int(size[1])
+        except ValueError:
+            continue
+        width, height = max(width, w), max(height, h)
+        name = 'res%s' % _res_id(parts[0]) if not name else name
+    if width <= 0 or height <= 0:
+        depth = _res_id(str(event.get('depth', '0') or '0'))
+        resource = next((r for r in bundle['resources'] if _res_id(str(r.get('resource', ''))) == depth),
+                        None)
+        if resource is not None and str(resource.get('kind')) == 'texture':
+            width = int(resource.get('width', 0) or 0)
+            height = int(resource.get('height', 0) or 0)
+            name = 'res%s' % depth
+    if width <= 0 or height <= 0:
+        return None
+    return (name or 'the target', width, height)
+
+def _pixel_box(ndc_min: Sequence[float], ndc_max: Sequence[float],
+               viewport: Optional[Tuple[float, float, float, float]],
+               target: Tuple[int, int]) -> Tuple[float, float, float, float]:
+    """Where the NDC box lands, in pixels: `(x0, y0, x1, y1)`, y down.
+
+    The divide by `w` is the driver's (one per vertex, which is the only place it can be done exactly),
+    so this is the viewport transform alone. The viewport is used when the state in force has one --
+    NDC is mapped onto *it*, not onto the target -- and the target's own rectangle otherwise, which is
+    the same thing when the pass renders the whole of it.
+    """
+    x, y, width, height = viewport if viewport is not None else (0.0, 0.0, float(target[0]),
+                                                                float(target[1]))
+    left = x + (ndc_min[0] * 0.5 + 0.5) * width
+    right = x + (ndc_max[0] * 0.5 + 0.5) * width
+    top = y + (0.5 - ndc_max[1] * 0.5) * height
+    bottom = y + (0.5 - ndc_min[1] * 0.5) * height
+    return (min(left, right), min(top, bottom), max(left, right), max(top, bottom))
+
+def _rect_in_force(bundle: BundleData, eid: int,
+                   key: str) -> Optional[Tuple[float, float, float, float]]:
+    """The first enabled rectangle of the state document in force at `eid`: `(x, y, width, height)`.
+
+    `key` is `viewports` or `scissors` -- the state document's own spelling of the two rectangles a
+    draw is clipped by. The state documents are written when the *state hash* changes, and the hash
+    carries neither: a draw can sit under a document written for an earlier one in the same range. That
+    is why a verdict built on one of these is a question rather than a certainty, while the target's own
+    rectangle (`targets` *is* in the hash) is not.
+    """
+    best: Optional[Dict[str, Any]] = None
+    for first, _last, state in _state_ranges(bundle):
+        if first > eid:
+            break
+        best = state
+    if not isinstance(best, dict):
+        return None
+    for rect in best.get(key, []) or []:
+        if not isinstance(rect, dict) or not rect.get('enabled'):
+            continue
+        try:
+            width, height = float(rect.get('width', 0) or 0), float(rect.get('height', 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if width > 0 and height > 0:
+            return (float(rect.get('x', 0) or 0), float(rect.get('y', 0) or 0), width, height)
+    return None
+
+def _outside_rect(box: Sequence[float], x: float, y: float, width: float, height: float) -> bool:
+    """Whether the pixel box `(x0, y0, x1, y1)` and the rectangle share no pixel."""
+    return box[2] <= x or box[0] >= x + width or box[3] <= y or box[1] >= y + height
+
+def detect_geometry_offscreen(bundle: BundleData) -> List[RedFlag]:
+    """Draws whose own geometry cannot have written their target (certain, or `question`).
+
+    Four verdicts, each from the geometry's own numbers and each one *checked for coverage first*: a
+    box is only a statement about a draw when the fold that produced it held every vertex (`finite ==
+    vertices`) and no vertex was behind the eye (`projected == finite`) -- a vertex whose position is
+    not a number is left out of the box, and one behind the eye can clip its primitive back into view,
+    so a box drawn around the others is not something a "this draw wrote nothing" claim may rest on.
+
+    * every vertex behind the eye: `projected == 0`, and the whole primitive is behind the camera;
+    * every vertex outside one clip plane: the geometry is culled before rasterisation, and the plane is
+      named as the half-space (`left of x = -w`, `beyond z = w`) rather than as near or far, which
+      depends on a projection convention a bundle does not carry;
+    * the pixels the geometry covers lie wholly outside the target's rectangle (certain). Its reachable
+      case is a viewport that is not the target's own rectangle -- inside the clip volume the two agree,
+      which is why the NDC box is compared with the *pixels* rather than with NDC;
+    * ... or wholly outside the viewport or scissor in force (a question: neither is part of the state
+      hash, so the document may have been written for an earlier draw in the same range).
+
+    What this cannot say is why: the application's own frustum decision is not in the capture
+    (`cullFlags` is nowhere in the public replay API of 1.46), so a draw the CPU culled did not reach
+    the file at all, and a draw that did was left to the GPU to reject.
+    """
+    behind: List[str] = []
+    planes: List[str] = []
+    rectangles: List[str] = []
+    clipped: List[str] = []
+    for event in bundle['events']:
+        if str(event.get('psoKind', 'graphics')) == 'compute':
+            continue
+        bounds = event.get('bounds')
+        if not isinstance(bounds, dict):
+            continue
+        counts = _bounds_counts(bounds)
+        if counts is None:
+            continue
+        vertices, finite, projected = counts
+        if vertices <= 0 or finite != vertices:
+            continue
+        eid = int(event.get('eid', 0) or 0)
+        label = 'eid %d (%s)' % (eid, ' '.join(str(event.get('marker', '')).split()) or 'no marker')
+        if projected == 0:
+            behind.append('%s: %d vertex/vertices, every one behind the eye (w <= 0)'
+                          % (label, vertices))
+            continue
+
+        clip_min = _bounds_box(bounds, 'clipMin', 4)
+        clip_max = _bounds_box(bounds, 'clipMax', 4)
+        if clip_min is not None and clip_max is not None:
+            plane = _outside_plane(clip_min, clip_max)
+            if plane is not None:
+                planes.append('%s: %d vertex/vertices, every one %s (clip x %g..%g y %g..%g z %g..%g '
+                              'w %g..%g)' % (label, vertices, plane, clip_min[0], clip_max[0],
+                                             clip_min[1], clip_max[1], clip_min[2], clip_max[2],
+                                             clip_min[3], clip_max[3]))
+                continue
+
+        if projected != finite:
+            continue
+        ndc_min = _bounds_box(bounds, 'ndcMin', 3)
+        ndc_max = _bounds_box(bounds, 'ndcMax', 3)
+        target = _target_rect(bundle, event)
+        if ndc_min is None or ndc_max is None or target is None:
+            continue
+        viewport = _rect_in_force(bundle, eid, 'viewports')
+        box = _pixel_box(ndc_min, ndc_max, viewport, (target[1], target[2]))
+        what, width, height = target
+        text = 'x %g..%g y %g..%g of %s %dx%d' % (box[0], box[2], box[1], box[3], what, width, height)
+        if _outside_rect(box, 0.0, 0.0, float(width), float(height)):
+            rectangles.append('%s: %d vertex/vertices project wholly outside the target: %s'
+                              % (label, vertices, text))
+            continue
+        for name, rect in (('the viewport in force', viewport),
+                           ('the scissor in force', _rect_in_force(bundle, eid, 'scissors'))):
+            if rect is None or not _outside_rect(box, rect[0], rect[1], rect[2], rect[3]):
+                continue
+            clipped.append('%s: %d vertex/vertices project wholly outside %s (x %g y %g %gx%g): %s'
+                           % (label, vertices, name, rect[0], rect[1], rect[2], rect[3], text))
+            break
+
+    flags: List[RedFlag] = []
+    if behind:
+        flags.append(_state_flag(
+            'geometry-offscreen',
+            '%d draw(s) whose every vertex is behind the eye: the geometry is behind the camera, so '
+            'the call is issued and cannot write a pixel' % len(behind), behind, 'certain'))
+    if planes:
+        flags.append(_state_flag(
+            'geometry-offscreen',
+            '%d draw(s) wholly outside one clip plane: a primitive entirely outside a plane is culled '
+            'before rasterisation, so none of them can have written its target' % len(planes), planes,
+            'certain'))
+    if rectangles:
+        flags.append(_state_flag(
+            'geometry-offscreen',
+            '%d draw(s) whose geometry projects wholly outside the rectangle of the target it writes: '
+            'the call is issued and its fragments fall outside the pixels that exist' % len(rectangles),
+            rectangles, 'certain'))
+    if clipped:
+        flags.append(_state_flag(
+            'geometry-offscreen',
+            '%d draw(s) whose geometry projects wholly outside the rectangle the state in force clips '
+            'it to: a question, because a viewport and a scissor are not part of the state hash and the '
+            'document may have been written for an earlier draw in the same range' % len(clipped),
+            clipped, 'question'))
+    return flags
+
 #: A render-target row as `state` writes it: `slot 0  res2269`.
 RENDER_TARGET_ROW = re.compile(r'^\s*slot\s+(?P<slot>\d+)\s+res(?P<resource>\d+)\s*$')
 
@@ -364,17 +640,26 @@ __all__ = [
     'OPAQUE_TARGET_NAMES',
     'RENDER_TARGET_ROW',
     'STATE_LIST_LIMIT',
+    '_bounds_box',
+    '_bounds_counts',
+    '_bounds_reason',
     '_graphics_state_ranges',
+    '_outside_plane',
+    '_outside_rect',
+    '_pixel_box',
     '_pipeline_state_reason',
     '_range_label',
+    '_rect_in_force',
     '_state_flag',
     '_state_ranges',
     '_stencil_writes',
+    '_target_rect',
     '_unorm_bits',
     'detect_blend_in_opaque_pass',
     'detect_depth_logic',
     'detect_empty_scissor',
     'detect_format_units_suspicion',
+    'detect_geometry_offscreen',
     'detect_mismatched_msaa',
     'detect_stencil_without_writer',
 ]

@@ -159,6 +159,132 @@ class TestReportPipelineState(BundleCase):
         self.assertTrue(runs['mismatched-msaa']['ran'],
                         'the samples rule reads the resource table, which every bundle has')
 
+class TestReportGeometry(BundleCase):
+    """The geometry rule (`geometry-offscreen`), which reads the per-draw `bounds` member `dump --bounds`
+    writes: where a draw's own positions land, against the target it writes.
+
+    Every fixture here is a *fold* the driver would have written -- the three counts and the two boxes --
+    which is what makes these tests about the rule rather than about a capture's data. The rule's own
+    difficulty is that a box is only a statement about a draw when the fold that produced it covered
+    every vertex, so half of these tests are the cases it must stay quiet about.
+    """
+
+    def test_a_draw_behind_the_eye_is_certain(self):
+        bundle = self.path('b')
+        write_bundle(bundle, events=[
+            event(96, targets=['2207 200x100x1 R8G8B8A8_UNORM'], marker='PrePass > Shadow',
+                  bounds=geo(3, projected=0, clip=([-1, -1, 0, -4], [1, 1, 0, -2]))),
+        ])
+        flags = self.flags(bundle, 'geometry-offscreen')
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0]['certainty'], 'certain')
+        self.assertEqual(flags[0]['evidence'],
+                         ['eid 96 (PrePass > Shadow): 3 vertex/vertices, every one behind the eye '
+                          '(w <= 0)'])
+        self.assertIn('every vertex is behind the eye', flags[0]['what'])
+
+    def test_a_draw_outside_one_clip_plane_is_certain(self):
+        """Three boxes, three planes -- left, above and beyond `z = w` -- and a fourth that merely
+        *straddles* the left plane, which is the case a verdict may not be taken from."""
+        bundle = self.path('b')
+        write_bundle(bundle, events=[
+            event(96, targets=['2207 200x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(3, clip=([-10, -1, 0, 1], [-5, 1, 1, 2]))),
+            event(120, targets=['2207 200x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(3, clip=([-1, 10, 0, 1], [1, 20, 1, 2]))),
+            event(140, targets=['2207 200x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(3, clip=([-1, -1, 5, 1], [1, 1, 6, 2]))),
+            event(160, targets=['2207 200x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(3, clip=([-3, -1, 0, 1], [3, 1, 1, 1]))),
+        ])
+        flags = self.flags(bundle, 'geometry-offscreen')
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0]['certainty'], 'certain')
+        self.assertEqual(len(flags[0]['evidence']), 3)
+        self.assertIn('every one left of the clip plane x = -w', flags[0]['evidence'][0])
+        self.assertIn('every one above the clip plane y = w', flags[0]['evidence'][1])
+        self.assertIn('every one beyond the clip plane z = w', flags[0]['evidence'][2])
+
+    def test_geometry_outside_the_target_rectangle_is_certain(self):
+        """The reachable case for this one is a viewport that is not the target's own rectangle: inside
+        the clip volume the two agree, which is why the NDC box is compared with the *pixels*. The clip
+        box straddles every plane, so only the pixels the geometry covers can answer."""
+        viewport = {'x': 0.0, 'y': 0.0, 'width': 400.0, 'height': 400.0, 'minDepth': 0.0,
+                    'maxDepth': 1.0, 'enabled': True}
+        bundle = self.path('b')
+        write_bundle(bundle, events=[event(96, targets=['2207 100x100x1 R8G8B8A8_UNORM'],
+                                          bounds=geo(6, clip=([-3, -3, 0, 1], [3, 3, 1, 2]),
+                                                     ndc=([0.2, 0.2, 0.5], [0.4, 0.4, 0.5])))],
+                     states={96: {'state': graphics_state(96, blocks={'viewports': [viewport]})}})
+        flags = self.flags(bundle, 'geometry-offscreen')
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0]['certainty'], 'certain')
+        self.assertIn('project wholly outside the target: x 240..280 y 120..160 of res2207 100x100',
+                      flags[0]['evidence'][0])
+
+    def test_geometry_outside_the_viewport_or_scissor_is_a_question(self):
+        """Two draws: one whose pixels miss a viewport smaller than the target (inside the clip volume --
+        the box sums cannot say it), one whose pixels miss a scissor while the viewport holds them. Both
+        are questions, because neither rectangle is part of the state hash."""
+        viewport = {'x': 0.0, 'y': 0.0, 'width': 50.0, 'height': 50.0, 'minDepth': 0.0,
+                    'maxDepth': 1.0, 'enabled': True}
+        full = dict(viewport, width=100.0, height=100.0)
+        scissor = {'x': 0, 'y': 0, 'width': 20, 'height': 20, 'enabled': True}
+        clip = ([-3, -3, -1, 1], [3, 3, 2, 1])
+        bundle = self.path('b')
+        write_bundle(bundle, events=[
+            event(96, targets=['2207 100x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(3, clip=clip, ndc=([1.05, 0.0, 0.0], [1.2, 0.0, 0.0]))),
+            event(120, targets=['2207 100x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(3, clip=clip, ndc=([-0.5, 0.5, 0.0], [0.5, 0.9, 0.0]))),
+        ], states={
+            96: {'state': graphics_state(96, blocks={'viewports': [viewport]})},
+            120: {'state': graphics_state(120, blocks={'viewports': [full], 'scissors': [scissor]})},
+        })
+        flags = self.flags(bundle, 'geometry-offscreen')
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0]['certainty'], 'question')
+        self.assertIn('wholly outside the viewport in force (x 0 y 0 50x50)', flags[0]['evidence'][0])
+        self.assertIn('wholly outside the scissor in force (x 0 y 0 20x20)', flags[0]['evidence'][1])
+
+    def test_a_fold_that_does_not_cover_every_vertex_is_not_judged(self):
+        """Three draws whose boxes say "off screen" in one way or another, and only the box that covers
+        every vertex is judged: a position that is not a number is left out of the box, and a vertex
+        behind the eye can clip its primitive back into view."""
+        offscreen = ([-10, -1, 0, 1], [-5, 1, 1, 2])
+        bundle = self.path('b')
+        write_bundle(bundle, events=[
+            event(96, targets=['2207 100x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(4, finite=3, projected=3, clip=offscreen,
+                             ndc=([-1.5, 0.0, 0.5], [-1.2, 0.0, 0.5]))),
+            event(120, targets=['2207 100x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(4, projected=2, clip=([-3, -3, -1, 1], [3, 3, 2, 1]),
+                             ndc=([-1.5, 0.0, 0.5], [-1.2, 0.0, 0.5]))),
+            event(160, targets=['2207 100x100x1 R8G8B8A8_UNORM'],
+                  bounds=geo(4, clip=([-3, -3, -1, 1], [3, 3, 1, 4]),
+                             ndc=([-0.5, -0.5, 0.2], [0.5, 0.5, 0.8]))),
+        ], manifest={'withBounds': 1})
+        self.assertEqual(self.flags(bundle, 'geometry-offscreen'), [])
+
+    def test_the_rule_reports_itself_skipped_without_the_flag(self):
+        """`dump --bounds` is opt-in -- a stream-out pass and a readback per draw -- so a bundle without it
+        must say "not looked at" rather than "no draw is off screen", and the manifest is what keeps that
+        apart from "asked, and the engine gave no post-projection position for any draw"."""
+        without = self.path('without')
+        write_bundle(without, events=[event(96, targets=['2207 100x100x1 R8G8B8A8_UNORM'])])
+        self.passes(without)
+        run = {entry['detector']: entry for entry in self.document(without)['detectors']}['geometry-offscreen']
+        self.assertFalse(run['ran'])
+        self.assertIn('dump --bounds', run['why'])
+
+        flagged = self.path('flagged')
+        write_bundle(flagged, events=[event(96, targets=['2207 100x100x1 R8G8B8A8_UNORM'])],
+                     manifest={'withBounds': 1})
+        self.passes(flagged)
+        run = {entry['detector']: entry for entry in self.document(flagged)['detectors']}['geometry-offscreen']
+        self.assertFalse(run['ran'])
+        self.assertIn('no post-projection position', run['why'])
+
 # =========================================================================== the .rdc-side detectors
 
 if __name__ == '__main__':

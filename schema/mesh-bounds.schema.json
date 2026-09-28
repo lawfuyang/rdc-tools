@@ -1,0 +1,29 @@
+{
+  "title": "mesh-bounds",
+  "description": "Where one draw's geometry lands: the box the stage's positions fill, the box the perspective divide makes of it, and one row per instance saying the same for that instance. This is `mesh --bounds`, the driver half of the report's geometry check -- a draw whose geometry is wholly outside one clip plane, or wholly outside its target's rectangle, cannot have written a pixel of it. `vertices` is every vertex the streams held, `finite` the ones the boxes actually cover and `projected` the ones with a place on the screen, so `finite == vertices` and `projected == finite` are the statements that make the boxes the whole call's: a vertex whose position is not a number is left out of them, and one behind the eye can clip its primitive back into view. `instances` is the engine's own instance count for the call and `shown` how many rows are in `instanceBounds` (the row cap is the command's `max`, default 16); the counts and boxes are over the instances *folded*, which is every instance of the call unless an instance argument named one. `note` says which of the reasons there is nothing to read applies, and is empty when there is.",
+  "type": "object",
+  "required": ["schemaVersion", "capture", "renderdoc", "driver", "localReplay", "machine", "eid",
+               "instances", "stage", "vertices", "finite", "projected", "note", "instanceBounds", "shown"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capture": {"type": "string"},
+    "renderdoc": {"type": "string"},
+    "driver": {"type": "string"},
+    "localReplay": {"type": "integer"},
+    "machine": {"type": "string"},
+    "eid": {"type": "integer"},
+    "instances": {"type": "integer"},
+    "stage": {"type": "string", "description": "the stage the numbers are that stage's: gsout, vsout or meshout"},
+    "vertices": {"type": "integer"},
+    "finite": {"type": "integer"},
+    "projected": {"type": "integer"},
+    "clipMin": {"type": "string", "description": "`x y z w`, absent when no vertex had four finite components"},
+    "clipMax": {"type": "string"},
+    "ndcMin": {"type": "string", "description": "`x/w y/w z/w`, absent when no vertex was in front of the eye"},
+    "ndcMax": {"type": "string"},
+    "note": {"type": "string"},
+    "instanceBounds": {"type": "array", "items": {"type": "string"}},
+    "shown": {"type": "integer"}
+  },
+  "additionalProperties": false
+}

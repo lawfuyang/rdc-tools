@@ -160,6 +160,11 @@ DETECTOR_SEVERITY: Dict[str, Tuple[str, str]] = {
         'high', 'depth is written through a test that is off, or tested against a target that is not bound'),
     'empty-scissor': (
         'high', 'the rectangle cannot rasterise, so the call draws nothing'),
+    'geometry-offscreen': (
+        'medium', "the draw's own geometry cannot reach its target: every vertex is behind the eye, or "
+                  'outside one clip plane, or the whole draw projects outside the rectangle it writes. '
+                  'The call is issued and does nothing, which the application may have meant -- the GPU '
+                  'culls it for free -- so this is "less than it looks like", not a contradiction'),
     'zero-work': (
         'high', "the call's own arguments make it do no work"),
     'mismatched-msaa': (
@@ -213,6 +218,7 @@ DETECTOR_RECIPE: Dict[str, str] = {
     'mismatched-msaa': "replay_dump usage '{rdc}' {resId}",
     'depth-logic': "replay_dump state '{rdc}' {eid}",
     'empty-scissor': "replay_dump state '{rdc}' {eid}",
+    'geometry-offscreen': "replay_dump mesh '{rdc}' {eid} --bounds",
     'stencil-without-writer': "replay_dump state '{rdc}' {eid}",
     'blend-in-opaque-pass': "replay_dump state '{rdc}' {eid}",
     'format-units-suspicion': "replay_dump state '{rdc}' {eid}",

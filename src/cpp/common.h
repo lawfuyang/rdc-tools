@@ -540,6 +540,14 @@ bool AnyEventReplayed();
 // --------------------------------------------------------------------------- the commands
 
 int CmdInfo(IReplayController *ctrl, ICaptureFile *file, const char *path);
+//: The CPU-side callstack behind one event, out of the capture's own recording: the chunk the call
+//: was serialised in (`SDChunkMetaData::callstack`) plus the capture's resolver (`ICaptureAccess::
+//: InitResolver`/`GetResolve`). It needs no state at the event, so it moves the replay nowhere --
+//: which is what makes it the cheap "which line of the application issued this call" command.
+//:
+//: A capture recorded without callstacks answers with that fact rather than with an error: `info`
+//: reports the same flag, so a reader can know before asking.
+int CmdCallstack(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid);
 int CmdDraws(IReplayController *ctrl, ICaptureFile *file, const char *path, int maxRows,
              const char *filter);
 int CmdFind(IReplayController *ctrl, ICaptureFile *file, const char *path, const char *needle,
@@ -784,6 +792,74 @@ struct Bounds3
   bool m_bAny = false;    // false when no vertex had three finite components
 };
 Bounds3 VertexBounds(const bytebuf &data, size_t stride, size_t count);
+//: Where one stage's stream puts its geometry: the position box, the box the perspective divide makes
+//: of it, and how many vertices each covers. This is what `mesh --bounds` prints and what `dump
+//: --bounds` folds into `events.json` for the report's geometry check.
+//:
+//: The four components are the position as the stage wrote it (`x y z w`) -- the first `Vec4f` of a
+//: post-VS stream, which is the one thing RenderDoc's mesh data guarantees (it moves position to the
+//: front when it stores the output). A vertex whose four components are not all finite is *counted*
+//: but not folded: a `NaN` poisons every later comparison, so a box that claimed to cover it would be
+//: a lie of exactly the kind this is meant to catch. `m_Projected` counts the vertices with `w > 0`,
+//: which are the only ones with an NDC to take -- dividing by a `w` of zero or less reports a box on
+//: the wrong side of the screen, and a vertex behind the eye has no place on it at all.
+//:
+//: Three counts, because a verdict needs to know what its box covers: `m_Finite == m_Vertices` says
+//: the box is the whole stream's (nothing was dropped as a `NaN`), and `m_Projected == m_Finite` says
+//: no vertex is behind the eye. Both matter to the caller -- a vertex behind the eye, or one whose
+//: position is not a number, is a vertex whose primitive may clip back into view, so a box drawn
+//: around the others is not something a "this draw wrote nothing" verdict may be built on.
+struct PositionBounds
+{
+  long long m_Vertices = 0;     // vertices the stream held (finite ones or not)
+  long long m_Finite = 0;       // of those, the ones whose four components are all finite
+  long long m_Projected = 0;    // of those, the ones with w > 0
+  bool m_bAny = false;          // a finite clip-space box was found
+  float m_ClipMin[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float m_ClipMax[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  bool m_bProjected = false;    // at least one vertex projected, so the NDC box is real
+  float m_NdcMin[3] = {0.0f, 0.0f, 0.0f};
+  float m_NdcMax[3] = {0.0f, 0.0f, 0.0f};
+};
+//: Folds one stream into `bounds`: `count` vertices of `stride` bytes each, the position being the
+//: first four floats of the vertex. `data`/`size` are a window into the stream rather than the
+//: whole of it, because the instances of one draw share a buffer and each instance's vertices are
+//: their own run of it. Free of the controller so the arithmetic can be checked without a device
+//: (the selftest hands it a hand-built buffer), which is the same reason `PrimitiveCount` is.
+void PositionBoundsAdd(PositionBounds &bounds, const byte *data, size_t size, size_t stride,
+                       size_t count);
+//: Folds `from` into `into`: the boxes widen, the counts add up. Declared here for the same reason
+//: `PositionBoundsAdd` is -- the union over a call's instances is what the report reads, and a
+//: merge that lost an instance's vertices would be a total nobody could see was wrong.
+void MergePositionBounds(PositionBounds &into, const PositionBounds &from);
+
+//: What one call's geometry covers: the position boxes of the instances asked for, and the union
+//: over them. The stage is the *last* geometry stage the pipeline wrote -- `gsout` when a geometry
+//: or tessellation shader is bound, `meshout` for a mesh dispatch, `vsout` otherwise -- which is
+//: the one that rasterises, and the engine's own answer is read rather than assumed: a stage that
+//: comes back with no buffer is simply not this draw's.
+//:
+//: `m_bPosition` is `MeshFormat::unproject`, the engine's own statement that the data is
+//: post-projection positional data: everything here divides by `w`, which is only a place on a
+//: screen when the first four floats are a clip-space position. A stage whose data is not that (a
+//: vertex buffer read as `vsin`, a task shader's payload) is reported as what it is and not folded.
+struct CallBounds
+{
+  bool m_bData = false;        // the engine had post-VS data for a geometry stage
+  bool m_bPosition = false;    // ... and said it carries a post-projection position
+  MeshDataStage m_Stage = MeshDataStage::VSOut;
+  std::vector<PositionBounds> m_Instance;    // one per instance folded, in instance order
+  PositionBounds m_Total;                    // the union over `m_Instance`
+};
+//: Folds the instances `[first, first + count)` of the current event's draw. One `GetBufferData` per
+//: call, not per instance: the buffer holds every instance's data and the per-instance runs are read
+//: out of that one readback (`GetPostVSBuffers` is a struct fill per instance, not a GPU read).
+//:
+//: `stage` is the stage to fold, or `MeshDataStage::Count` for the engine's own "the last stage that
+//: wrote something" -- which is what `mesh --bounds` and `dump --bounds` want, since which stage holds
+//: a draw's geometry is a property of its pipeline rather than something a caller can know.
+CallBounds CallPositionBounds(IReplayController *ctrl, MeshDataStage stage, int firstInstance,
+                              int instanceCount);
 //: `--obj <file>`: the vertices and indices as a Wavefront OBJ, which is what an external viewer
 //: reads. `positions` is the interleaved vertex stream and `stride` is its bytes per vertex -- the
 //: first three floats of each vertex are taken as its position, because that is the one convention
@@ -793,8 +869,26 @@ Bounds3 VertexBounds(const bytebuf &data, size_t stride, size_t count);
 long long WriteObj(const std::filesystem::path &path, const bytebuf &positions, size_t stride,
                    size_t count, const std::vector<uint32_t> &indices, Topology topology,
                    std::string &why);
-int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid, int instance,
-            int maxRows, MeshDataStage stage, const char *objPath);
+//: `mesh`'s options, filled once from the command line (`replay_dump.cpp`) so the exe, a batch file
+//: and a library session cannot disagree about what `--bounds` means -- the same reason
+//: `PictureOptions` and `DumpOptions` are structs.
+//:
+//: `m_Instance` is -1 for "not given", which the two modes read differently: the plain form describes
+//: instance 0, and `--bounds` with no instance describes *every* instance of the call. "Given as 0"
+//: and "not given" are therefore different questions, which is why the default is not 0.
+struct MeshOptions
+{
+  int m_Instance = -1;
+  int m_MaxRows = 16;
+  MeshDataStage m_Stage = MeshDataStage::VSOut;
+  bool m_bStageGiven = false;
+  //: The mode: the vertices of one instance, or the bounds of every one of them (`--bounds`).
+  bool m_bBounds = false;
+  //: `--obj <file>`, empty when the export was not asked for.
+  std::string m_ObjPath;
+};
+int CmdMesh(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
+            const MeshOptions &opts);
 int CmdImage(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
              const char *outPath, const PictureOptions &opts);
 //: A cubemap as six pictures plus the engine's own cruciform: `<outDir>/face0.png` .. `face5.png`

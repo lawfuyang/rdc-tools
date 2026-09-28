@@ -21,6 +21,7 @@
     "withImages": {"type": "integer"},
     "withCounters": {"type": "integer"},
     "withTextures": {"type": "integer"},
+    "withBounds": {"type": "integer", "description": "1 when the bundle was dumped with `--bounds` (the report's geometry check reads it); absent in a bundle written before the flag existed, which reads as 0"},
     "resourceUsage": {"type": "string", "description": "`collected`, or why the usage lists are absent"},
     "stateHashInputs": {"type": "string", "description": "what the events' state hash is computed from"},
     "statesRule": {"type": "string", "description": "when a state file is written"},

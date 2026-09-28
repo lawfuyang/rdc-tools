@@ -371,8 +371,8 @@ class TestReportDetectors(BundleCase):
                           'dead-allocation', 'read-before-write', 'write-never-read',
                           'load-instead-of-clear', 'dead-compute', 'depth-logic', 'empty-scissor',
                           'stencil-without-writer', 'blend-in-opaque-pass', 'format-units-suspicion',
-                          'mismatched-msaa', 'marker-imbalance', 'unattributed-draws', 'zero-work',
-                          'srgb-view-mismatch', 'aliased-write'],
+                          'mismatched-msaa', 'geometry-offscreen', 'marker-imbalance',
+                          'unattributed-draws', 'zero-work', 'srgb-view-mismatch', 'aliased-write'],
                           'every detector is listed, whether it ran or was skipped')
         runs = {run['detector']: run for run in self.document(bundle)['detectors']}
         for detector in ('unbound-table-slot', 'binding-kind-mismatch'):

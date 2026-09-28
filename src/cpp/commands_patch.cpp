@@ -282,9 +282,10 @@ int CmdPatch(IReplayController *ctrl, ICaptureFile *file, const char *path,
     if(bCompare)
     {
       ImageData after;
-      std::string why;
-      if(!ReadTargetImage(ctrl, target, PictureOptions(), after, why))
-        return Fail(1, "the frame replayed but its render target cannot be read: %s", why.c_str());
+      std::string afterWhy;
+      if(!ReadTargetImage(ctrl, target, PictureOptions(), after, afterWhy))
+        return Fail(1, "the frame replayed but its render target cannot be read: %s",
+                    afterWhy.c_str());
 
       const std::string dir = outDir.empty() ? std::string("patch") : outDir;
       if(!MakeDir(dir))

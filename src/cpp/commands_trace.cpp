@@ -38,10 +38,20 @@
 //    reflection actually holds, says which causes it can and cannot tell apart, and names the fix
 //    rather than printing "failed".
 //
-// What is printed is the three things the roadmap's item asks for: the invocation's **inputs** (the
-// values its first instruction sees), one row per **step** with the variables that changed on it,
-// and the **outputs** — the variable list after the last step, which is what the invocation ended
-// up producing. The outputs are accumulated the way RenderDoc's own UI accumulates them
+//  * **A replacement shader is not a way to step one the capture cannot.** `patch` compiles a shader
+//    for the target and substitutes it, and that compile *does* carry debug info — the engine's
+//    `BuildTargetShader` ORs in `D3DCOMPILE_DEBUG` (`d3d12_replay.cpp`), and the built shader's
+//    reflection reports a source file. But the debugger does not step it: measured 2026-09-28, a
+//    trace of the same invocation with a replacement installed — built, substituted, the replay cache
+//    cleared and the event re-entered — is byte-identical to the same trace without one, steps,
+//    inputs and outputs included. (That is where the two would have to meet: `DebugPixel` reads the
+//    shader off the pipeline the render state names, `pso->graphics->PS.pShaderBytecode`.) So the
+//    refusal for a capture with no debug data says this rather than pointing at `patch` as a fix.
+//
+// What is printed is the three things a trace holds: the invocation's **inputs** (the values its
+// first instruction sees), one row per **step** with the variables that changed on it, and the
+// **outputs** — the variable list after the last step, which is what the invocation ended up
+// producing. The outputs are accumulated the way RenderDoc's own UI accumulates them
 // (`ShaderViewer`): a change's name is its `before` name when it has one and its `after` name
 // otherwise, an empty `after` name is a variable leaving scope, and every other change is a new
 // value. That rule lives in `TraceApplyChange` below, on its own, because it is the one piece of
@@ -89,24 +99,35 @@ std::string IndentedLog(const rdcstr &log)
   return out;
 }
 
+}    // namespace
+
 //: The reason a trace could not be run, as a sentence: the facts the reflection holds, then what to do
 //: about them, in the order a reader can act. Two measured cases shape it, and they need *different*
 //: advice -- the engine's answer is the same empty trace for both:
 //:
 //:  * a DXIL shader whose debug data is absent (`sourceDebugInfo: 0`, the Android capture): the engine
 //:    had nothing to step, and its loading log names the file it went looking for;
-//:  * a shader that *has* its debug data (`sourceDebugInfo: 1`, the HobbyRenderer capture) and still
-//:    produced no trace: the data was found ("Found debug data in the shader") and the invocation is what
-//:    failed, which for a pixel is usually a co-ordinate no fragment wrote.
+//:  * a shader that *has* its debug data (`sourceDebugInfo: 1`) and still produced no trace: the data
+//:    was found ("Found debug data in the shader") and the *invocation* is what failed -- and for a
+//:    pixel that is a question about *coverage*, not about visibility. Measured on `desktop-1`
+//:    (2026-09-28) by tracing draws whose fragments the frame's own pixel history rejected: eid 2440's
+//:    fragment was `shader discarded` and eid 3111's and 4235's `depth test failed` at the
+//:    co-ordinates asked, and all three traced anyway, while a co-ordinate the named call's own
+//:    fragments never covered (eid 2494 at 960,540) got the engine's `No hit for this event`. The
+//:    engine rasterises the *named* call with a fetcher pixel shader and looks for its fragments at the
+//:    co-ordinate; the frame's earlier draws are not part of that replay, so "some draw wrote this
+//:    pixel" is neither necessary nor sufficient. `pixelhistory` is the command that names calls whose
+//:    fragments covered a pixel (`passed` or `rejected` -- both are coverage), which makes it the
+//:    route from a refusal to an invocation that runs.
 //:
 //: So this branches on that one field rather than guessing, and points at `--vertex`/`--thread` as the way
 //: to tell the two apart: an invocation with no fragment to find cannot fail for want of one.
-std::string NoTraceText(const TraceRequest &req, int eid, ShaderStage stage,
-                        const D3D12Pipe::Shader *sh, const ShaderDebugInfo *info)
+std::string NoTraceText(const TraceRequest &req, int eid, ShaderStage stage, ResourceId debugged,
+                        const ShaderDebugInfo *info)
 {
   std::string out =
       Fmt("the engine produced no trace for %s at eid %d (%s, res%s)",
-          TraceInvocationText(req).c_str(), eid, StageName(stage), IdText(sh->resourceId).c_str());
+          TraceInvocationText(req).c_str(), eid, StageName(stage), IdText(debugged).c_str());
 
   if(info != NULL)
   {
@@ -147,28 +168,39 @@ std::string NoTraceText(const TraceRequest &req, int eid, ShaderStage stage,
         "naming. A "
         "DXBC "
         "(SM5) shader is stepped from its own bytecode and needs none "
-        "of this, so if that is what this capture holds, the cause is the invocation instead.";
+        "of this, so if that is what this capture holds, the cause is the invocation instead. A "
+        "replacement shader is not a way out either (`patch` can substitute one, and it does carry "
+        "debug info -- the engine compiles it with `D3DCOMPILE_DEBUG` -- but the debugger steps "
+        "the "
+        "shader the capture's own pipeline holds: measured 2026-09-28, a trace with a replacement "
+        "installed is byte-identical to one without it).";
   }
   else
   {
     out +=
         "\n       the shader has its debug data, so the *invocation* is what the engine could not "
-        "run: "
-        "for a pixel, a co-ordinate no fragment wrote or none that passed the depth test at it "
-        "(`state "
-        "<eid>` shows the target and its viewport); for a vertex or a thread, an index outside the "
-        "draw "
-        "or dispatch; or a feature its interpreter does not implement. `--vertex 0`/`--thread "
-        "0,0,0 "
-        "0,0,0` on the same event is the cheapest way to tell an empty co-ordinate from an engine "
-        "limitation, because an invocation with no fragment to find cannot fail for want of one. "
-        "The "
-        "engine's own log (`--log <file>`) has whatever it was willing to say.";
+        "run: for a pixel, no fragment *of this call* covers that co-ordinate -- the engine "
+        "rasterises "
+        "this call alone and looks for its own fragments there, so the co-ordinate has to be one "
+        "this "
+        "draw covers, not merely one the frame wrote (`pixelhistory <rdc> <eid|last> <target> <x> "
+        "<y>` "
+        "lists the calls whose fragments covered a pixel: every row it prints is a candidate, "
+        "whether "
+        "it passed or was rejected); for a vertex or a thread, an index outside the draw or "
+        "dispatch; "
+        "or a feature its interpreter does not implement. `--vertex 0`/`--thread 0,0,0 0,0,0` on "
+        "the "
+        "same event is the cheapest way to tell an empty co-ordinate from an engine limitation, "
+        "because "
+        "an invocation with no fragment to find cannot fail for want of one.";
   }
 
   return out;
 }
 
+namespace
+{
 //: `FreeTrace` on every path out of the command, `Fail` returns included. A trace owns an
 //: engine-side debugger -- `ReplayController` keeps a list of them and frees them in `FreeTrace` --
 //: so a return that misses it leaks one per run, and `--repl` or a `batch` file runs many.
@@ -414,6 +446,7 @@ int CmdTrace(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   // The reflection of the shader the engine *bound*, not of the entry point it would disassemble by
   // default (`BoundReflection`): the debug info hangs off this one, and a shader with several entry
   // points can have it for one of them.
+  const ResourceId debugged = sh->resourceId;
   const ShaderReflection *refl = BoundReflection(ctrl, d3d12, stage, sh);
   const ShaderDebugInfo *info = refl != NULL ? &refl->debugInfo : NULL;
 
@@ -422,7 +455,7 @@ int CmdTrace(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   // are there, nothing here has to guess -- and the shader is refused *before* a trace is asked
   // for, so the answer is the engine's rather than an empty trace's.
   if(info != NULL && !info->debuggable)
-    return Fail(1, "res%s (%s at eid %d) cannot be debugged: %s", IdText(sh->resourceId).c_str(),
+    return Fail(1, "res%s (%s at eid %d) cannot be debugged: %s", IdText(debugged).c_str(),
                 StageName(stage), eid,
                 info->debugStatus.empty() ? "the engine says so and gives no reason"
                                           : info->debugStatus.c_str());
@@ -474,7 +507,7 @@ int CmdTrace(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   {
     if(trace != NULL)
       ctrl->FreeTrace(trace);
-    return Fail(1, "%s", NoTraceText(req, eid, stage, sh, info).c_str());
+    return Fail(1, "%s", NoTraceText(req, eid, stage, debugged, info).c_str());
   }
 
   // From here on the trace is the engine's until `FreeTrace`, on every path -- including the ones
@@ -501,9 +534,8 @@ int CmdTrace(IReplayController *ctrl, ICaptureFile *file, const char *path, int 
   if(info != NULL)
   {
     Flag("debuggable", info->debuggable);
-    // The two fields the roadmap's item is about: whether the source half exists, and the engine's
-    // own word when the shader is one it will not run. Printed on success too, because "it stepped,
-    // but without source lines" is the answer most runs will give on a shipped capture.
+    // Whether the source half exists, and the engine's own word when the shader is one it will not
+    // run. Printed on success too, because "it stepped, but without source lines" is a real answer.
     Flag("sourceDebugInfo", info->sourceDebugInformation);
     if(!info->debugStatus.empty())
       Field("debugStatus", info->debugStatus);

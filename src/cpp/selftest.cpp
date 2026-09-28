@@ -1575,6 +1575,69 @@ int CmdSelftest()
     req.m_Thread[1] = 5;
     req.m_Thread[2] = 6;
     t.Equal(TraceInvocationText(req), std::string("thread 1,2,3 4,5,6"), "trace-invocation-thread");
+
+    // The refusal's two branches, in the words the measurements gave them (`NoTraceText`, whose
+    // doc comment has the runs): a shader with *no* debug data is a search -- the engine's log is the
+    // answer and `--pdb` is the fix, while a replacement shader is *not* one (the debugger steps the
+    // capture's own pipeline) -- and a shader that has its debug data failed on the invocation, which
+    // for a pixel is a question about *coverage*: the co-ordinate has to be one the named call's own
+    // fragments cover, and `pixelhistory` is the command that names such a call. Pinned device-free
+    // because the wording *is* the whole answer a capture without debug data gives, and nothing else
+    // in the command would notice if it went back to guessing at a cause.
+    TraceRequest pixel;
+    pixel.m_Kind = TraceInvocation::Pixel;
+    pixel.m_X = 640;
+    pixel.m_Y = 360;
+
+    const auto contains = [](const std::string &text, const char *needle) {
+      return text.find(needle) != std::string::npos;
+    };
+
+    ShaderDebugInfo noData;
+    noData.debuggable = true;
+    noData.sourceDebugInformation = false;
+    noData.debugInfoLoadingLog = rdcstr(
+        "Did not find debug data for 'ec6e6433f96a985d5086cd232bf42fd8.pdb'\n"
+        "  searched: C:\\none");
+    const std::string missing =
+        NoTraceText(pixel, 692, ShaderStage::Pixel, ResourceId::Null(), &noData);
+    t.Check(contains(missing, "pixel 640,360 at eid 692 (ps, res0)"),
+            "trace-refusal-names-invocation-and-shader",
+            "the refusal did not say which invocation of which shader failed");
+    t.Check(contains(missing, "sourceDebugInfo is 0") && contains(missing, "--pdb <dir>"),
+            "trace-refusal-without-debug-data-names-the-fix",
+            "a shader with no debug data was not told how to get some");
+    t.Check(contains(missing, "replacement shader is not a way out"),
+            "trace-refusal-without-debug-data-refuses-the-replacement",
+            "the refusal did not say a patched shader cannot be stepped");
+    // Every line of the log, because with no debug data the log *is* the search: the file name it
+    // derived and the folders it tried are the answer to "where does this PDB have to be?".
+    t.Check(contains(missing, "searched: C:\\none"), "trace-refusal-quotes-the-whole-search",
+            "only part of the engine's search was printed");
+
+    ShaderDebugInfo withData;
+    withData.debuggable = true;
+    withData.sourceDebugInformation = true;
+    withData.debugInfoLoadingLog =
+        rdcstr("Found debug data in the shader\n  (the rest of the log)");
+    const std::string present =
+        NoTraceText(pixel, 692, ShaderStage::Pixel, ResourceId::Null(), &withData);
+    t.Check(contains(present, "the *invocation* is what the engine could not run"),
+            "trace-refusal-with-debug-data-blames-the-invocation",
+            "a shader that has debug data was not told the invocation is what failed");
+    t.Check(contains(present, "pixelhistory"), "trace-refusal-names-the-route-to-a-co-ordinate",
+            "the pixel case did not name the command that finds a co-ordinate that traces");
+    // The first line only: with debug data present the rest of that log is the search for something
+    // it already found, and a refusal is read by a person who wants the cause, not the whole file.
+    t.Check(contains(present, "Found debug data in the shader") &&
+                !contains(present, "(the rest of the log)"),
+            "trace-refusal-keeps-the-first-log-line-only",
+            "the refusal printed a search log for a shader whose debug data was found");
+
+    // No reflection at all is a third case, and it says so rather than borrowing either sentence.
+    const std::string none = NoTraceText(pixel, 692, ShaderStage::Pixel, ResourceId::Null(), NULL);
+    t.Check(contains(none, "no reflection"), "trace-refusal-without-reflection",
+            "a shader the engine published no reflection for was described as something else");
   }
 
   // ------------------------------------------------------------------ the probe's range and cache

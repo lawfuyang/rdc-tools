@@ -1846,7 +1846,7 @@ the answers look like answers, and only the source says what the library should 
 | `mesh <rdc> <eid> [instance] [max] [--stage vsin\|vsout\|gsout\|taskout\|meshout] [--obj <file>] [--bounds]` | one instance's geometry **at one stage**: `vsout` (the default) is what the vertex shader emitted, `vsin` the stream the draw read, and `gsout`/`taskout`/`meshout` what a geometry, task/amplification or mesh shader produced — with the vertices, the index count, the **primitive count** (absent, with `primitivesNote` in its place, when the topology does not fix one from the counts: a strip with adjacency, a meshlet list), and the **position bounds** (the first three components, vertices that are not all finite dropped whole, with `boundsNote` when none was usable). `--obj <file>` exports a Wavefront OBJ for an external viewer — one `v` line per vertex and faces only where the vertex order *is* the primitive's, which the file's own header says. `--bounds` asks the other question — **where the draw's geometry lands** — and is a document of its own kind (`mesh-bounds`, §9's contract): one row per instance of the call (`max` caps the rows, default 16; an instance argument describes just that one) with the clip-space position box `x y z w`, the box the perspective divide makes of it (`x/w y/w z/w`, over the vertices with `w > 0` — the only ones with a place on a screen), and the three counts that say what those boxes cover: `vertices` read, `finite` with four finite components, `projected` with `w > 0`. `projected == finite == vertices` is what makes a box a statement about the whole draw, which is what the report's geometry rule (§4.11) gates on; the stage is picked per draw (the last one that wrote something: `gsout`, `vsout` or `meshout`), and the numbers are the engine's own `MeshFormat::unproject` data — that flag is what says the first `Vec4f` is a post-projection position, and without it `--bounds` says so instead of dividing. One measured caveat about `--stage`, which is this API's rather than this tool's: on D3D12 the engine answers a **`vsin`** request with the **`vsout`** data (`GetStage(VSIn)` falls through to `vsout` in RenderDoc 1.46's `d3d12_postvs.cpp`; measured on `desktop-1` eid 2731, whose fullscreen-quad shader makes the two identical anyway, and on the hobby capture, whose mesh dispatches answer a `vsin` request with the empty `vsout`). So `vsin` is not a different stream on this API, and `--bounds` folds the stage the *engine* reports rather than the one a caller assumed |
 | `image <rdc> <eid> <out.bmp> [--overlay <name>] [--mip N] [--slice N] [--sample N] [--cast <type>] [--hdr M] [--gamma]` | the texture display at that event, written as a BMP (no PNG encoder needed). `--overlay` draws the engine's own `DebugOverlay` **into** the picture — `wireframe` is the topology the frame actually rasterised, `quad-draw`/`quad-pass` and `triangle-size-draw`/`triangle-size-pass` are the cost hunches, and a typo is refused with the list of fifteen — and `--hdr <multiplier>`/`--gamma` are the display path's tonemapping for float/HDR content. The subresource and cast options are the same ones `textures --save` takes; the document says which overlay and which subresource the file is |
 | `pixelhistory <rdc> <eid\|last> <resId\|name> <x> <y>` | every event up to `<eid>` that tried to write that pixel: the test that rejected each attempt and the value before, from and after it (below) |
-| `trace <rdc> <eid> --pixel <x,y>` · `--vertex <v[,inst[,idx[,view]]]>` · `--thread <gx,gy,gz,tx,ty,tz>` · `--mesh-thread <gx,gy,gz,tx,ty,tz>` `[--sample N] [--primitive N] [--view N] [--max-steps N] [--all]` | **one shader invocation, stepped** (below): the engine's own debugger runs the shader the selector names — the stage follows from it, pixel=ps, vertex=vs, thread=cs, mesh-thread=ms — and the document holds the values it started with, one row per step (program counter, the `ShaderEvents` that fired, the source line, the callstack, every variable that changed as `before -> after`) and the variable list it ended with. Stepping a **DXIL** shader goes through the debug data DXC emitted, so a capture without it answers with the file the engine went looking for; a **DXBC** shader is stepped from its own bytecode. `sourceDebugInfo` says which of the two, and a refusal distinguishes "no debug data" from "this invocation could not be run" rather than guessing |
+| `trace <rdc> <eid> --pixel <x,y>` · `--vertex <v[,inst[,idx[,view]]]>` · `--thread <gx,gy,gz,tx,ty,tz>` · `--mesh-thread <gx,gy,gz,tx,ty,tz>` `[--sample N] [--primitive N] [--view N] [--max-steps N] [--all]` | **one shader invocation, stepped** (below): the engine's own debugger runs the shader the selector names — the stage follows from it, pixel=ps, vertex=vs, thread=cs, mesh-thread=ms — and the document holds the values it started with, one row per step (program counter, the `ShaderEvents` that fired, the source line, the callstack, every variable that changed as `before -> after`) and the variable list it ended with. Stepping a **DXIL** shader goes through the debug data DXC emitted, so a capture without it answers with the file the engine went looking for; a **DXBC** shader is stepped from its own bytecode. `sourceDebugInfo` says which of the two, and a refusal distinguishes "no debug data" from "this invocation could not be run" rather than guessing — for a pixel that second case is *coverage*: the co-ordinate has to be one the named call's own fragments cover, which `pixelhistory`'s rows name (below) |
 | `counters <rdc> [--per-pass [--passes <file>] [--top N]]` | GPU counters per event. `--per-pass` folds one counter over each pass (`FetchCounters` answers per event and takes no range): the passes come from the frame's markers — consecutive calls sharing a marker path are one — or from `--passes`, one `<first eid> <last eid> [<name>]` line per pass. The counter that is the cost is the engine's choice (`EventGPUDuration` when this replay produced one), named in the document with its unit; a replay that produces no results says so rather than printing a table of zeros, because GPU counters are a driver feature |
 | `crosscheck <rdc> [eid] [--since N] [--until N] [--max-events N] [--max N]` | what the reflections say a shader wants against what the state says it was given: the vs output signature against the ps input signature, each stage's bindings against the root signature's declared ranges, and the render targets' formats against the ps output signature. Every finding names an event and quotes both sides. `linksChecked`, `bindingsChecked`, `bindingsUnmapped`, `targetsChecked` and `noRootParameters` say how much was actually compared — a capture whose shaders were stripped has no reflection, and then an empty findings list means *nothing was checked*, not that the frame is clean |
 | `debug <rdc> [--group] [--fail-on high\|medium\|low\|info]` | the engine's own messages (validation layers, driver complaints). One row per message; `--group` folds each *distinct* message — the engine's own `messageID` plus severity, category and source — into one row with its count and its first/last eid, which is what makes ten thousand messages a table. `--fail-on` is the pass/fail line: the run exits **1** when anything at or above that severity was reported, and `high` is the *most* severe, so `--fail-on medium` means High or Medium. Nothing else in the driver fails on a *finding* rather than on a failure, and the exit code is the point — "did the engine complain about this frame" becomes a line in a script instead of a paragraph someone has to judge |
@@ -1939,6 +1939,37 @@ assumed:
   apart because an invocation with no fragment to find cannot fail for want of one. The engine's own
   `debuggable`/`debugStatus` are checked *before* a trace is asked for, so a shader the engine knows it cannot
   run is refused in its own words.
+
+**The pixel path works, and what it needs is coverage rather than visibility** (measured 2026-09-28, because
+the refusal above is the whole answer a refused trace gives and it had been guessing). `trace 2731 --pixel
+640,360` — the invocation the corpus pins — is refused, and so was every other co-ordinate tried on that frame
+until one was found from the frame's own answers. Reaching that one took the measurement that settles what the
+search *is*: three draws whose fragments the frame's own pixel history **rejected** all traced anyway — eid 2440
+(its fragment `shader discarded`), eid 3111 and eid 4235 (both `depth test failed` at the co-ordinate asked) each
+produced a full document with source lines — while a co-ordinate the named call's own fragments never cover (eid
+2494 at 960,540) came back refused, with the engine's own log line for it: `d3d12_shaderdebug.cpp(3174) - Log -
+No hit for this event`. What the engine does is rasterise *that call alone* with a fetcher pixel shader and look
+for its fragments at the co-ordinate — `DebugPixel` replays `ReplayLog(0, eventId, eReplay_OnlyDraw)`, so the
+frame's earlier draws are not part of that replay — which makes "some draw wrote this pixel" neither necessary
+(a rejected fragment still traces) nor sufficient (the wrong draw yields nothing). The command that names calls
+whose fragments *did* cover a pixel is **`pixelhistory`**: every row it prints, `passed` or `rejected`, is
+coverage, so each is a candidate invocation. Measured end to end on `mobile-1`: `mesh 692 --bounds` gives the
+draw's NDC box, which lands at (1437,1020) of its 2004x1256 target, `pixelhistory 800 res1195304 1437 1020`
+shows eid 692's fragment `passed every test` there, and `trace 692 --pixel 1437,1020` steps its pixel shader
+(`sourceDebugInfo on`, 1091 source variables). Nothing needed to be guessed: the geometry fold and the history
+each name a co-ordinate the trace accepts.
+
+**A replacement shader is not what the debugger steps** (measured 2026-09-28, `mobile-1`). The obvious way out of
+a capture whose shaders were built without debug data is to build one: `patch` does exactly that, and the compile
+is not the problem — the engine's `BuildTargetShader` ORs `D3DCOMPILE_DEBUG` into the caller's flags
+(`d3d12_replay.cpp`), and the built shader's reflection carries a debug file of its own (measured: one file where
+the reflection of a capture shader with no debug data has none). But the debugger does not step it. A trace of the same invocation with a replacement installed — built,
+substituted, `ClearReplayCache`, the event re-entered — is **byte-identical** to the same trace without one,
+steps, inputs and outputs included; the second run differed only in the header fields the experiment itself had
+added, so the profile of inputs printed was still the capture's shader's. `DebugPixel` reads the shader off the
+pipeline the render state names (`pso->graphics->PS.pShaderBytecode`), which is where a replacement would have to
+appear. So "change the shader, then step it" is not available here, and the refusal for a capture without debug
+data says so rather than pointing at `patch` as the fix.
 
 `outputs` is accumulated the way RenderDoc's own UI accumulates a debug state
 (`ShaderViewer::AddCurrentState`), which is the one rule here that is wrong *quietly* if it is wrong: a change's
@@ -2414,14 +2445,20 @@ that stage bound at that event.
 **What is proven about `patch`, and what is not.** Proven: it builds HLSL/DXBC/DXIL for the target, dumps real
 disassembly (112 KB for one of `desktop-2`'s pixel shaders), compiles a hand-written replacement, reports
 the compiler's own message when one fails, installs the replacement, re-runs the frame, and writes the three
-images with an exact difference. **Not proven: that the replacement reaches the draw.** A pixel shader that
-`discard`s every pixel -- a change no bookkeeping can fake -- rendered byte-identically to the original at the
-event measured, with and without `ClearReplayCache`, so on this capture the substitution is either not reaching
-the draw or that event's draw does not write the colour the display shows (its pass's colour may come from
-earlier draws while the last one still has the target bound). The next step is to point it at an event that is
-demonstrably the colour source -- `sheet`'s index names one image eid per pass, and `draws` says what kind of
-call it is -- and only then treat a `patch` render as evidence. Reporting this is the point: the tool says
-"nothing changed" rather than implying the patch worked.
+images with an exact difference. **Measured 2026-09-28, and it settles the question the earlier text left open:
+the substitution does not reach the draw.** Three runs, two instruments. On `desktop-2` at eid 928 — an event
+`sheet` renders as a picture with content, so the readback is not the suspect — a replacement pixel shader that
+returns a fixed colour left the picture *identical*: `differing 0`, `maxDelta 0`, and one non-zero difference
+hash for both images (`hashDistance 0`). On `mobile-1` (eid 692) and `desktop-1` (eid 4235) the same comparison
+said `differing 0` with **both hashes zero** — two black 256x256 readbacks, which is a second finding: at those
+events the readback shows nothing at all, while the engine reports real content for that same target at that
+same event (`histogram --eid 4235` on `desktop-1`: max `5.30, 1.86, 2.59`), and the *same* call in a `dump`
+writes pictures with content. And the second instrument is independent: a *trace* of the same invocation with
+a replacement installed is byte-identical to one without it (the paragraph above). So a `patch` run reports
+"nothing changed" in every case tried, the tool says so rather than implying the patch worked, and the item in
+`ROADMAP.md` is where the next step is written: find out whether the pipeline replacement the engine builds
+(`RefreshDerivedReplacements`) is ever bound by the draw — that is what a fix starts from, and until then a
+`patch` render is not evidence about anything.
 
 * **`probe` runs alone.** It forces non-events on purpose, and a forced non-event keeps the last real
   event's state, so mixing it with other commands makes *one* of the two answers wrong whichever order
@@ -2434,7 +2471,12 @@ call it is -- and only then treat a `patch` render as evidence. Reporting this i
   runs at once cannot write into each other's log (a second run in the same second takes `-2`). It
   records the working directory, each phase with a timestamp, every batch command with its own time,
   and why the run stopped. `--log <file>` names one exact file instead, truncated, since it is still
-  that run's log. A message reaches stderr and the log through one formatting path each (`Log`, and `Fail`
+  that run's log. **This is the tool's log, not the engine's**: RenderDoc's own messages (`RDCLOG`/`RDCERR`,
+  which is where a shader-debug refusal explains itself — `No hit for this event` is one) go to the engine's
+  own per-run file under the machine's temp folder, `%TEMP%\RenderDoc\RenderDoc_<date>_<time>.log`, one per
+  replayed session and written by the engine whatever this tool passes. A refusal used to claim `--log` had
+  them, which is false and was removed 2026-09-28; a reader who wants the engine's own words knows where to
+  look. A message reaches stderr and the log through one formatting path each (`Log`, and `Fail`
   for a failure, which prints the same text to both), and both format into a `std::string` rather than a
   fixed buffer: a message can carry the engine's own words, and a 512-byte `vsnprintf` — what both used
   until 2026-09-22 — cut the shader-trace refusal mid-path, dropping every line that named a directory the

@@ -225,7 +225,7 @@ each command.
 | What does the shader actually *do* with those values? | `trace <eid> --pixel x,y` — one invocation, stepped |
 | How far apart are two images? | `imgdiff <rdc> <a.bmp> <b.bmp>` |
 | Where does the time and the bandwidth go? | `counters`, `counters --per-pass`, `crosscheck` |
-| What if the shader did something else? | `patch <eid> <stage> --from <file>` |
+| What if the shader did something else? | `patch <eid> <stage> --from <file>` — it builds and installs one, but nothing the frame does afterwards shows it yet (REFERENCE §9) |
 | What does this whole frame do, pass by pass, and what is off about it? | `report` — after a `dump` (REFERENCE §4.11) |
 | How do two captures differ (mobile vs desktop, before vs after)? | `diff` (the streams' own record), `passdiff`, then `replaydiff` (REFERENCE §4.18, §4.16) |
 | Do the documents still match their contract? | `validate <bundle> schema`, `schema --check` |
@@ -387,8 +387,8 @@ badly (REFERENCE §9).
 | Command | What it answers | Example |
 |---|---|---|
 | `counters` | GPU counters per event; `--per-pass` folds one counter over each pass (or over `--passes <file>`) and lists the dearest; a replay with no counter results says so rather than printing zeros | `counters 'capture.rdc' --per-pass --top 10` |
-| `trace` | one shader invocation, stepped: the values it started with, one row per step with every variable that changed, and the values it ended with. The stage follows from the selector (`--pixel`=ps, `--vertex`=vs, `--thread`=cs, `--mesh-thread`=ms); `--max-steps`/`--all` bound the run. Stepping a **DXIL** shader goes through its debug data, so a capture without it answers with the file the engine looked for — `--pdb <dir>` (or `$RDC_PDB`) is how the folder that holds it is named, and the answer lists the paths the engine searched. A DXBC shader steps from its bytecode instead | `trace 'capture.rdc' 1715 --vertex 0 --max-steps 40`, `trace 'capture.rdc' 289 --pixel 640,360 --pdb build\pdbs` |
-| `patch` | builds a shader for this replay target out of a file you edited, substitutes it for the capture's own and replays the frame; `--compare` renders before and after and writes the diff map | `patch 'capture.rdc' 27931 ps --from edited.hlsl --compare` |
+| `trace` | one shader invocation, stepped: the values it started with, one row per step with every variable that changed, and the values it ended with. The stage follows from the selector (`--pixel`=ps, `--vertex`=vs, `--thread`=cs, `--mesh-thread`=ms); `--max-steps`/`--all` bound the run. Stepping a **DXIL** shader goes through its debug data, so a capture without it answers with the file the engine looked for — `--pdb <dir>` (or `$RDC_PDB`) is how the folder that holds it is named, and the answer lists the paths the engine searched. A DXBC shader steps from its bytecode instead. For a pixel the co-ordinate has to be one the *named call's own* fragments cover, which is a coverage question rather than a visibility one: a fragment the frame rejected still traces, and `pixelhistory`'s rows name calls that cover a pixel | `trace 'capture.rdc' 1715 --vertex 0 --max-steps 40`, `trace 'capture.rdc' 289 --pixel 640,360 --pdb build\pdbs` |
+| `patch` | builds a shader for this replay target out of a file you edited, substitutes it for the capture's own and replays the frame; `--compare` renders before and after and writes the diff map. **The substitution does not reach the draw** (measured — REFERENCE §9), so a `patch` run is an experiment whose answer is always "nothing changed" until that is fixed | `patch 'capture.rdc' 27931 ps --from edited.hlsl --compare` |
 
 #### One session, many questions
 
@@ -463,9 +463,10 @@ If the draw is there and the values look right, `pixelhistory` *(REFERENCE §9)*
 answer: it lists every event that touched that pixel **and the reason each was rejected** — `depth test failed`,
 `stencil test failed`, `scissor clipped`, `view clipped`, `shader discarded`, `backface culled`, `sample masked` —
 with the value before, from and after each one. "Nothing drew it" then becomes "the scissor was 0×0 at eid 812". If the pixel
-history says the shader itself is responsible, patch it *(REFERENCE §9)* — force the return value, disable the branch —
-and re-render the draw to see what changes. That experiment is often faster than reasoning about the
-disassembly.
+history says the shader itself is responsible, `trace` *(REFERENCE §9)* steps that one invocation — the co-ordinate
+`pixelhistory` named is exactly the co-ordinate a trace can run at — and prints the values it computed step by step.
+`patch` is the command for "what if it did something else", and it compiles a replacement and installs it, but
+measured 2026-09-28 the substitution does not reach the draw, so its answer is always "nothing changed" for now.
 
 **C. "Why do mobile and PC look different?"** The project's original question, and the reason `diff`,
 `passdiff` and `replaydiff` exist (REFERENCE §4.16, §4.18).

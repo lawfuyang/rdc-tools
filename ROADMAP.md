@@ -51,6 +51,17 @@ coverage gate and its measurements). The measurement the `callstack` item was wa
 `resolvedb` section is in the file — and the recorder collected **no frame for any of them**, so the item landed
 with its "there is nothing here, and it is the capture rather than the query" path as the corpus's answer.
 
+**Phase 5 landed on 2026-09-28 and left this file**: the two probes §1 used to hold, each of which ended in a
+measurement rather than a feature. The **pixel path of `trace`** was not broken — what the engine looks for is
+*coverage*: the named call's own fragments at the co-ordinate, so a fragment the frame rejected (`depth test
+failed`, `shader discarded`) still traces, one the call never covers does not, and `pixelhistory`'s rows name
+calls that do. The refusal now says that instead of guessing between two causes, and the runs behind it, the
+`pixelhistory` route and the engine's own `No hit for this event` are in REFERENCE §9. The **patched shader** is
+not steppable: the compile keeps its debug info (the engine's `BuildTargetShader` adds `D3DCOMPILE_DEBUG`), but a
+trace with a replacement installed is byte-identical to one without it — and the picture side agrees, so the
+substitution does not reach the draw at all. That is not a probe any more but a defect, and it is §1 below: the
+one item left in this file.
+
 The survey also cut three candidates, and the reasons are kept in "what is deliberately *not* on this list"
 below, because a measurement that removes an item is worth as much as one that adds it. Half of what the
 survey suggested was already answerable here — `pixelhistory`, `mesh`, `usage`, `patch`, `debug`, `watch`,
@@ -206,40 +217,35 @@ say so explicitly, and should degrade gracefully when it is missing.
 
 ---
 
-## 1. P3 — the two probes
+## 1. P1 — the substitution does not reach the draw
 
-* **Why the pixel path of `trace` produces nothing.** Measured again on the re-pinned corpus: on both new
-  captures every shader carries its own debug data (258 of 258 bindings, 196 of 196) and `--vertex 0` steps
-  200 steps with source lines — while `--pixel 640,360` is refused at both pinned eids, with the engine's
-  reason now in the text: `no trace for pixel 640,360 at eid 2731 (ps, res166972): sourceDebugInfo is 1 / its
-  shader loading log says: Found debug data in the shader`. The debug data is there and it is the *invocation*
-  that cannot run, because no fragment at that co-ordinate passed the depth test. That is a better answer than
-  the one this probe was written against ("the engine says nothing about why", on a capture whose shaders had
-  no debug data at all). What is left of it: whether *any* pixel on these captures traces — the engine's
-  search is depth- and stencil-shaped, so a pixel behind or discarded geometry is the wrong candidate — and
-  whether the message can name that search. *How*: `--pixel` at a co-ordinate a pass provably wrote (a
-  readback's own non-zero pixels, via `histogram`), then read the refusal paths in `d3d12_shaderdebug.cpp`.
-  **~0.5 d to a conclusion.**
-
-* **Does a patched shader carry debug info?** — `patch` compiles a replacement shader locally
-  (`BuildTargetShader`) and substitutes it for the capture's own. If that compile keeps its debug info, the
-  debugger can step the *edited* shader in a capture whose own shaders were stripped of PDBs — which is every
-  UE capture here (their shaders carry `ILDB`, which the engine steps through, but no `.pdb` beside them) —
-  and would make `trace` usable where it is most wanted ("change the shader, then see what it computes").
-  *How*: one run settles it — patch a shader in `mobile-1`, then `trace` the patched draw. Then either build
-  the link between the two commands, or write the one paragraph in REFERENCE that says a replacement carries
-  none. **~0.5 d.**
-
-## 2. Suggested order
-
-Phased, and each phase stands on its own — nothing here is blocked on something later in the list. Every work
-item of §1 appears exactly once, so this is the whole list in one place rather than a selection of it; each
-item keeps its section's **P** label and its own effort figure, so this file stays the place to read what an
-item *is*.
-
-**The two probes (§1, ~1 d)**, each of which ends in a sentence either way:
-
-1. **Why the pixel path of `trace` produces nothing (§1, ~0.5 d)** — fix the message, or document the
-   engine's limit in the words of the measurement.
-2. **Does a patched shader carry debug info? (§1, ~0.5 d)** — if it does, "change the shader, then step it"
-   is the next feature; if not, it is one paragraph in REFERENCE.
+* **What it is.** `patch` builds a replacement shader for this replay target, installs it with
+  `ReplaceResource`, clears the replay cache and re-runs the frame — and nothing the frame does afterwards shows
+  it: a replacement pixel shader that returns a fixed colour left the picture *identical* (`differing 0`, one
+  non-zero difference hash for both images, `hashDistance 0`), and a trace of the same invocation with a
+  replacement installed was byte-identical to one without it. Both measured 2026-09-28; REFERENCE §9 has the
+  runs and the events. The replacement is registered (the command prints `replaced on`) and the *compile* is not
+  the problem — it keeps its debug info (`BuildTargetShader` adds `D3DCOMPILE_DEBUG`) — so the break is between
+  "installed" and "bound by the draw".
+* **Why it is wanted.** Two commands depend on the experiment: `patch --compare` can only ever answer "nothing
+  changed", and "change the shader, then step it" — the one answer for a capture whose shaders were built
+  without debug data — does not exist while the substitution is inert. It is also the tool's only way to ask
+  what a frame *would* do, where every other command reports what it did.
+* **How.** Read what the engine does with a replacement instead of what our side assumes: `ReplaceResource`
+  (`d3d12_replay.cpp`) registers the *shader*, and then `RefreshDerivedReplacements` walks
+  `WrappedID3D12Device::GetPipelineList()` and, for every pipeline whose stages include a replaced shader,
+  creates a new pipeline and registers that as the *pipeline's* replacement. So the first question is whether
+  that pipeline exists and is bound: log the PSO id the render state names and whether the engine reports a
+  replacement for it (a few lines in `patch`, removed afterwards), then check whether the draw used it — the
+  picture at an event whose readback is known to have content (`sheet`'s index names one per pass, and
+  `desktop-2` eid 928 is one that measured content) is the instrument. If no replacement pipeline is created,
+  the difference is in `GetPipelineList()`'s contents or in the shader id the pipeline names; if it is created
+  and not bound, it is in the render-state path a `eReplay_OnlyDraw` replay takes.
+* **The other end of the same investigation.** At some events the readback is *entirely black*: `desktop-1` eid
+  4235 and `mobile-1` eid 692 both compared two all-zero 256×256 pictures, while the engine reports real content
+  for that same target at that same event (`histogram --eid 4235` on `desktop-1`: max `5.30, 1.86, 2.59`) and the
+  same `ReadTargetImage` call writes pictures with content in a `dump` and in `sheet`. That may be the same
+  cause seen from the other side, or its own; either way a `patch --compare` at such an event compares nothing.
+* **What blocks it.** Nothing this machine lacks — no capture, no device, no tree. It is one question answered by
+  reading the engine and running `patch` twice, and it ends either in a fix or in a paragraph saying a
+  replacement cannot be replayed on this engine. **~0.5–1 d.**

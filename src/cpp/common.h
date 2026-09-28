@@ -741,6 +741,18 @@ void TraceApplyChange(std::map<std::string, std::string> &vars, const ShaderVari
 //: implies. Empty when no mapping covers it, or when the instruction has one that names no file.
 std::string TraceSourceAt(const ShaderDebugTrace &trace, const ShaderReflection *refl,
                           uint32_t instruction);
+//: The reason a trace could not be run, as a sentence: the facts the reflection holds, then what to
+//: do about them, in the order a reader can act. `debugged` is the shader the engine was asked to
+//: step and `info` its debug info, which the two branches below need to tell apart: no debug data
+//: at all is a *search* the engine's log is the answer to, while debug data present means the
+//: invocation is what it could not run -- for a pixel a question about *coverage*, which is what
+//: `pixelhistory` names.
+//:
+//: Declared rather than file-local because its wording is pinned device-free in `selftest`: the
+//: refusal is the whole answer a capture without debug data gives, and it is the one place in this
+//: command that could quietly go back to guessing at a cause.
+std::string NoTraceText(const TraceRequest &req, int eid, ShaderStage stage, ResourceId debugged,
+                        const ShaderDebugInfo *info);
 int CmdTrace(IReplayController *ctrl, ICaptureFile *file, const char *path, int eid,
              const TraceRequest &req);
 

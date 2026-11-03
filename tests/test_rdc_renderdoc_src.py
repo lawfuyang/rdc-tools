@@ -403,6 +403,23 @@ class TestTheBundledTable(SrcCase):
         self.assertIn('out of date', out)
         self.assertRegex(out, r'driver: \d+ new, \d+ gone')     # which kind moved, and how much of it
 
+    def test_the_drift_message_reads_a_table_with_windows_line_endings(self):
+        """A checkout with `core.autocrlf` hands this comparison CRLF, and every name still has to be read.
+
+        A line ending `,\\r` is one the entry pattern cannot match, so a comparison that skipped the
+        normalisation read *nothing* from the checked-in file -- and the message blamed every name in the
+        table (``7 new, 0 gone``) for a version line that had moved.
+        """
+        root = self.tree()
+        with open(self.write_table(root), encoding='utf-8', newline='') as handle:
+            text = handle.read()
+        crlf = text.replace('\n', '\r\n')
+        # No id moved: the two tables agree, so the report is the one that says so rather than a count.
+        self.assertEqual(chunkmap._table_drift(crlf, text),
+                         'the table differs from the tree (rewrite it with `--write`)')
+        # A name that really moved is still named -- once, not as everything.
+        self.assertIn('1 renamed', chunkmap._table_drift(crlf.replace("'PushMarker'", "'PushMarkerX'"), text))
+
     def test_no_tree_is_exit_2_and_writes_nothing(self):
         """A tree that is not on this machine is working-tree state, like a capture the goldens cannot read."""
         path = os.path.join(self.tmp, 'never-written.py')

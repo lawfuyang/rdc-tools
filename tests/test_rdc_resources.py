@@ -627,7 +627,7 @@ class TestRootParamLabel(unittest.TestCase):
 
 #: Chunk names the tool knows that neither the bundled table's release nor the tree on this machine has:
 #: `List_ClearStateObject` and `List_CopyRaytracingAccelerationStructureRegion` are chunks a *newer* RenderDoc
-#: names in its `D3D12Chunk` enum (checked: neither string appears anywhere in the 1.46 source). They stay in
+#: names in its `D3D12Chunk` enum (checked: neither string appears anywhere in the 1.47 source). They stay in
 #: the tool's constants because those are about what the *stream* can contain -- a capture from that newer
 #: release has them -- and a tree from that release names them, which is what the table's fallback is for.
 #: The point of listing them is that a *third* one is a decision somebody has to make, not a typo.

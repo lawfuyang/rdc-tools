@@ -101,7 +101,7 @@ def is_populated(root: str) -> bool:
 
 
 def version(root: str) -> str:
-    """The RenderDoc version a tree says it is, as `1.46`, or `''` when it does not say.
+    """The RenderDoc version a tree says it is, as `1.47`, or `''` when it does not say.
 
     Read from `renderdoc/api/replay/version.h`, which declares `RENDERDOC_VERSION_MAJOR` and `_MINOR` -- the
     same two numbers RenderDoc's own build turns into the `progVersion` a capture header carries, so the two
@@ -132,7 +132,7 @@ def _fetch(url: str, timeout: float = TIMEOUT) -> bytes:
 
 
 def latest_tag(timeout: float = TIMEOUT) -> str:
-    """The most recent tag on the RenderDoc repository, e.g. `v1.46`.
+    """The most recent tag on the RenderDoc repository, e.g. `v1.47`.
 
     The tags API lists the most recently *pushed* tag first, which for this project's `v<major>.<minor>`
     release tags is the latest release. A response that is not the list of objects with a `name` is an error
@@ -155,7 +155,7 @@ def tarball_url(tag: str) -> str:
 def _safe_parts(name: str) -> Optional[List[str]]:
     """A tar member's path with the archive's own top folder removed, or None when it must be refused.
 
-    `renderdoc-1.46/renderdoc/core/core.h` becomes `['renderdoc', 'core', 'core.h']`. Anything that could
+    `renderdoc-1.47/renderdoc/core/core.h` becomes `['renderdoc', 'core', 'core.h']`. Anything that could
     escape the destination is refused: a `..` component, an absolute path, a Windows separator (a tar entry is
     written with `/`, so a backslash is either an accident or an attack), a drive letter, or an empty name.
     """

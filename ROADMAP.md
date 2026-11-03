@@ -139,7 +139,7 @@ They were looked at, and the reasons they are not items are worth more than the 
 * **DRED / Aftermath-style GPU crash dumps.** A `.rdc` cannot carry one. DRED's settings must be configured
   before the device is created and its data — auto-breadcrumbs, page-fault information — is read from the
   *removed* device inside the faulting process, and the replay API exposes none of it (`DRED` appears nowhere
-  in `api/replay` in 1.46). A capture is a healthy frame; the crash that follows it belongs to another tool in
+  in `api/replay` in 1.47). A capture is a healthy frame; the crash that follows it belongs to another tool in
   another process, and no analysis of this file recovers it. What this tool can do about crashes is the
   arithmetic `hazards` and `samplers` now do (REFERENCE §4.24), the aliased-placement overlap check
   `memory` does (REFERENCE §4.15), and the items in §1 below — catching the defects that cause them —
@@ -203,10 +203,10 @@ convention is the repository root, which is two levels up.
 
 ```powershell
 cd 'C:\Workspace WIth Spaces\rdc-tools'
-git clone --depth 1 --branch v1.46 https://github.com/baldurk/renderdoc.git renderdoc-src
+git clone --depth 1 --branch v1.47 https://github.com/baldurk/renderdoc.git renderdoc-src
 ```
 
-Match the version that produced the captures (RenderDoc **1.46** in this project — the bundled table is 1.46
+Match the version that produced the captures (RenderDoc **1.47** in this project — the bundled table is 1.47
 too). Resolution order is `$RENDERDOC_SRC` → `<tool folder>/renderdoc-src` → `<parent>/renderdoc-src` → the
 historical absolute default; when none of them exists the tool prints one warning naming the version the
 bundled names are from, and a chunk the table does not have prints as a number. Details in README §1.1.

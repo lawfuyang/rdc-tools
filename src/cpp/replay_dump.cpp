@@ -20,7 +20,7 @@
 // It talks to the installed renderdoc.dll through the replay API (renderdoc/api/replay/
 // renderdoc_replay.h), so it needs no build of RenderDoc itself: the DLL is loaded at runtime and the
 // handful of C entry points are resolved by name. The interfaces are C++ vtables, which is why this
-// is C++ rather than Python -- RenderDoc 1.46's Python module (renderdoc.pyd) is not installed.
+// is C++ rather than Python -- RenderDoc 1.47's Python module (renderdoc.pyd) is not installed.
 //
 // Three things a replay host *must* do, none of them optional:
 //   1. REPLAY_PROGRAM_MARKER() at file scope, so the DLL knows this is a replay program;

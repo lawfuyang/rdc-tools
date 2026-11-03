@@ -403,7 +403,7 @@ def detect_geometry_offscreen(bundle: BundleData) -> List[RedFlag]:
       hash, so the document may have been written for an earlier draw in the same range).
 
     What this cannot say is why: the application's own frustum decision is not in the capture
-    (`cullFlags` is nowhere in the public replay API of 1.46), so a draw the CPU culled did not reach
+    (`cullFlags` is nowhere in the public replay API of 1.47), so a draw the CPU culled did not reach
     the file at all, and a draw that did was left to the GPU to reject.
     """
     behind: List[str] = []

@@ -848,7 +848,7 @@ long long WriteObj(const std::filesystem::path &path, const bytebuf &positions, 
 //: the perspective divide makes of them -- plus the union of those rows. This is the half of the
 //: question "the draw is in the frame and nothing appears" that arithmetic can answer: the
 //: geometry's own place on the screen, where the other half (the application's own frustum
-//: decision) is not in any capture -- `cullFlags` appears nowhere in the public replay API in 1.46.
+//: decision) is not in any capture -- `cullFlags` appears nowhere in the public replay API in 1.47.
 //:
 //: The union is the *document's* numbers and the rows are the reading: a caller that wants to know
 //: whether this call could have written anything folds `vertices`, `finite`, `projected` and the two

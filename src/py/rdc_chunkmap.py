@@ -302,8 +302,8 @@ def parse_chunk_enum(text: str, enum_name: str) -> Dict[int, str]:
 def _warn_bundled_names(src_root: str, missing: List[str]) -> None:
     """The one line a run prints when some or all of the names are the bundled table's rather than the tree's.
 
-    It says which RenderDoc version those names are from -- a chunk named out of a 1.46 table while the
-    capture is 1.47 is a fact the reader has to have, not a detail -- what was missing, so the fix is
+    It says which RenderDoc version those names are from -- a chunk named out of one release's table while
+    the capture is another's is a fact the reader has to have, not a detail -- what was missing, so the fix is
     obvious, and where the fix is documented.
     """
     if os.path.isdir(src_root):
@@ -445,9 +445,12 @@ def _table_blocks(text: str) -> List[str]:
     """Split a table file into its three dict bodies, in `ENUM_KINDS` order.
 
     Read back out of the *text* rather than imported, so a table being compared (`--out <file>`) does not
-    have to be the module this process already has.
+    have to be the module this process already has. Line endings are normalised first: a checkout with
+    `core.autocrlf` hands the comparison CRLF, and a line that ends `,\\r` is one the entry pattern cannot
+    match -- which made the drift report blame every name in the table for a version line that had moved.
     """
-    blocks = re.split(r'^(?:SYSTEM_CHUNKS|DRIVER_CHUNKS|FORMAT_NAMES)\b.*$', text, flags=re.M)[1:]
+    blocks = re.split(r'^(?:SYSTEM_CHUNKS|DRIVER_CHUNKS|FORMAT_NAMES)\b.*$', text.replace('\r\n', '\n'),
+                      flags=re.M)[1:]
     return blocks + [''] * (len(ENUM_KINDS) - len(blocks))
 
 

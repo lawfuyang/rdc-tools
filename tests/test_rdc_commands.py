@@ -1398,9 +1398,18 @@ class TestSelfTestCommand(CmdCase):
         self.assertIn('OK', out)
 
     def test_filter_that_matches_nothing_still_passes(self):
-        out = capture_all(R.cmd_selftest, ['-k', 'NoSuchTestName'])
+        # unittest writes its report to stderr, so both streams are captured here. The report's own word for
+        # "nothing ran" moved with the interpreter -- `OK` up to 3.11, `NO TESTS RAN` from 3.12 -- so the
+        # exit code is what "still passes" is asserted on, and the report only has to agree.
+        codes = []
+
+        def run():
+            codes.append(R.cmd_selftest(['-k', 'NoSuchTestName']))
+
+        out = capture_all(run)
+        self.assertEqual(codes, [0], out)
         self.assertIn('Ran 0 tests', out)
-        self.assertIn('OK', out)
+        self.assertTrue('OK' in out or 'NO TESTS RAN' in out, out)
 
     def test_unknown_option_returns_2(self):
         out = io.StringIO()

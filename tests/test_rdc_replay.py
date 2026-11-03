@@ -178,7 +178,9 @@ class TestTheAbi(TempDirCase):
         message = str(caught.exception)
         self.assertIn('recorded by RenderDoc 9.99', message)
         self.assertIn("must be at least the capture's version", message)
-        self.assertIn('this replay engine is 1.46', message)    # the engine that is installed here
+        # Both versions are named, and the engine's is whatever DLL this machine has -- pinned as a number
+        # rather than as `1.46`, because the whole point of the guard is that the installed engine moves.
+        self.assertRegex(message, r'this replay engine is \d+\.\d+: replay must be at least')
 
     def test_several_lines_run_in_one_session_and_report_their_own_codes(self) -> None:
         """The point of the library: N questions, one standup, and each answer's own exit code.

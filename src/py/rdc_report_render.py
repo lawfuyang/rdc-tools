@@ -66,7 +66,7 @@ def report_caveats() -> List[str]:
         'every vertex outside one clip plane, or a whole draw projecting outside the rectangle it writes (the '
         'viewport and scissor in force are each a question, because neither is in the state hash). Whether the '
         'application *meant* to cull the draw is not in any capture: `cullFlags` is nowhere in the public '
-        'replay API of 1.46.',
+        'replay API of 1.47.',
         'The notable lists rank what a bundle can measure -- the work its calls asked for, calls, target '
         'pixels, resource churn, and counter cost when the bundle was written with --with-counters -- and their '
         'own table says so where an input is not available: the work volumes live in a bundle written from '

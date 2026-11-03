@@ -95,7 +95,7 @@ fresh clone, a script or a pinned version wants:
 
 ```powershell
 & $py src\py\rdc_analysis.py bootstrap            # fetch the latest tagged source, or do nothing
-& $py src\py\rdc_analysis.py bootstrap v1.46      # pin a tag, e.g. to match the installed RenderDoc
+& $py src\py\rdc_analysis.py bootstrap v1.47      # pin a tag, e.g. to match the installed RenderDoc
 ```
 
 It downloads ~54 MB, extracts ~6,000 files (~900 MB on disk — the full source tree, docs included) in about
@@ -329,7 +329,7 @@ progress lines and `$RDC_NO_CACHE` to read the stream from scratch, none of whic
 
 | Command | What it answers | Example |
 |---|---|---|
-| `bootstrap` | fetches the RenderDoc source tree the chunk names come from, or checks it, optionally pinned to a tag; every command does this on demand (§1.1) | `bootstrap v1.46` |
+| `bootstrap` | fetches the RenderDoc source tree the chunk names come from, or checks it, optionally pinned to a tag; every command does this on demand (§1.1) | `bootstrap v1.47` |
 | `chunk-names` | the bundled enum table against a source tree: `--check` reports drift, `--write` regenerates `src/py/rdc_chunknames.py` | `chunk-names --check` |
 | `build` | whether `bin\replay_dump.exe`, `bin\rdc_replay.dll` and `bin\rdc_lz4.dll` are older than their sources, and builds them unless `--check` | `build --check` |
 | `selftest` | the hermetic unittest suite — no GPU, no capture, seconds long | `selftest`, `selftest -k goldens -v` |

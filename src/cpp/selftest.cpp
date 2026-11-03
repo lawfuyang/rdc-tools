@@ -832,7 +832,7 @@ int CmdSelftest()
     t.Check(!OverlayFromName("wirefrane", ignored), "overlay-refuses-a-typo",
             "a misspelled overlay was accepted");
     // The engine's own list, so an upgrade that adds an overlay is where this check fails rather
-    // than the overlay quietly not existing: RenderDoc 1.46 has fifteen, `none` included.
+    // than the overlay quietly not existing: RenderDoc 1.47 has fifteen, `none` included.
     t.Check(OverlayNames(",") ==
                 std::string(
                     "none,drawcall,wireframe,depth,stencil,backface,viewport,nan,clipping,"

@@ -277,6 +277,14 @@ class TestLz4Pages(unittest.TestCase):
         self.assertEqual(stream._lz4_dict_size(1 << 16), 1 << 16)
         self.assertEqual(stream._lz4_dict_size(1 << 24), 1 << 16)
 
+    def test_the_room_offered_is_clamped_where_the_library_takes_an_int(self):
+        # a section over 2 GB used to be refused outright; only the capacity is clamped now, and it is
+        # pinned here rather than through a 2 GB destination
+        self.assertEqual(stream._lz4_capacity(1234), 1234)
+        self.assertEqual(stream._lz4_capacity(stream._LZ4_C_MAX), stream._LZ4_C_MAX)
+        self.assertEqual(stream._lz4_capacity(1 << 31), stream._LZ4_C_MAX)
+        self.assertEqual(stream._lz4_capacity(5 << 30), stream._LZ4_C_MAX)
+
     def test_a_refused_page_raises_and_says_which_one(self):
         calls: List[Any] = []
         with mock.patch.object(stream, '_lz4_c_function', return_value=self.fake_c(calls, refuse=2)):

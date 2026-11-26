@@ -140,7 +140,8 @@ def parse_container(path: str) -> CaptureInfo:
 #: An LZ4 match may reach 64 KB back, so that much of the output is the dictionary a block needs.
 _LZ4_DICT = 1 << 16
 
-#: Past this a section cannot be addressed by the C API's `int` sizes; it takes the per-block paths.
+#: What one call may be told: every `LZ4_decompress_safe*` parameter is an `int`. Only the destination
+#: *capacity* grows with the section, and only that value needs clamping -- see `decompress_lz4`.
 _LZ4_C_MAX = 0x7FFFFFFF
 
 #: The library names to try after `bin/rdc_lz4.dll`: what a system package installs, on Windows, Linux and
@@ -156,6 +157,18 @@ def _lz4_dict_size(written: int) -> int:
     would turn into a wrong stream, and the tests pin it where the pages do not reach it.
     """
     return written if written < _LZ4_DICT else _LZ4_DICT
+
+
+def _lz4_capacity(remaining: int) -> int:
+    """The room to offer the library for one page: the rest of the section, clamped to an `int`.
+
+    The library only has to be told that the destination can hold *this page's* output, so a section
+    larger than 2 GB needs no different treatment -- and RenderDoc cuts the stream at 1 MB per page
+    (`lz4BlockSize` in serialise/lz4io.cpp), so the clamp still leaves a page a thousandfold margin.
+    A page that needed more than the clamp is refused by the library, which raises, rather than being
+    cut short. Named for `_lz4_dict_size`'s reason: one line of arithmetic the tests can pin.
+    """
+    return remaining if remaining < _LZ4_C_MAX else _LZ4_C_MAX
 
 
 def _lz4_c_function() -> Optional[Callable[..., int]]:
@@ -211,6 +224,12 @@ def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
     would then read as fact. A section declaring no bytes is empty whatever the body says, and takes no
     library at all.
 
+    A section over 2 GB used to be refused here, because every `LZ4_decompress_safe*` parameter is an
+    `int`. Only two of them scale with the section, and neither has to carry it: the *input* is one page
+    at a time, and the *destination capacity* only has to cover the page's own output. So the capacity is
+    clamped to `_LZ4_C_MAX` per call while the destination stays the whole section -- a 2.2 GB section
+    decodes through the same code as a 631 MB one, with no copy and no page limitation of its own.
+
     The one destination is carried across the pages on purpose: they are **not** independent.
     RenderDoc writes a section as a single continuous LZ4 stream cut into 1 MB pages and both ends
     use the streaming API (`LZ4_compress_fast_continue` / `LZ4_decompress_safe_continue` with a
@@ -231,9 +250,6 @@ def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
         raise FrameError('no LZ4 decoder to decompress the section with: build bin/rdc_lz4.dll with '
                          '`cmake --build build`, or point $RDC_LZ4_DLL at a library exporting '
                          'LZ4_decompress_safe_usingDict (a system lz4.dll / liblz4.so.1 works)')
-    if expect > _LZ4_C_MAX or len(blob) > _LZ4_C_MAX:
-        raise FrameError('section too large for the LZ4 decoder: %d byte(s) of body, %d byte(s) of '
-                         'output, and the C API takes int sizes' % (len(blob), expect))
 
     out = bytearray(expect)
     dst_ref = ctypes.c_char.from_buffer(out)    # held for the call: an export stops the buffer moving
@@ -261,12 +277,19 @@ def decompress_lz4(blob: Buffer, expect: int) -> Tuple[bytearray, int]:
         o += 4
         if clen == 0 or o + clen > len(blob):
             break
+        if clen > _LZ4_C_MAX:
+            bar.done(written)
+            raise FrameError('page %d of the section declares %d byte(s) of input, more than the LZ4 '
+                             'decoder takes in one call' % (blocks, clen))
+        # The room offered is the rest of the section, clamped to what an `int` carries (`_lz4_capacity`).
+        capacity = _lz4_capacity(expect - written)
         dsize = _lz4_dict_size(written)
-        produced = fn(src + o, dst + written, clen, expect - written, dst + written - dsize, dsize)
+        produced = fn(src + o, dst + written, clen, capacity, dst + written - dsize, dsize)
         if produced < 0:
             bar.done(written)
             raise FrameError('page %d of the section did not decode (%d of %d byte(s) of output, %d '
-                             'byte(s) of input from offset %d)' % (blocks, written, expect, clen, o))
+                             'byte(s) of input from offset %d, %d byte(s) of room offered)'
+                             % (blocks, written, expect, clen, o, capacity))
         written += produced
         o += clen
         blocks += 1

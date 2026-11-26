@@ -58,6 +58,15 @@ walks this into `info['sections']`, stopping at the first byte that is not 0 (th
   is memory-bandwidth bound, so this is a few percent of a cold command's decompression rather than a step
   change: it is upstream's x64 loop shape, measured rather than assumed.
 
+  The C API's every parameter is an `int`, which is why a section over 2 GB used to be refused outright
+  (`section too large for the LZ4 decoder`). Only two of those parameters scale with the section, and neither
+  has to: the input is one page at a time, and the *destination capacity* only has to cover that page's own
+  output, so it is clamped to `INT_MAX` per call (`_lz4_capacity`) while the destination stays the whole
+  section. A 2.19 GB stream — the Bistro frame capture, 1.35 GB compressed, 2092 pages — decodes with the same
+  
+  code and no copy, and `verify` / `summary` / `hazards` / `rootsig-check` all run on it. A page that needed
+  more room than the clamp is refused by the library and raises, so the clamp cannot silently truncate one.
+
   The blocks are **pages of one continuous LZ4 stream, not independent frames**: RenderDoc compresses with
   `LZ4_compress_fast_continue` and decompresses with `LZ4_decompress_safe_continue` over a shared stream
   context (`serialise/lz4io.cpp`), so a match may point up to 64 KB back into the previous page. That is why
